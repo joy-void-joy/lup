@@ -131,7 +131,9 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
     /** Choose nothing and clear what the status line says; in the window, close it: Esc. */
     "choose-none": (shell) => {
         if (shell.owner !== null) {
-            shell.owner.window?.close();
+            if (shell.owner.window?.shell() === shell) {
+                shell.owner.window.close();
+            }
             return;
         }
         shell.choose([]);
@@ -172,10 +174,18 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
         if (shell.owner?.window?.choose(shell.lineId()) === true) {
             return;
         }
+        if (shell.owner !== null && shell.owner.outline?.shell === shell) {
+            shell.owner.view.focus();
+            return;
+        }
         const cm = getCM(shell.view);
         if (cm !== null) {
             Vim.handleKey(cm, "+", "mapping");
         }
+    },
+    /** Enter pane mode, to move between the outline, the document and the window: Space w. */
+    panes: (shell) => {
+        (shell.owner ?? shell).panes?.enter();
     },
     /** Choose whom the comment at the cursor, or on its line in the review, reaches, or write one to whom's chosen: Space s. */
     address: (shell) => {
@@ -270,6 +280,7 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>d", command: "let-go", modes: ["normal"] },
     { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "<CR>", command: "enter", modes: ["normal"] },
+    { keys: "<Space>w", command: "panes", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },
     { keys: ":w", command: "draft-write", modes: ["normal"] },

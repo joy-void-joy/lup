@@ -13,6 +13,8 @@ import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offse
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
+import { Outline } from "./outline";
+import { Panes } from "./panes";
 import { said, say, Window } from "./window";
 
 /** Where views are read from and the draft is kept: the core, through the server, or the harness. */
@@ -38,8 +40,12 @@ export interface Source {
 export interface Placing {
     /** More of the editor: the page's look, its margin, its folds' placeholders, a window's own too. */
     readonly extensions?: readonly Extension[];
-    /** The document's shell, where this one draws its window; none for the document's own, which takes comments. */
+    /** The document's shell, where this one draws its window or its outline; none for the document's own, which takes comments. */
     readonly owner?: Shell | null;
+    /** Where the document's outline goes, beside it; none for no outline. */
+    readonly aside?: HTMLElement | null;
+    /** What holds the page's panes, whose keys pane mode hears first; none for no pane mode. */
+    readonly page?: HTMLElement | null;
 }
 
 
@@ -74,6 +80,10 @@ export class Shell {
     readonly owner: Shell | null;
     /** The page's window, under the document: none for a window's own shell. */
     readonly window: Window | null;
+    /** The document's outline, beside it; none where the page has none. */
+    readonly outline: Outline | null;
+    /** Pane mode, moving between the outline, the document and the window; none where the page has none. */
+    readonly panes: Panes | null;
     /** The review of what the draft sends where, as the core last told it. */
     #review: Blocks = { blocks: [], summary: [], offers: [] };
     #stopReviews: () => void = () => {};
@@ -98,6 +108,18 @@ export class Shell {
             this.owner === null
                 ? new Window(this, (body, given) => new Shell(body, { module: null, view: "window", given: {} }, looks, given, { extensions, owner: this }))
                 : null;
+        const aside = placing.aside ?? null;
+        this.outline =
+            this.owner === null && aside !== null
+                ? new Outline(this, aside, (body, given) => {
+                      const went = EditorView.updateListener.of((update) => {
+                          if (update.selectionSet && update.view.hasFocus) {
+                              this.outline?.went();
+                          }
+                      });
+                      return new Shell(body, { module: null, view: "outline", given: {} }, looks, given, { extensions: [...extensions, went], owner: this });
+                  })
+                : null;
         const shell = this;
         this.view = new EditorView({
             parent,
@@ -112,6 +134,9 @@ export class Shell {
                     EditorState.transactionExtender.of((transaction) => (transaction.annotation(fromCore) === true ? { annotations: Transaction.addToHistory.of(false) } : null)),
                     EditorView.updateListener.of((update) => {
                         shell.comments.changed(update);
+                        if (update.selectionSet) {
+                            shell.outline?.followed();
+                        }
                     }),
                     foldState,
                     said,
@@ -126,6 +151,8 @@ export class Shell {
         getCM(this.view)?.on("vim-mode-change", (event: { mode: string }) => {
             this.comments.moded(event.mode);
         });
+        const page = placing.page ?? null;
+        this.panes = this.owner === null && page !== null ? new Panes(this, page) : null;
         if (this.window !== null) {
             const window = this.window;
             this.#stopReviews = source.reviews((review) => {
@@ -141,6 +168,7 @@ export class Shell {
     /** Stop reading every view, and leave the page. */
     destroy(): void {
         this.window?.close();
+        this.outline?.shell.destroy();
         this.#stopReviews();
         this.comments.destroy();
         this.#stop();
@@ -201,6 +229,7 @@ export class Shell {
             }
         }
         this.view.dispatch({ effects: [...effects, redrawn.of(null)], annotations: fromCore.of(true) });
+        this.outline?.laid();
     }
 
     /** Say whether the fold `node` is open: as the operator left it, else as its view says, else as its kind says. */

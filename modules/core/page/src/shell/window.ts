@@ -12,7 +12,8 @@
 import { StateEffect, StateField, type Extension } from "@codemirror/state";
 import { showPanel, type EditorView, type Panel } from "@codemirror/view";
 
-import type { Blocks, Comment, Delivered, Draft, JsonValue, Viewing } from "../generated/read";
+import type { Blocks, JsonValue } from "../generated/read";
+import { Given } from "./given";
 import type { Shell, Source } from "./shell";
 
 /** One of what a picker offers: what it's called, and what it stands for. */
@@ -40,46 +41,6 @@ interface Picking {
 
 /** Makes a shell drawing the window's document, in `parent`, from `source`. */
 export type Making = (parent: HTMLElement, source: Source) => Shell;
-
-/** The window's own document: what it's given, answered as its root, and nothing kept as a draft. */
-class Given implements Source {
-    #blocks: Blocks;
-    readonly #answered = new Set<(blocks: Blocks) => void>();
-
-    constructor(blocks: Blocks) {
-        this.#blocks = blocks;
-    }
-
-    /** Show `blocks` in place of what's shown. */
-    set(blocks: Blocks): void {
-        this.#blocks = blocks;
-        for (const answered of this.#answered) {
-            answered(blocks);
-        }
-    }
-
-    watch(_viewing: Viewing, answered: (blocks: Blocks) => void): () => void {
-        this.#answered.add(answered);
-        answered(this.#blocks);
-        return () => {
-            this.#answered.delete(answered);
-        };
-    }
-
-    write(_comment: Comment): void {}
-
-    erase(_id: string): void {}
-
-    send(): void {}
-
-    drafts(_drafted: (draft: Draft) => void, _delivered: (delivered: Delivered) => void): () => void {
-        return () => {};
-    }
-
-    reviews(_reviewed: (review: Blocks) => void): () => void {
-        return () => {};
-    }
-}
 
 /** Opens the window on what it shows, or closes it where none. */
 const shown = StateEffect.define<Showing | null>();
