@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, NoReturn
 from pydantic import TypeAdapter
 from pydantic_settings import DotEnvSettingsSource, EnvSettingsSource
 
-from lup.command_line.answering import Answerer, Offered
+from lup.command_line.answering import Answerer, Here, Offered
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.layout import MachineLayout, RepositoryLayout
@@ -216,7 +216,10 @@ def main() -> None:
     """Run `lup` on the words it's given, through lup's program on the operator's machine, which says who calls: over the socket `LUP_CALLING` names, as in a room, else over the machine's own, the machine started first where nothing answers there.
 
     Through the program, nothing of the project's code runs here: the command
-    line lists and parses the plan the program offers. Where podman isn't
+    line lists and parses the plan the program offers. A command that plan
+    marks to run where it's typed (`@lup.command(here=True)`) is the one
+    exception: it's answered here, by the party the program names, over this
+    worktree's declaration, read only then (`Here`). Where podman isn't
     there, as in a room no lup started, no machine is started: `lup` answers
     in this process, as the operator, over the declaration of the worktree it
     runs in, and says so.
@@ -247,8 +250,21 @@ def main() -> None:
             if said is not None:
                 sys.stderr.write(f"lup: {said}\n")
         if calling is not None:
+            found = layout
+
+            def worktree(by: Caller) -> Answerer:
+                return InProcess(
+                    by=by,
+                    resolved=resolve(read(found, machine()).project),
+                    repository=found.main.name,
+                    runs=Local(),
+                )
+
             ran(
-                Calling(socket=calling, repository=layout.main.name),
+                Here(
+                    through=Calling(socket=calling, repository=layout.main.name),
+                    here=worktree,
+                ),
                 "lup",
                 words,
                 CORE,

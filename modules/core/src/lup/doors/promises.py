@@ -196,6 +196,7 @@ class Misshapen(Model):
         "a command not saying who may run it",
         "a name defined for type checking alone",
         "two doors",
+        "a command run where it's typed offered under a key",
     ]
 
     def methods(self) -> str:
@@ -269,6 +270,13 @@ class Misshapen(Model):
     @lup.command
     async def wrong(self, said: Said, by: lup.Operator) -> str:
         """Two doors."""
+        return said.text
+'''
+            case "a command run where it's typed offered under a key":
+                return '''
+    @lup.command(here=True, verb="done", says="do it")
+    async def wrong(self, said: Said, by: lup.Operator) -> str:
+        """A command the dashboard can't run where it's typed."""
         return said.text
 '''
 
