@@ -6,6 +6,7 @@
 import { getCM } from "@replit/codemirror-vim";
 
 import { foldKind, nodeAt, type Node } from "../document/tree";
+import { standings } from "./palette";
 import type { Shell } from "./shell";
 
 /** One key and what it does where the cursor is, as the line of keys says it. */
@@ -92,7 +93,15 @@ export function framed(shell: Shell, header: HTMLElement | null, keys: HTMLEleme
             letter.style.color = `var(--lup-${declared?.colour ?? "muted"})`;
             const said = document.createElement("span");
             said.textContent = node.head[0] ?? "";
-            part.append(letter, said);
+            const standing = node.block?.standing ?? null;
+            if (standing !== null) {
+                const glyph = document.createElement("span");
+                glyph.textContent = `${standings[standing]} `;
+                glyph.style.color = `var(--lup-${standing})`;
+                part.append(letter, glyph, said);
+            } else {
+                part.append(letter, said);
+            }
             return part;
         });
         header.replaceChildren(...parts);

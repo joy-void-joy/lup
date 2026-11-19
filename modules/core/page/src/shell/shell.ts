@@ -5,14 +5,15 @@
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
 import { history } from "@codemirror/commands";
 import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, WidgetType, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
-import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
+import type { Blocks, Comment, Delivered, Draft, Looks, Standing, Viewing } from "../generated/read";
 import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, opening, section, viewKey, type Change, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
+import { standings } from "./palette";
 import { framed } from "./frame";
 import { Outline } from "./outline";
 import { Panes } from "./panes";
@@ -436,6 +437,26 @@ function within(node: Node, keys: ReadonlySet<string>): boolean {
     return false;
 }
 
+/** How a block stands for the operator, drawn before its first line: its glyph, in its meaning's colour. */
+class Stands extends WidgetType {
+    constructor(readonly standing: Standing) {
+        super();
+    }
+
+    override eq(other: Stands): boolean {
+        return other.standing === this.standing;
+    }
+
+    override toDOM(): HTMLElement {
+        const glyph = document.createElement("span");
+        glyph.className = `lup-standing lup-standing-${this.standing}`;
+        glyph.textContent = `${standings[this.standing]} `;
+        glyph.style.color = `var(--lup-${this.standing})`;
+        glyph.title = this.standing;
+        return glyph;
+    }
+}
+
 /** The shell an editor shows, for the keymap's commands to find it by its editor. */
 export const shells = Facet.define<Shell, Shell | null>({ combine: (values) => values[0] ?? null });
 
@@ -506,6 +527,10 @@ const drawing = ViewPlugin.fromClass(
                             },
                         }).range(line.from),
                     );
+                    const standing = start === line.from ? (node.block?.standing ?? null) : null;
+                    if (standing !== null) {
+                        ranges.push(Decoration.widget({ widget: new Stands(standing), side: -1 }).range(line.from));
+                    }
                     const spans =
                         node.block?.block === "line" ? node.block.spans : heading && node.block?.block === "fold" ? node.block.summary : [];
                     let at = line.from;
@@ -601,6 +626,7 @@ export const look = EditorView.theme(
             boxShadow: "inset 2px 0 0 var(--lup-comment)",
         },
         ".lup-comment-first::before": { content: '"» "', color: "var(--lup-muted)" },
+        ".lup-standing-waiting": { fontWeight: "700" },
         ".lup-quoted": { textDecoration: "underline 2px var(--lup-comment)", textUnderlineOffset: "3px" },
         ".lup-placeholder .lup-counted": { color: "var(--lup-comment)" },
         ".lup-comment-first::after": { content: '"  " attr(data-to)', color: "var(--lup-muted)", fontStyle: "italic" },

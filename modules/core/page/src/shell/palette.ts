@@ -7,7 +7,7 @@
 // name (a tone's, a fold kind's or a mark kind's colour) is keyed by the core's `Colour`, so a colour the core adds
 // fails the type check here until the palette gives it a value.
 
-import type { Colour } from "../generated/read";
+import type { Colour, Standing } from "../generated/read";
 
 /** The colours a module may name, each reading at 7:1 or more on the page's black. */
 export const colours: Readonly<Record<Colour, string>> = {
@@ -54,7 +54,20 @@ export const meanings = {
     comment: "warn",
     /** What keeps something written from going as it is: lines it quotes that changed, a send that kept it back. */
     trouble: "err",
+    /** How a block stands for the operator (`Shown.standing`): waiting on them, new to them, done, held back. */
+    waiting: "orange",
+    new: "link",
+    done: "muted",
+    held: "warn",
 } as const satisfies Record<string, Colour>;
+
+/** The glyph each way a block can stand for the operator is drawn with, in its meaning's colour, wherever it shows. */
+export const standings: Readonly<Record<Standing, string>> = {
+    waiting: "◆",
+    new: "●",
+    done: "✓",
+    held: "‖",
+};
 
 /** Set every colour of the palette on `root`, as `--lup-<name>`, and each meaning as the colour it's drawn in. */
 export function painted(root: HTMLElement): void {

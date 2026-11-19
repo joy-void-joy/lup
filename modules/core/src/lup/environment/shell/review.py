@@ -73,7 +73,11 @@ def reviewed(draft: Draft, going: list[Going]) -> Blocks:
         return Line(id=comment.id, spans=[*said(comment), *stays])
 
     sending = [each for each in draft.comments if not each.held]
-    held: list[Block] = [line(each) for each in draft.comments if each.held]
+    held: list[Block] = [
+        line(each).model_copy(update={"standing": "held"})
+        for each in draft.comments
+        if each.held
+    ]
     places: list[Block] = [
         Fold(
             id=f"to {to}",
