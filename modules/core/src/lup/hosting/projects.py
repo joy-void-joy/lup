@@ -25,7 +25,7 @@ import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
 from lup.doors.parties import Machine, Operator
-from lup.doors.parts import Data, Part, Program
+from lup.doors.parts import Data, Part, Program, Runtime
 from lup.errors import LupError
 from lup.hosting.approvals import Approvals, Asking
 from lup.hosting.carrying import Carrying, Naming, Placement, Placing
@@ -131,6 +131,8 @@ class Projects(Part, machine=True, shared=True):
     registry: Data
     """Each project registered or opened, kept so the machine's parts open it
     again as they start."""
+    outputs: Runtime
+    """What each container prints, a file each, in memory, capped in size."""
     uv: Program = Program(
         name="uv",
         optional=True,
@@ -290,15 +292,25 @@ class Projects(Part, machine=True, shared=True):
 
     @lup.command
     async def status(self, asking: Statusing, by: Operator) -> str:
-        """Say what the machine runs: each project open, the commit it runs, its containers, and the parts waiting for a secret; and each project registered that isn't open."""
+        """Say what the machine runs: each project open, the commit it runs, each of its containers, whether it's running and where what it prints goes, and the parts waiting for a secret; and each project registered that isn't open."""
         del asking, by
+        alive = (await Containers.alive(Clearing())).names if self.projects else []
+
+        def container(name: str) -> str:
+            state = "running" if name in alive else "ended"
+            return f"  {name}, {state}: what it prints is in {self.output(name)}"
+
         running = [
-            f"{each.repository} runs {each.commit} in "
-            + ", ".join(each.containers)
-            + (
-                f"; waiting on a secret: {', '.join(each.waiting)}"
-                if each.waiting
-                else ""
+            "\n".join(
+                [
+                    f"{each.repository} runs {each.commit}"
+                    + (
+                        f", waiting on a secret: {', '.join(each.waiting)}"
+                        if each.waiting
+                        else ""
+                    ),
+                    *(container(name) for name in each.containers),
+                ]
             )
             for each in self.projects.values()
         ]
@@ -308,6 +320,10 @@ class Projects(Part, machine=True, shared=True):
             if repository not in self.projects
         ]
         return "\n".join([*running, *closed]) or "nothing is registered or open"
+
+    def output(self, container: str) -> Path:
+        """Return the file what the container named `container` prints goes to, in memory, which no container mounts."""
+        return self.outputs.path / f"{container}.log"
 
     def kept(self) -> dict[str, Opening]:
         """Return each project opened, by its repository, as kept."""
@@ -477,7 +493,10 @@ class Projects(Part, machine=True, shared=True):
                 file.write_text(value)
         spec = self.spec(source, name, self.role(source, part), directory.path)
         spec = spec.model_copy(
-            update={"env": {**spec.env, "LUP_ASKED": start.model_dump_json()}}
+            update={
+                "env": {**spec.env, "LUP_ASKED": start.model_dump_json()},
+                "output": self.output(name),
+            }
         )
         await Containers.started(spec)
         return Placement(
