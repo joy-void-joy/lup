@@ -206,7 +206,6 @@ type Wall = Literal[
     "--rm",
     "--init",
     "--pull=never",
-    "--log-driver=none",
     "--userns=keep-id",
     "--cap-drop=all",
     "--security-opt=no-new-privileges",
@@ -1032,6 +1031,10 @@ UV = Scripted(answers=[Answering(when=["python", "dir"], output="/srv/python\n")
 OPENING_PODMAN = Scripted(
     answers=[
         VERSIONED,
+        Answering(
+            when=["ps"],
+            output=json.dumps([{"Names": ["lup-harmon-project-1"]}]),
+        ),
         Answering(when=["image", "exists"], status=0),
         Answering(when=["run", "--interactive"], output=json.dumps(VAULT_PLAN)),
         Answering(when=["run", "--detach"]),
@@ -1308,16 +1311,17 @@ class WithoutPromises(Part):
     async def without_podman_only_what_needs_it_is_refused(self, by: Testing) -> None:
         """Without podman, or with one at a version lup doesn't take, the part holding it isn't made and what needs it is refused, saying it's podman and why, while the machine's other parts answer: the operator can still keep a secret; with one it takes, it starts containers."""
         podman = by.any(Podmanless).version
-        programs = (
-            {}
+        programs: dict[str, Scripted | Responding] = (
+            {"uv": UV}
             if not podman
             else {
+                "uv": UV,
                 "podman": Scripted(
                     answers=[
                         Answering(when=["version"], output=f"{podman}\n"),
                         Answering(when=["run"]),
                     ]
-                )
+                ),
             }
         )
         started = await by.started(
@@ -1330,7 +1334,9 @@ class WithoutPromises(Part):
             {"project": "harmon", "name": "token", "value": "t"},
             lup.Operator(),
         )
+        status = await started.run("hosting", "status", {}, lup.Operator())
         assert isinstance(kept, Accepted)
+        assert isinstance(status, Accepted)
         assert isinstance(run, Accepted) == (podman == "6.1.0")
         assert bool(podman_ran(started, "run")) == (podman == "6.1.0")
         if isinstance(run, Refused):
@@ -1368,3 +1374,26 @@ class WithoutPromises(Part):
         said = status.answer()
         assert ("harmon runs" in said) == opened
         assert ("harmon is registered, and not open" in said) != opened
+        assert ("lup-harmon-project-1, running" in said) == opened
+
+    @lup.promise
+    async def what_a_container_prints_is_kept_capped(self, by: Testing) -> None:
+        """What a project's container prints goes to a file of its own, capped in size, which no container mounts; a container run to its end, whose output its caller reads, keeps nothing."""
+        started = await started_approved(by, OPENING_PODMAN)
+        opened = await started.serve("opened", Opens().given(), Machine())
+        assert isinstance(opened, Accepted)
+        runs = podman_ran(started, "run")
+        detached = [each for each in runs if "--detach" in each]
+        planned = [each for each in runs if "--interactive" in each]
+        assert detached
+        for command in detached:
+            assert "--log-driver=k8s-file" in command
+            [path] = [each for each in command if each.startswith("--log-opt=path=")]
+            assert path.endswith(".log")
+            assert not [
+                each
+                for each in command
+                if each.startswith("--mount=") and "outputs" in each
+            ]
+            assert any(each.startswith("--log-opt=max-size=") for each in command)
+        assert all("--log-driver=none" in command for command in planned)

@@ -6,9 +6,12 @@ commit, and only the machine's own parts may call it (`Machine`). Every
 container it starts is walled the same way, whatever asked for it (`walls`): the
 operator's uid inside, so what it writes is theirs; every capability dropped and
 no privileges gained; a limit on processes; `--init`, reaping what exits;
-removed when it ends; no image fetched by a short name; no log kept of what it
-prints. These are the second lup's room's walls, measured with rootless podman
-6.1 (`docs/field-notes.md`, *the engine's command lines*).
+removed when it ends; no image fetched by a short name. What a container that
+runs on prints goes to a file of its own, capped in size, where nothing else
+writes; one run to its end keeps nothing, its caller reading what it prints.
+These are the second lup's room's walls, measured with rootless podman 6.1
+(`docs/field-notes.md`, *the engine's command lines*), but for what's printed,
+which a room kept nothing of.
 """
 
 import csv
@@ -17,7 +20,7 @@ import io
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, TypeAdapter
 
 import lup
 from lup.doors.door import RefusedError
@@ -89,6 +92,9 @@ class Spec(Model):
     network: Literal["host", "private"] = "host"
     """The machine's network, as rooms share it, or one of its own."""
     gpu: bool = False
+    output: Path | None = None
+    """The file what it prints goes to, capped in size; none to keep nothing,
+    as for a container run to its end, whose output its caller reads."""
 
     def linked(self) -> list[Path]:
         """Return each directory or file it mounts whose path isn't its own: relative, or through a link, which podman would follow to wherever the link points."""
@@ -111,6 +117,9 @@ class Walls(Model):
     """How many processes and threads it may hold at once: well above podman's
     default of 2,048, which a gate alone neared, and a limit still, which stops
     a fork bomb taking the machine down."""
+    output_size: str = "10mb"
+    """The most a container's output file holds, as podman reads a size: kept
+    in memory, so a container printing without end fills nothing."""
 
     def options(self) -> list[str]:
         """Return podman's options for them.
@@ -122,7 +131,6 @@ class Walls(Model):
             "--rm",
             "--init",
             "--pull=never",
-            "--log-driver=none",
             "--userns=keep-id",
             "--cap-drop=all",
             "--security-opt=no-new-privileges",
@@ -159,10 +167,20 @@ def command_of(spec: Spec, walls: Walls, *, detached: bool = True) -> list[str]:
         "--mount=" + mount_option(["type=tmpfs", f"destination={each}", "notmpcopyup"])
         for each in spec.hidden
     ]
+    logged = (
+        ["--log-driver=none"]
+        if spec.output is None
+        else [
+            "--log-driver=k8s-file",
+            f"--log-opt=path={spec.output}",
+            f"--log-opt=max-size={walls.output_size}",
+        ]
+    )
     return [
         "run",
         "--detach" if detached else "--interactive",
         *walls.options(),
+        *logged,
         f"--name={spec.name}",
         "--label=lup.machine",
         f"--label=lup.project={spec.image.project}",
@@ -191,7 +209,22 @@ class Named(Model):
 
 
 class Clearing(Model):
-    """Asking to stop every container lup started, giving nothing."""
+    """Asking about every container lup started, giving nothing."""
+
+
+class Listed(Model):
+    """A container as `podman ps --format=json` lists it, of which lup reads its names."""
+
+    names: list[str] = Field(alias="Names")
+
+
+LISTED = TypeAdapter(list[Listed])
+
+
+class Alive(Model):
+    """Each container lup started that's running, by its name."""
+
+    names: list[str] = []
 
 
 class Built(Model):
@@ -323,6 +356,20 @@ class Containers(Part, machine=True, shared=True):
             message = f"podman couldn't stop {named.name}: {ran.said()}"
             raise ContainerError(message)
         self.running = [each for each in self.running if each.spec.name != named.name]
+
+    @lup.service
+    async def alive(self, clearing: Clearing, by: Machine) -> Alive:
+        """Name each container lup started that's running, as podman lists them: one whose program ended is gone, removed as it ended.
+
+        Raise `ContainerError` where podman can't say.
+        """
+        del clearing, by
+        ran = await self.podman.ran("ps", "--filter=label=lup.machine", "--format=json")
+        if ran.status != 0:
+            message = f"podman couldn't list the containers lup started: {ran.said()}"
+            raise ContainerError(message)
+        listed = LISTED.validate_json(ran.output or b"[]")
+        return Alive(names=[name for each in listed for name in each.names])
 
     @lup.service
     async def cleared(self, clearing: Clearing, by: Machine) -> None:
