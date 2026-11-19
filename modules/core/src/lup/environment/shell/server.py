@@ -33,7 +33,7 @@ from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Operator
 from lup.environment.doors import Running
 from lup.environment.shell.layout import ShellLayout
-from lup.environment.shell.review import Going, reviewed, wrapped
+from lup.environment.shell.review import Going, reviewed
 from lup.environment.shell.viewing import viewed
 from lup.inbox.records import NO_AGENT
 from lup.inbox.said import Pile, Reached
@@ -49,6 +49,7 @@ from lup.shell.wire import (
     Mark,
     Opened,
     Read,
+    Reviewed,
     Send,
     Sent,
     Unanswered,
@@ -109,9 +110,9 @@ class Keeping(MutableModel, arbitrary_types_allowed=True):
     """Where the draft is kept across restarts of the server; none where it's
     kept in memory alone."""
     pages: list[Session] = []
-    review: Fold | None = None
-    """What the next send would do with the draft, as the review at the top
-    of the document shows it; none where the draft holds nothing."""
+    review: Blocks = Blocks()
+    """What the next send would do with the draft, as the review in the
+    page's window shows it."""
     sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
     """Held while the draft is sent, so two pages sending at once send each
     part once."""
@@ -130,6 +131,13 @@ class Keeping(MutableModel, arbitrary_types_allowed=True):
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(draft.model_dump_json())
+
+
+class Placed(Model):
+    """A quoted block as its view answers it at a send, and whom a comment on it reaches, found through the folds holding it."""
+
+    block: Block
+    reaches: dict[str, JsonValue] | None = None
 
 
 class Taken(Model):
@@ -169,44 +177,45 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         for page in self.kept.pages:
             if page is not by:
                 await page.tell(Drafted(draft=draft))
-            await page.reviewed()
+            await page.tell(Reviewed(review=self.kept.review))
 
     async def going(self, draft: Draft) -> list[Going]:
         """Say where each comment of `draft` not held back goes at the next send, or why it can't, each block read once."""
-        read: dict[str, Block | str] = {}
+        read: dict[str, Placed | str] = {}
         return [
             await self.goes(comment, read)
             for comment in draft.comments
             if not comment.held
         ]
 
-    async def goes(self, comment: Comment, read: dict[str, Block | str]) -> Going:
-        """Say where `comment` goes at the next send, or why it can't, its block read once for every comment on it (`read`)."""
-        key = comment.on.model_dump_json(include={"viewing": True, "block": True})
+    async def goes(self, comment: Comment, read: dict[str, Placed | str]) -> Going:
+        """Say where `comment` goes at the next send, or why it can't, what it's on read once for every comment on it (`read`)."""
+        key = comment.on.model_dump_json(
+            include={"viewing": True, "block": True, "within": True}
+        )
         if key not in read:
-            read[key] = await self.block(comment.on)
-        block = read[key]
-        if isinstance(block, str):
-            return Going(part=comment.id, to="to what can't be read", stays=block)
-        taken = self.taking(comment, block)
+            read[key] = await self.placed(comment.on)
+        placed = read[key]
+        if isinstance(placed, str):
+            return Going(part=comment.id, to="to what can't be read", stays=placed)
+        taken = self.taking(comment, placed)
         if isinstance(taken, str):
             return Going(part=comment.id, to="to no one", stays=taken)
         return Going(part=comment.id, to=taken.to)
 
-    def taking(self, comment: Comment, block: Block) -> Taken | str:
-        """Return what takes `comment`, and whom it reaches: its block's own comment, unless the operator chose whom it reaches; else the inbox, telling the party chosen, the one its block reaches, or the No agent pile where it reaches none; why nothing does, where nothing does."""
-        offer = next((each for each in block.offers if each.verb == "comment"), None)
+    def taking(self, comment: Comment, placed: Placed) -> Taken | str:
+        """Return what takes `comment`, and whom it reaches: its block's own comment, unless the operator chose whom it reaches; else the inbox, telling the party chosen, the one what it's on reaches, or the No agent pile where it reaches none; why nothing does, where nothing does."""
+        offers = placed.block.offers
+        offer = next((each for each in offers if each.verb == "comment"), None)
         if comment.to is None and offer is not None:
-            reaches = block.reaches
+            reaches = placed.reaches
             to = (
                 f"on {comment.on.viewing.view}"
                 if reaches is None
-                else f"to {named(reaches.model_dump(mode='json'))}"
+                else f"to {named(reaches)}"
             )
             return Taken(offer=offer, to=to)
-        party = comment.to
-        if party is None and block.reaches is not None:
-            party = block.reaches.model_dump(mode="json")
+        party = comment.to or placed.reaches
         if party is None and self.repository is not None:
             party = Pile(repository=self.repository, path=NO_AGENT).model_dump(
                 mode="json"
@@ -313,32 +322,72 @@ class Dashboard(Model, arbitrary_types_allowed=True):
                 held=[each.id for each in [*draft.comments, *draft.marks] if each.held],
             )
 
-    async def block(self, quote: Quote) -> Block | str:
-        """Return the block `quote` is on, as its view answers at the send; why not, where it can't be read."""
-        answered = await self.answer(0, quote.viewing)
+    async def around(self, viewing: Viewing, block: str) -> list[Block] | str:
+        """Return the block of id `block` as `viewing` answers it, then each fold holding it in that answer, innermost first; why not, where it can't be read."""
+
+        def path(blocks: list[Block]) -> list[Block] | None:
+            """Return the block of id `block` among `blocks`, then each fold holding it there; none where they hold none."""
+            for each in blocks:
+                if each.id == block:
+                    return [each]
+                if isinstance(each, Fold) and isinstance(each.content, list):
+                    found = path(each.content)
+                    if found is not None:
+                        return [*found, each]
+            return None
+
+        answered = await self.answer(0, viewing)
         if isinstance(answered, Unanswered):
             return f"its view can't be read: {answered.reason}"
-        found = next(
-            (each for each in answered.blocks.every() if each.id == quote.block), None
-        )
+        found = path(answered.blocks.blocks)
         return "what it's on is gone from its view" if found is None else found
+
+    async def block(self, quote: Quote) -> Block | str:
+        """Return the block `quote` is on, as its view answers at the send; why not, where it can't be read."""
+        around = await self.around(quote.viewing, quote.block)
+        return around if isinstance(around, str) else around[0]
+
+    async def placed(self, quote: Quote) -> Placed | str:
+        """Return the block `quote` is on as its view answers at the send, and whom a comment on it reaches; why not, where it can't be read."""
+        around = await self.around(quote.viewing, quote.block)
+        if isinstance(around, str):
+            return around
+        return Placed(block=around[0], reaches=await self.reached(quote, around))
+
+    async def reached(
+        self, quote: Quote, around: list[Block]
+    ) -> dict[str, JsonValue] | None:
+        """Return whom a comment on the first of `around`, the block `quote` is on and the folds holding it in its view, reaches: the first of them naming a party, else the first fold the view was read under (`Quote.within`) that does, or a block holding it; none where none does."""
+        for each in around:
+            if each.reaches is not None:
+                return each.reaches.model_dump(mode="json")
+        for under in quote.within:
+            outer = await self.around(under.viewing, under.block)
+            found = (
+                None
+                if isinstance(outer, str)
+                else next((each.reaches for each in outer if each.reaches), None)
+            )
+            if found is not None:
+                return found.model_dump(mode="json")
+        return None
 
     async def commented(self, comment: Comment) -> Outcome:
         """Send `comment` to what its block offers for comments, and say what came of it: why it stays, where it can't go, or was written on what changed since and hasn't been sent anyway once already."""
-        block = await self.block(comment.on)
-        if isinstance(block, str):
-            return Outcome(reason=block)
+        placed = await self.placed(comment.on)
+        if isinstance(placed, str):
+            return Outcome(reason=placed)
         quote = comment.on
         if (
             quote.version is not None
-            and block.version != quote.version
+            and placed.block.version != quote.version
             and not comment.warned
         ):
             return Outcome(
                 reason="what it's on changed since you wrote it: send again to send it anyway",
                 outdated=True,
             )
-        taken = self.taking(comment, block)
+        taken = self.taking(comment, placed)
         if isinstance(taken, str):
             return Outcome(reason=taken)
         offer = taken.offer
@@ -417,9 +466,6 @@ class Session(Model, arbitrary_types_allowed=True):
     dashboard: Dashboard
     socket: Socket
     sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
-    roots: dict[int, Blocks] = {}
-    """What the document's root view last answered, by each number the page
-    watches it under, laid out again with the review as the draft changes."""
 
     async def run(self) -> None:
         """Read the page's frames until it goes, each answered or refused alone, every view watched answered at once, so a slow one holds up no other."""
@@ -457,15 +503,15 @@ class Session(Model, arbitrary_types_allowed=True):
                     await self.tell(Opened(root=dashboard.root, looks=dashboard.looks))
                     dashboard.kept.pages = [*dashboard.kept.pages, self]
                     kept = dashboard.kept
-                    if kept.review is None and kept.draft.comments:
-                        kept.review = reviewed(
-                            kept.draft, await dashboard.going(kept.draft)
-                        )
+                    kept.review = reviewed(
+                        kept.draft, await dashboard.going(kept.draft)
+                    )
                     await self.tell(Drafted(draft=kept.draft))
+                    await self.tell(Reviewed(review=kept.review))
                 case Watch(watch=watch, viewing=viewing):
                     answering.create_task(self.answered(watch, viewing))
-                case Unwatch(watch=watch):
-                    self.roots.pop(watch, None)
+                case Unwatch():
+                    pass
                 case Write(comment=comment):
                     kept = self.dashboard.kept
                     await self.dashboard.changed(kept.draft.written(comment), by=self)
@@ -479,23 +525,11 @@ class Session(Model, arbitrary_types_allowed=True):
                     await self.tell(await self.dashboard.sent())
 
     async def answered(self, watch: int, viewing: Viewing) -> None:
-        """Answer the view watched under `watch`, and tell the page: the document's root with the review at its top."""
-        answer = await self.dashboard.answer(watch, viewing)
-        if isinstance(answer, Answered) and viewing == self.dashboard.root:
-            self.roots[watch] = answer.blocks
-            answer = Answered(
-                watch=watch, blocks=wrapped(answer.blocks, self.dashboard.kept.review)
-            )
-        await self.tell(answer)
-
-    async def reviewed(self) -> None:
-        """Tell the page the document's root again under each number it watches it under, with the review as the draft stands."""
-        review = self.dashboard.kept.review
-        for watch, blocks in list(self.roots.items()):
-            await self.tell(Answered(watch=watch, blocks=wrapped(blocks, review)))
+        """Answer the view watched under `watch`, and tell the page."""
+        await self.tell(await self.dashboard.answer(watch, viewing))
 
     async def tell(
-        self, told: Opened | Answered | Unanswered | Drafted | Delivered
+        self, told: Opened | Answered | Unanswered | Drafted | Delivered | Reviewed
     ) -> None:
         """Send the page one frame, one at a time whichever task sends it."""
         async with self.sending:

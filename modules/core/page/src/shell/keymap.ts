@@ -128,15 +128,18 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
         shell.choose(found);
         shell.say(`${kind.called}: ${new Set(found).size} chosen`);
     },
-    /** Choose nothing, clear what the status line says, and leave the review where it was opened: Esc. */
+    /** Choose nothing and clear what the status line says; in the window, close it: Esc. */
     "choose-none": (shell) => {
+        if (shell.owner !== null) {
+            shell.owner.window?.close();
+            return;
+        }
         shell.choose([]);
         shell.say(null);
-        shell.leaveReview();
     },
     /**
-     * End the comment being written, as leaving insert mode does; outside one, open the review of what the draft
-     * sends where and go to it; in the review, send the draft: Ctrl+Enter.
+     * End the comment being written, as leaving insert mode does; outside one, open the window on the review of what
+     * the draft sends where; in the review, send the draft: Ctrl+Enter.
      */
     send: (shell) => {
         const cm = getCM(shell.view);
@@ -144,29 +147,29 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
             Vim.handleKey(cm, "<Esc>", "mapping");
             return;
         }
-        if (shell.inReview()) {
-            shell.leaveReview();
-            shell.comments.send();
+        if (shell.owner !== null) {
+            shell.owner.window?.close();
+            shell.owner.comments.send();
             return;
         }
         shell.comments.flush();
-        if (shell.toReview()) {
-            shell.say("the review: Ctrl+Enter sends it, Space x holds a part back, Esc goes back");
+        if (shell.review().blocks.length === 0) {
+            shell.say("the draft holds nothing to send");
             return;
         }
-        shell.say("the draft holds nothing to send");
+        shell.window?.review(shell.review());
     },
-    /** Hold the part of the draft at the cursor back from sends: Space x on a comment or a line of the review. */
+    /** Hold the part of the draft at the cursor back from sends: Space x on a comment, or on its line in the review. */
     hold: (shell) => {
-        shell.comments.hold(true);
+        (shell.owner ?? shell).comments.hold(true, shell.owner === null ? null : shell.lineId());
     },
     /** Let the part of the draft at the cursor go at the next send: Space d. */
     "let-go": (shell) => {
-        shell.comments.hold(false);
+        (shell.owner ?? shell).comments.hold(false, shell.owner === null ? null : shell.lineId());
     },
-    /** Choose whom the comment at the cursor reaches, or write one to whom's chosen: Space s. */
+    /** Choose whom the comment at the cursor, or on its line in the review, reaches, or write one to whom's chosen: Space s. */
     address: (shell) => {
-        shell.comments.address();
+        (shell.owner ?? shell).comments.address(shell.owner === null ? null : shell.lineId());
     },
     /** Comment on the innermost block at the cursor whole, rather than on one of its lines: Space `c`. */
     "comment-whole": (shell) => {
