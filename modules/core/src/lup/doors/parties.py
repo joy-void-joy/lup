@@ -3,8 +3,8 @@
 A party is a class deriving from `Party`, which any module may declare, and a
 method's `by` both says who may call it (`by: Agent`, `by: Agent | Operator`)
 and hands it the caller (`README.md` here, *Who calls*). The core's parties
-carry only what identifies them: what an agent is, beyond lup's id for them, is
-the pieces' that start sessions and hold concerns, which give the id its type.
+carry only what identifies them: what an agent is beyond their ids, their name
+and what they hold, is the inbox's.
 """
 
 from typing import Literal
@@ -19,15 +19,32 @@ class Party(Model):
 class Agent(Party):
     """An agent: a session's own conversation, or one of their subagents', calling one of their tools, or running a command from their room.
 
-    Identified by lup's id for them, which stays put as they're renamed; the id
-    becomes the conversation's own type, with the session it's in, once lup
-    starts sessions (#5).
+    Identified by lup's id for them, which stays put as they're renamed, and by
+    the session they're in, which the room they call from vouches for: a room
+    is one session's, so a call from it can speak for that session's own
+    conversation or one of its subagents, never another session's (`of`).
     """
 
     party: Literal["agent"] = "agent"
     """Which of the core's parties it is, as a call across containers names it."""
     id: str
-    """lup's id for the agent."""
+    """lup's id for the agent: their session's own, for the session's own
+    conversation, or one made from it, for a subagent of it."""
+    session: str
+    """lup's id for the session they're in."""
+
+    @classmethod
+    def of(cls, session: str, conversation: str | None = None) -> Agent:
+        """Return the session's own conversation, or the one the runtime calls `conversation` in it, a subagent's: its id made from the session's, so no other session's room can be vouched as it.
+
+        >>> Agent.of("s1") == Agent(id="s1", session="s1")
+        True
+        >>> Agent.of("s1", "a7").id
+        's1/a7'
+        """
+        if conversation is None:
+            return cls(id=session, session=session)
+        return cls(id=f"{session}/{conversation}", session=session)
 
 
 class Operator(Party):
