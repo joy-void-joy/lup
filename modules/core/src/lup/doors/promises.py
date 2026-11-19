@@ -16,6 +16,7 @@ import lup
 from lup import (
     Agent,
     Codebase,
+    Declared,
     Model,
     Module,
     Modules,
@@ -126,6 +127,42 @@ class Borrowing(Module):
 
     name = "borrowing"
     parts: Parts = Parts.of(EchoPart)
+
+
+class Notes(lup.Named[str]):
+    """Notes a module declares, which a part of another module reads."""
+
+
+class Heard(Model):
+    """Every module's notes, as a part reads them."""
+
+    notes: list[str]
+
+
+class ListeningPart(Part):
+    """Reading what every module of the project declares."""
+
+    declared: Declared
+
+    @lup.tool(reads=True)
+    async def heard(self, _asking: Asking, by: Agent) -> Heard:
+        """Say every module's notes."""
+        return Heard(notes=self.declared.held(Notes))
+
+
+class Listening(Module):
+    """Listening to what every module notes."""
+
+    name = "listening"
+    notes: Notes = Notes.of("own")
+    parts: Parts = Parts.of(ListeningPart)
+
+
+class Noted(Module):
+    """Noting, and serving nothing."""
+
+    name = "noted"
+    notes: Notes = Notes.of("theirs")
 
 
 def declared(*modules: Module) -> Project:
@@ -650,6 +687,20 @@ class PartsPromises(Part):
         started = await by.started(declared(Keeper()))
         refused = await started.serve("tallied", Asking(), by.any(Agent))
         assert isinstance(refused, Refused)
+
+    @lup.promise
+    async def a_class_reads_what_every_module_declares(self, by: Testing) -> None:
+        """A class's field typed `Declared` holds the project's every module, every layer applied, so what another module declares reaches it, each module's in the declaration's order."""
+        drawn = by.any(str)
+        started = await by.started(
+            declared(Listening(), Noted(notes=Notes.default().add(drawn)))
+        )
+        heard = await started.call("heard", Asking(), by.any(Agent))
+        assert isinstance(heard, Accepted)
+        assert isinstance(heard.output, Heard)
+        notes = heard.output.notes
+        assert all(each in notes for each in ["own", "theirs", drawn])
+        assert notes.index("own") < notes.index("theirs")
 
     @lup.promise
     async def a_class_holds_the_secret_stored_under_its_fields_name(

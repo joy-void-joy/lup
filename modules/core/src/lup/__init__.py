@@ -7,7 +7,8 @@ run on), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.command`, `lup.on`,
 `lup.promise`), with the parties a method's `by` names, lup's events,
 and the parts a module is made of (`Part`, listed in its `Parts`, holding its
-`Secret`s, its `Data` and what lasts while it runs, its `Runtime`); the shell's
+`Secret`s, its `Data` and what lasts while it runs, its `Runtime`, and what
+every module declares, `Declared`); the shell's
 view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
 `Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
@@ -42,6 +43,7 @@ from lup.doors.on import on
 from lup.doors.parties import Agent, Codebase, Machine, Operator, Party
 from lup.doors.parts import (
     Data,
+    Declared,
     Finished,
     Part,
     Parts,
@@ -92,6 +94,7 @@ __all__ = [
     "Commenting",
     "Core",
     "Data",
+    "Declared",
     "Diff",
     "DoorError",
     "Edge",

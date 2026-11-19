@@ -129,6 +129,9 @@ class Doors(Model):
     """Every part a project's modules serve, each with its module: what's started, and called through their doors."""
 
     served: list[Serves] = []
+    modules: list[Module] = []
+    """The project's modules, every layer applied, in order: what a part's
+    field typed `Declared` holds."""
 
     @classmethod
     def of(cls, modules: list[Module]) -> Doors:
@@ -145,7 +148,8 @@ class Doors(Model):
                 Serves(module=module, part=part)
                 for module in modules
                 for part in module.held(Parts)
-            ]
+            ],
+            modules=modules,
         )
         for each in doors.served:
             made_with(each)
@@ -270,6 +274,7 @@ class Doors(Model):
                             data=None if data is None else data / each.named(),
                             runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
+                            modules=self.modules,
                         ),
                     ),
                 )
