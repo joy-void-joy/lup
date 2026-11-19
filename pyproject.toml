@@ -210,6 +210,7 @@ source_modules = [
     "lup.store",
     "lup.inbox",
     "lup.setup",
+    "lup.gate",
 ]
 forbidden_modules = ["lup.environment"]
 
@@ -236,6 +237,7 @@ forbidden_modules = [
     "lup.told.*",
     "lup.command_line.*",
     "lup.setup.*",
+    "lup.gate.*",
 ]
 allow_indirect_imports = true
 
