@@ -330,7 +330,7 @@ scenario("Space x holds a comment back, so a send leaves it in the draft as it i
     }
 });
 
-scenario("Space s on a comment sends it to the party chosen among those the document shows, as typing narrows them", async (by) => {
+scenario("Space s on a comment sends it to the party chosen in the window among those the document shows, Enter choosing its line", async (by) => {
     const name = by.any(fc.constantFrom("port-plan", "frictions"));
     const party: Fold = {
         block: "fold",
@@ -349,14 +349,15 @@ scenario("Space s on a comment sends it to the party chosen among those the docu
     try {
         await press(opened, ["G", "o", "t", "o", "<Esc>", "<Space>", "s"]);
         expect(opened.window?.role()).toBe("pick");
-        const field = parent.querySelector<HTMLInputElement>(".lup-window-filter");
-        expect(field).not.toBeNull();
-        if (field === null) {
+        const inner = windowOf(opened);
+        const line = every(inner.document.root).find((node) => node.block?.block === "line" && node.head[0] === name);
+        expect(line).not.toBeUndefined();
+        if (line === undefined) {
             return;
         }
-        field.value = name.slice(0, 3);
-        field.dispatchEvent(new Event("input"));
-        field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+        // The party's line, as `/` and its name would find it: vim's search needs the page laid out, which the harness isn't.
+        inner.go(offsetOf(line));
+        await press(inner, ["<CR>"]);
         expect(memory.draft.comments.map((each) => each.to)).toEqual([party.reaches]);
         expect(opened.window?.role()).toBeNull();
     } finally {

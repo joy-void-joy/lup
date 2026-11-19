@@ -2,8 +2,9 @@
 // staying in view above with its cursor where it was. Every modal the page has is the window: the review of what the
 // draft sends where (Ctrl+Enter), the picker of whom a comment reaches (Space s), and those to come (the palette of
 // commands, Ctrl+K), so each is drawn and moved through alike. What it shows is a document of its own, drawn by a
-// shell of its own as the page's is (its look, its margin, its folds), whose commands act for the page's shell; a
-// picker narrows its list as a line at its top is typed into. Esc closes it.
+// shell of its own as the page's is (its look, its margin, its folds), whose commands act for the page's shell, and
+// which is moved through and searched as the document is (`/`, `n`); in a picker, Enter chooses the line the cursor is
+// on. Esc closes it.
 //
 // The status line is drawn here too: the page's one other line under the document. No other module draws a panel, a
 // dialog or an overlay (`promises.ts` here holds the page to it).
@@ -110,18 +111,12 @@ export const said = StateField.define<string | null>({
         ),
 });
 
-/** Return the choices of `among` whose name holds `typed`, whatever its case. */
-export function narrowed(among: readonly Choice[], typed: string): Choice[] {
-    const wanted = typed.trim().toLowerCase();
-    return among.filter((each) => each.name.toLowerCase().includes(wanted));
-}
-
-/** Return the lines a picker shows of `choices`: one each, keyed by where it is among `all`, so what's chosen is found again. */
-function listed(choices: readonly Choice[], all: readonly Choice[], asking: string): Blocks {
+/** Return the lines a picker shows of `choices`: one each, keyed by where it is among them, so what's chosen is found again. */
+function listed(choices: readonly Choice[], asking: string): Blocks {
     return {
-        blocks: choices.map((choice) => ({
+        blocks: choices.map((choice, at) => ({
             block: "line",
-            id: String(all.indexOf(choice)),
+            id: String(at),
             version: null,
             offers: [],
             reaches: null,
@@ -189,8 +184,25 @@ export class Window {
     /** Open the window on a picker asking `asking` among `choices`, handing the one chosen to `chosen` once it's closed. */
     pick(asking: string, choices: readonly Choice[], chosen: (choice: Choice) => void): void {
         this.#owner.view.dispatch({
-            effects: shown.of({ role: "pick", title: asking, source: new Given(listed(choices, choices, asking)), picking: { choices, chosen } }),
+            effects: shown.of({
+                role: "pick",
+                title: `${asking}  ·  Enter chooses, / searches, Esc closes`,
+                source: new Given(listed(choices, asking)),
+                picking: { choices, chosen },
+            }),
         });
+    }
+
+    /** Choose what the line of id `id` stands for, where the window is a picker: close it, and hand it what it was asked for. */
+    choose(id: string | null): boolean {
+        const picking = this.#owner.view.state.field(this.extension as StateField<Showing | null>, false)?.picking ?? null;
+        const choice = picking === null || id === null ? undefined : new Map(picking.choices.map((each, at) => [String(at), each])).get(id);
+        if (picking === null || choice === undefined) {
+            return false;
+        }
+        this.close();
+        picking.chosen(choice);
+        return true;
     }
 
     /** Close the window, the cursor back in the document where it was. */
@@ -214,12 +226,6 @@ export class Window {
         title.textContent = showing.title;
         this.#title = title;
         dom.append(title);
-        const field = showing.picking === null ? null : document.createElement("input");
-        if (field !== null) {
-            field.className = "lup-window-filter";
-            field.setAttribute("aria-label", showing.title);
-            dom.append(field);
-        }
         const body = document.createElement("div");
         body.className = "lup-window-body";
         dom.append(body);
@@ -227,15 +233,12 @@ export class Window {
         this.#shell = shell;
         // The window takes the keys where the document had them, as the key opening it was pressed there.
         const focused = this.#owner.view.hasFocus;
-        if (field !== null && showing.picking !== null) {
-            this.#typed(field, shell, showing.source, showing.picking, showing.title);
-        }
         return {
             dom,
             top: false,
             mount: () => {
                 if (focused) {
-                    (field ?? shell.view).focus();
+                    shell.view.focus();
                 }
             },
             destroy: () => {
@@ -245,42 +248,6 @@ export class Window {
                 }
             },
         };
-    }
-
-    /** Let `field` narrow the picker's list as it's typed into, its arrows move along it, Enter choose and Esc close. */
-    #typed(field: HTMLInputElement, shell: Shell, source: Given, picking: Picking, asking: string): void {
-        const byId = new Map(picking.choices.map((choice, at) => [String(at), choice]));
-        const moved = (by: number): void => {
-            const doc = shell.view.state.doc;
-            const line = doc.lineAt(shell.view.state.selection.main.head).number + by;
-            if (line >= 1 && line <= doc.lines) {
-                shell.go(doc.line(line).from);
-            }
-        };
-        field.addEventListener("input", () => {
-            source.set(listed(narrowed(picking.choices, field.value), picking.choices, asking));
-            shell.go(0);
-        });
-        field.addEventListener("keydown", (event) => {
-            if (event.key === "Escape") {
-                event.preventDefault();
-                this.close();
-            } else if (event.key === "ArrowDown" || (event.key === "n" && event.ctrlKey)) {
-                event.preventDefault();
-                moved(1);
-            } else if (event.key === "ArrowUp" || (event.key === "p" && event.ctrlKey)) {
-                event.preventDefault();
-                moved(-1);
-            } else if (event.key === "Enter") {
-                event.preventDefault();
-                const id = shell.lineId();
-                const choice = id === null ? undefined : byId.get(id);
-                this.close();
-                if (choice !== undefined) {
-                    picking.chosen(choice);
-                }
-            }
-        });
     }
 }
 

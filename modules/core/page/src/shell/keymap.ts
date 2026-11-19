@@ -167,6 +167,16 @@ export const commands: Readonly<Record<string, (shell: Shell, given: Given) => v
     "let-go": (shell) => {
         (shell.owner ?? shell).comments.hold(false, shell.owner === null ? null : shell.lineId());
     },
+    /** In a picker, choose the line the cursor is on; elsewhere go down a line to its first character, as vim's Enter does. */
+    enter: (shell) => {
+        if (shell.owner?.window?.choose(shell.lineId()) === true) {
+            return;
+        }
+        const cm = getCM(shell.view);
+        if (cm !== null) {
+            Vim.handleKey(cm, "+", "mapping");
+        }
+    },
     /** Choose whom the comment at the cursor, or on its line in the review, reaches, or write one to whom's chosen: Space s. */
     address: (shell) => {
         (shell.owner ?? shell).comments.address(shell.owner === null ? null : shell.lineId());
@@ -259,6 +269,7 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>x", command: "hold", modes: ["normal"] },
     { keys: "<Space>d", command: "let-go", modes: ["normal"] },
     { keys: "<Space>s", command: "address", modes: ["normal"] },
+    { keys: "<CR>", command: "enter", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },
     { keys: ":w", command: "draft-write", modes: ["normal"] },
