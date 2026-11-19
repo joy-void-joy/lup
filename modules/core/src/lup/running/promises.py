@@ -220,7 +220,7 @@ class RunningPromises(Part):
             "kind": "tool",
             "tool": "jot",
             "given": {"text": "x"},
-            "by": {"party": "agent", "id": "a"},
+            "by": {"party": "agent", "id": "a", "session": "a"},
         }
         match sending.sent:
             case "a call":

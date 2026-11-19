@@ -44,13 +44,16 @@ class AgentRecord(PartyRecord):
     """An agent: a session's own conversation, or one they spawned or started as a subagent.
 
     Known to lup's doors by `id` (`lup.Agent.id`), which stays put as they're
-    renamed; named by their path, `port-plan/promise-door`. Whether they've
-    ended is an `Ended` edge said of them, never a field.
+    renamed, in the session `session` names; named by their path,
+    `port-plan/promise-door`. Whether they've ended is an `Ended` edge said of
+    them, never a field.
     """
 
     kind: str = "inbox:agent"
     id: str
     """lup's id for the agent, which the doors hand a method as `by: Agent`."""
+    session: str
+    """lup's id for the session they're in (`lup.Agent.session`)."""
 
 
 class PileRecord(PartyRecord):

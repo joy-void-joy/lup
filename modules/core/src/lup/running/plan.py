@@ -56,6 +56,10 @@ class Doorway(Model):
     input_schema: JsonObject = {}
     """The JSON Schema of the model it takes, or of each where it takes a list
     of it: what the command line reads its arguments and options from."""
+    here: bool = False
+    """Whether it's a command `lup` answers where it's typed, over the
+    declaration of the worktree it's typed in, never carried to where the
+    project runs (`@lup.command(here=True)`)."""
 
     def typed(self) -> str:
         """Name it as the command line types it (`typed`)."""

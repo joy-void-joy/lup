@@ -4,8 +4,10 @@ Each container lup starts gets a directory of sockets of its own, mounted at
 `/run/lup` in it: `calling.sock`, which it calls out through, and
 `listening.sock`, which it answers calls on. Who a call is by is this part's
 word, from the directory it came in on, never what the call says: a project's
-container is its project's `Codebase`, the operator's directory is the
-`Operator`. Every socket is a file in a directory no other container mounts,
+container is its project's `Codebase`, a session's room is that session's
+`Agent`, the operator's directory is the `Operator`. A room may say which of
+its session's conversations calls, a subagent's, and nothing else of who it
+is. Every socket is a file in a directory no other container mounts,
 never an abstract socket, which rooms, sharing the machine's network, could
 reach (`README.md` here, *Carrying*).
 
@@ -22,7 +24,7 @@ from pydantic import Field
 
 import lup
 from lup.doors.door import RefusedError
-from lup.doors.parties import Codebase, Machine, Operator
+from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import Part, Runtime
 from lup.running.plan import Name, Plan
 from lup.running.wire import (
@@ -55,6 +57,31 @@ class Placement(Model):
     def calling(self) -> Path:
         """Return the socket it calls out through."""
         return self.directory / "calling.sock"
+
+
+class SessionRoom(Model):
+    """A session's room, as `Carrying` vouches for what calls from it: the project it works on, the session it's for, and its directory of sockets."""
+
+    repository: Name
+    """The project the session works on, as lup names it."""
+    session: str
+    """lup's id for the session, whose agent every call from it is by."""
+    container: str
+    directory: Path
+    """Its sockets' directory on the machine, mounted at `/run/lup` in it."""
+
+
+class Leaving(Model):
+    """A session's room that stopped, by its session."""
+
+    session: str
+
+
+class Vouched(Model):
+    """Who a call is by, as the socket it came in on says, and the project it's of: theirs, where the operator names one."""
+
+    by: Caller
+    repository: str | None
 
 
 class Placing(Model):
@@ -128,6 +155,8 @@ class Carrying(Part, machine=True, shared=True):
     """The machine's own parts' plan, which every caller is offered beside
     its project's: set where the machine's parts run."""
     placements: list[Placement] = []
+    rooms: list[SessionRoom] = []
+    """Each session's room that's running."""
 
     def operator(self) -> Path:
         """Return the operator's directory of sockets, which no container mounts: a call coming in there is the operator's."""
@@ -165,6 +194,21 @@ class Carrying(Part, machine=True, shared=True):
         ]
 
     @lup.service
+    async def seated(self, room: SessionRoom, by: Machine) -> None:
+        """Keep where a session's room is, in place of where it was before: every call from it is by that session's agent from now on."""
+        del by
+        self.rooms = [
+            *[each for each in self.rooms if each.session != room.session],
+            room,
+        ]
+
+    @lup.service
+    async def left(self, leaving: Leaving, by: Machine) -> None:
+        """Forget a session's room that stopped: a call coming in on its directory is refused from now on."""
+        del by
+        self.rooms = [each for each in self.rooms if each.session != leaving.session]
+
+    @lup.service
     async def routed(self, arrival: Arrival, by: Machine) -> Route:
         """Decide where a call come in on a socket goes, and who it's by: the operator on their own directory, a project's code on its container's.
 
@@ -173,15 +217,17 @@ class Carrying(Part, machine=True, shared=True):
         by the machine's own parts, which refuse what none of them serves:
         never by another project's part, and a part a plan says is the
         machine's is only ever the machine's own. Raise
-        `RefusedError` where the directory is no container's nor the
-        operator's, or the project's part answering the call isn't running.
+        `RefusedError` where the directory is no container's, no session's
+        room nor the operator's, where a conversation is named from anywhere
+        but a room, or where the project's part answering the call isn't
+        running.
         """
         del by
-        caller = self.caller(arrival.directory)
-        call = arrival.call.model_copy(update={"by": caller})
-        repository = (
-            caller.repository if isinstance(caller, Codebase) else arrival.repository
+        vouched = self.vouched(
+            arrival.directory, arrival.repository, arrival.call.conversation
         )
+        call = arrival.call.model_copy(update={"by": vouched.by, "conversation": None})
+        repository = vouched.repository
         plan = None if repository is None else self.plans.get(repository)
         way = way_of(call)
         serving = None if plan is None else plan.serving(way.door, way.name, way.module)
@@ -209,13 +255,11 @@ class Carrying(Part, machine=True, shared=True):
 
         A project's parts that the machine runs are the machine's, offered
         once, as the machine's. Raise `RefusedError` where the directory is no
-        container's nor the operator's.
+        container's, no session's room nor the operator's.
         """
         del by
-        caller = self.caller(visiting.directory)
-        repository = (
-            caller.repository if isinstance(caller, Codebase) else visiting.repository
-        )
+        vouched = self.vouched(visiting.directory, visiting.repository)
+        repository = vouched.repository
         own = None if repository is None else self.plans.get(repository)
         parts = [
             each
@@ -224,27 +268,49 @@ class Carrying(Part, machine=True, shared=True):
         ]
         tools = [] if own is None else own.tools
         return Offer(
-            by=caller,
+            by=vouched.by,
             plan=Plan(
                 parts=[*parts, *self.hosted.parts],
                 tools=[*tools, *self.hosted.tools],
             ),
         )
 
-    def caller(self, directory: Path) -> Caller:
-        """Return who a call coming in on `directory` is by.
+    def vouched(
+        self, directory: Path, named: str | None, conversation: str | None = None
+    ) -> Vouched:
+        """Return who a call coming in on `directory` is by, and the project it's of: the one the operator names (`named`), else the caller's own.
 
-        Raise `RefusedError` where it's no container's nor the operator's.
+        A session's room vouches for its session's agent, the conversation it
+        names within that session where it names one. Raise `RefusedError`
+        where the directory is no container's, no session's room nor the
+        operator's, or where a caller that isn't a room names a conversation.
         """
+        room = next((each for each in self.rooms if each.directory == directory), None)
+        if room is not None:
+            return Vouched(
+                by=Agent.of(room.session, conversation), repository=room.repository
+            )
+        if conversation is not None:
+            message = (
+                "only a session's room names the conversation a call is from: "
+                f"{directory} is no session's room"
+            )
+            raise RefusedError(message)
         if directory == self.operator():
-            return Operator()
+            return Vouched(by=Operator(), repository=named)
         placement = next(
             (each for each in self.placements if each.directory == directory), None
         )
         if placement is None:
-            message = f"{directory} is no container's lup started, nor the operator's"
+            message = (
+                f"{directory} is no container's lup started, no session's room, "
+                "nor the operator's"
+            )
             raise RefusedError(message)
-        return Codebase(repository=placement.repository)
+        return Vouched(
+            by=Codebase(repository=placement.repository),
+            repository=placement.repository,
+        )
 
 
 class Way(Model):

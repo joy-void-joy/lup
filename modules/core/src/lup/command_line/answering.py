@@ -4,18 +4,23 @@ The command line parses words into a call that crosses (`lup.running.wire`), and
 hands it to an answerer (`Answerer`), which sends it where it's answered and
 returns its reply: in this process, over a project's parts started here
 (`lup.environment.command_line.InProcess`), or through the program on the
-operator's machine, which names who calls from the socket a call came in on.
+operator's machine, which names who calls from the socket a call came in on,
+but a command marked to run where it's typed, which this process answers over
+the worktree's declaration (`Here`).
 Who calls is the answerer's to say, never the command line's, and so is what
 they may run: the command line offers only what the plan the answerer offers
 lets that party call (`README.md` here).
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import get_args
 
+from lup.doors.door import Rejection
+from lup.errors import LupError
 from lup.running.plan import Doorway, Offerable, Plan
-from lup.running.wire import Call, Caller, Reply
-from lup.types import Model
+from lup.running.wire import Call, Caller, CommandCalled, Declined, Reply
+from lup.types import Model, MutableModel
 
 
 class Runnable(Model):
@@ -84,6 +89,59 @@ class Answerer(ABC):
     @abstractmethod
     async def stopped(self) -> None:
         """Stop what answering started where the command line runs, as it ends: a project's parts started in this process; nothing where the calls went elsewhere."""
+
+
+class Here(MutableModel, Answerer, arbitrary_types_allowed=True):
+    """The command line's calls carried through `through`, but a command marked to run where it's typed, which the answerer `here` makes answers in this process, over the worktree's declaration.
+
+    `through` is lup's program on the operator's machine, as a room and the
+    operator's terminal reach it: it says who the calls are by, and offers the
+    plan whose commands say which run where they're typed
+    (`Doorway.here`). `here` makes the answerer for those, by the party
+    `through` names, at the first such call, so the worktree's declaration is
+    read only where one is typed; where it can't be (`LupError`, a
+    declaration that doesn't load among it), the call is refused, saying why.
+    """
+
+    through: Answerer
+    here: Callable[[Caller], Answerer]
+    made: Answerer | None = None
+    """The answerer `here` made, once a command marked to run here came."""
+
+    async def offered(self) -> Offered:
+        """Return what `through` offers: who the calls are by, and the plan it runs."""
+        return await self.through.offered()
+
+    async def answered(self, call: Call) -> Reply:
+        """Answer `call` in this process where it's a command `through`'s plan marks to run where it's typed, else send it through."""
+        offered = await self.through.offered()
+        match call:
+            case CommandCalled(module=module, command=name) if any(
+                way.door == "command" and way.name == name and way.here
+                for part in offered.plan.parts
+                if part.module == module
+                for way in part.doorways
+            ):
+                try:
+                    made = self.made or self.here(offered.by)
+                except LupError as unmade:
+                    reason = (
+                        f"`{name}` of `{module}` runs where it's typed, over this "
+                        f"worktree's declaration, which can't be read: {unmade}"
+                    )
+                    return Declined(
+                        rejection=Rejection(submitted=call.given, reason=reason)
+                    )
+                self.made = made
+                return await made.answered(call)
+            case _:
+                return await self.through.answered(call)
+
+    async def stopped(self) -> None:
+        """Stop what each answerer started here."""
+        await self.through.stopped()
+        if self.made is not None:
+            await self.made.stopped()
 
 
 class Typed(Model):

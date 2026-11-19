@@ -5,8 +5,10 @@ read first (`read`): a reader meeting another version refuses in words, naming
 both and how to update, never with a validation error about a field it doesn't
 know. Who calls (`by`) is one of the core's parties, which only the program
 names, from the socket a call came in on: a call is sent without one, and a
-container's program refuses one that comes without it. `Machine` never crosses:
-it's only ever a call made where the machine's own parts run.
+container's program refuses one that comes without it. A session's room may
+say which of its session's conversations a call is from (`conversation`), and
+nothing more. `Machine` never crosses: it's only ever a call made where the
+machine's own parts run.
 """
 
 from pathlib import Path
@@ -46,6 +48,11 @@ class ToolCalled(Model):
     by: Caller | None = None
     """Who it's by, as the program on the operator's machine vouches from the
     socket it came in on: none as it's sent."""
+    conversation: str | None = None
+    """The conversation making it, the runtime's own id for a subagent, as a
+    session's room sends it: the room's word, which the program folds into the
+    agent it vouches for, within the room's own session, and refuses from any
+    other caller. None for the session's own conversation."""
 
 
 class ServiceCalled(Model):
@@ -58,6 +65,11 @@ class ServiceCalled(Model):
     by: Caller | None = None
     """Who it's by, as the program on the operator's machine vouches from the
     socket it came in on: none as it's sent."""
+    conversation: str | None = None
+    """The conversation making it, the runtime's own id for a subagent, as a
+    session's room sends it: the room's word, which the program folds into the
+    agent it vouches for, within the room's own session, and refuses from any
+    other caller. None for the session's own conversation."""
 
 
 class CommandCalled(Model):
@@ -71,6 +83,11 @@ class CommandCalled(Model):
     by: Caller | None = None
     """Who it's by, as the program on the operator's machine vouches from the
     socket it came in on: none as it's sent."""
+    conversation: str | None = None
+    """The conversation making it, the runtime's own id for a subagent, as a
+    session's room sends it: the room's word, which the program folds into the
+    agent it vouches for, within the room's own session, and refuses from any
+    other caller. None for the session's own conversation."""
 
 
 class ViewCalled(Model):
@@ -84,6 +101,11 @@ class ViewCalled(Model):
     by: Caller | None = None
     """Who it's by, as the program on the operator's machine vouches from the
     socket it came in on: none as it's sent."""
+    conversation: str | None = None
+    """The conversation making it, the runtime's own id for a subagent, as a
+    session's room sends it: the room's word, which the program folds into the
+    agent it vouches for, within the room's own session, and refuses from any
+    other caller. None for the session's own conversation."""
 
 
 type Call = Annotated[

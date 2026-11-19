@@ -70,7 +70,7 @@ async def said(started: Started, tool: str, given: lup.Model, agent: Agent) -> s
 
 async def told(started: Started, agent: Agent) -> Told:
     """Tell `agent` what's for them, as their session's next call does."""
-    answered = await started.serve("told", Ending(agent=agent.id), HERE)
+    answered = await started.serve("told", Ending(agent=agent), HERE)
     assert isinstance(answered, Accepted)
     assert isinstance(answered.output, Told)
     return answered.output
@@ -177,11 +177,11 @@ class InboxPromises(Part):
             ConcernSaid(text="watch the gate", title="the gate"),
             agent,
         )
-        await started.serve("agent_ended", Ending(agent=agent.id), HERE)
+        await started.serve("agent_ended", Ending(agent=agent), HERE)
         left = placed(await inboxed(started), "the gate")
         assert left.holder == "@no-agent"
         assert left.left_by is not None
-        await started.serve("agent_started", Ending(agent=agent.id), HERE)
+        await started.serve("agent_started", Ending(agent=agent), HERE)
         back = placed(await inboxed(started), "the gate")
         assert back.holder == left.left_by
         assert back.left_by is None
@@ -250,9 +250,9 @@ class InboxPromises(Part):
     async def a_comment_on_agents_exchange_reaches_both(self, by: Testing) -> None:
         """The operator's comment on a message one agent sent another reaches both: whoever wrote it, and whoever it was for."""
         started = await by.started(project())
-        writer, reader = Agent(id="writer-id"), Agent(id="reader-id")
-        await started.serve("agent_named", Naming(agent=writer.id, name="writer"), HERE)
-        await started.serve("agent_named", Naming(agent=reader.id, name="reader"), HERE)
+        writer, reader = Agent.of("writer-id"), Agent.of("reader-id")
+        await started.serve("agent_named", Naming(agent=writer, name="writer"), HERE)
+        await started.serve("agent_named", Naming(agent=reader, name="reader"), HERE)
         await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
         message = max((await inboxed(started)).new)
         commented = await started.run(
@@ -274,7 +274,7 @@ class InboxPromises(Part):
         """Every concern an agent opens is found from the list of parties, under the party holding it, and opens on what was said in it; a comment on it reaches its holder."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await started.serve("agent_named", Naming(agent=agent.id, name="builder"), HERE)
+        await started.serve("agent_named", Naming(agent=agent, name="builder"), HERE)
         await said(
             started,
             "concern",
@@ -339,13 +339,13 @@ class InboxPromises(Part):
     ) -> None:
         """A friction an agent of one project sends to another repository's pile lands there, made if it isn't, and not in their own."""
         started = await by.started(project())
-        lup_agent, project_agent = by.any(Agent), Agent(id="downstream")
+        lup_agent, project_agent = by.any(Agent), Agent.of("downstream")
         await said(started, "note", NoteSaid(remark="here first"), lup_agent)
         elsewhere = Codebase(repository="downstream")
         sent = await started.serve(
             "friction",
             {
-                "agent": project_agent.id,
+                "agent": project_agent.model_dump(),
                 "said": FrictionSaid(
                     text="lup's keys lag", under="frictions/keys", repository="harness"
                 ).model_dump(),
