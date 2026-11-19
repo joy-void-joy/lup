@@ -2,12 +2,14 @@
 
 `<name> <module> <method> …` runs a module's tool, command or view by its
 method's name, typer's way (`-` for `_`), the fields of the model it takes its
-arguments and options (`lup.command_line.parameters`). What it offers, and
-parses words for, is what the answerer's plan lets the party it names call;
-`--help` lists that alone, and a module only where it has some. A command takes
-everything as arguments: one missing is refused as the words are parsed, and
-nothing runs; nothing is ever asked for. Only the module named is built, so
-help and a run cost what one module's methods do.
+arguments and options (`lup.command_line.parameters`); the methods of the one
+module a command line puts at its top level are typed without its name, as
+`lup`'s core's are (`lup init`). What it offers, and parses words for, is what
+the answerer's plan lets the party it names call; `--help` lists that alone,
+and a module only where it has some. A command takes everything as arguments:
+one missing is refused as the words are parsed, and nothing runs; nothing is
+ever asked for. Only the module named is built, and the top level's where no
+other module is named, so help and a run cost what one module's methods do.
 
 A view's run prints its text (`Blocks.text`); a tool's or a command's, what it
 answered, words as they are and a model as JSON; a refusal, why, on standard
@@ -23,7 +25,7 @@ from typing import TYPE_CHECKING, TextIO
 
 import typer
 from pydantic_core import to_json
-from typer.main import get_command, get_command_name
+from typer.main import get_command
 
 from lup.command_line.answering import Answerer, Offered, Runnable, Typed
 from lup.command_line.parameters import Parameter, Parsed, parameters, sent
@@ -83,17 +85,25 @@ def modules() -> None:
     """Run a module's tool, command or view by its name, the fields of what it takes its arguments and options."""
 
 
+def grouped(offered: Offered, top: str | None) -> list[str]:
+    """List the modules typed by their name: each with something the party may call, but the one at the top level, named `top`."""
+    return [each for each in offered.modules() if each != top]
+
+
 def built(
     name: str,
     offered: Offered,
     module: str | None,
     parsing: Parsing,
     markup: MarkupMode = None,
+    *,
+    top: str | None = None,
 ) -> typer.Typer:
-    """Return the command line `offered` makes, called `name`: each module with something its party may call, and, of the one named `module`, each method they may call, its command keeping the call it parses in `parsing`.
+    """Return the command line `offered` makes, called `name`: each method of the module named `top` its party may call, at the top level, and each other module with something they may call, by its name, with each method they may call of the one named `module`, each command keeping the call it parses in `parsing`.
 
-    Its help is plain, or, with `markup`, typer's rich layout, docstrings
-    read as that markup.
+    The top level's methods are built only where `module` names no other
+    module. Its help is plain, or, with `markup`, typer's rich layout,
+    docstrings read as that markup.
     """
     line = typer.Typer(
         name=name,
@@ -103,7 +113,14 @@ def built(
     )
     line.callback()(modules)
     runnable = offered.runnable()
-    for each in offered.modules():
+    groups = grouped(offered, top)
+    if module not in groups:
+        for one in runnable:
+            if one.module == top:
+                line.command(one.doorway.typed(), help=one.doorway.description)(
+                    command(one, parsing)
+                )
+    for each in groups:
         methods = typer.Typer(
             help=offered.described(each) or None,
             add_completion=False,
@@ -112,10 +129,9 @@ def built(
         if each == module:
             for one in runnable:
                 if one.module == each:
-                    methods.command(
-                        get_command_name(one.doorway.name),
-                        help=one.doorway.description,
-                    )(command(one, parsing))
+                    methods.command(one.doorway.typed(), help=one.doorway.description)(
+                        command(one, parsing)
+                    )
         line.add_typer(methods, name=each)
     return line
 
@@ -129,14 +145,22 @@ def reached(words: list[str]) -> list[str]:
     return list(takewhile(lambda word: not word.startswith("-"), words))
 
 
-def listed(offered: Offered, named: list[str]) -> list[str] | None:
-    """Return what the help shown where `named` reaches lists: the modules at the top, or one module's methods, as each is typed; none for a method's own."""
+def listed(offered: Offered, named: list[str], top: str | None) -> list[str] | None:
+    """Return what the help shown where `named` reaches lists, as each is typed: at the top, the methods of the module named `top` and the other modules; under a module, its methods; none for a method's own."""
+    groups = grouped(offered, top)
     match named:
         case []:
-            return offered.modules()
-        case [module]:
             return [
-                get_command_name(each.doorway.name)
+                *(
+                    each.doorway.typed()
+                    for each in offered.runnable()
+                    if each.module == top
+                ),
+                *groups,
+            ]
+        case [module] if module in groups:
+            return [
+                each.doorway.typed()
                 for each in offered.runnable()
                 if each.module == module
             ]
@@ -171,9 +195,13 @@ async def typed(
     name: str,
     out: TextIO | None = None,
     error: TextIO | None = None,
+    *,
+    top: str | None = None,
 ) -> Typed:
     """Run the command line called `name` on `words`, its calls handed to `answerer`, and say what it did.
 
+    The methods of the module named `top` are typed at its top level, without
+    its name, as `lup`'s core's are; every other module's under its name.
     What it prints goes to `out` and `error`, or, where they're left out, is
     kept in what it answers. Typer's own help and messages are written to
     them as it parses: in typer's rich layout where `out` is a terminal, as
@@ -183,7 +211,7 @@ async def typed(
     # lup: defer(issue=7, why="`lup` alone opens the dashboard, which is #7's: until then it shows the help")
     asked = words or ["--help"]
     named = reached(asked)
-    if len(named) == 1 and len(asked) == 1:
+    if len(asked) == 1 and named in [[each] for each in grouped(offered, top)]:
         asked = [*asked, "--help"]
     kept_out, kept_error = io.StringIO(), io.StringIO()
     printing = out or kept_out
@@ -191,7 +219,7 @@ async def typed(
     parsing = Parsing()
     markup: MarkupMode = "markdown" if printing.isatty() else None
     module = named[0] if named else None
-    line = get_command(built(name, offered, module, parsing, markup))
+    line = get_command(built(name, offered, module, parsing, markup, top=top))
     with redirect_stdout(printing), redirect_stderr(erring):
         try:
             line.main(args=asked, prog_name=name, standalone_mode=True)
@@ -204,7 +232,7 @@ async def typed(
             status=status,
             output=kept_out.getvalue(),
             error=kept_error.getvalue(),
-            listed=listed(offered, named) if status == 0 else None,
+            listed=listed(offered, named, top) if status == 0 else None,
         )
     reply = await answerer.answered(call)
     match reply:

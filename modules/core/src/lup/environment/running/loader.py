@@ -38,11 +38,11 @@ from tenacity import (
 import lup.hosting.installed
 from lup.core import Core
 from lup.declaration.grammar import applied, set_fields
+from lup.declaration.layout import MachineLayout, Pyproject, RepositoryLayout
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, RefusedError
 from lup.doors.parties import Machine, Operator
 from lup.environment.declaration import load, resolve
-from lup.environment.layout import MachineLayout, Pyproject, RepositoryLayout
 from lup.environment.running.calling import Calling
 from lup.environment.running.programs import Local
 from lup.errors import LupError

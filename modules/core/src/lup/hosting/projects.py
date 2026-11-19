@@ -460,6 +460,14 @@ class Projects(Part, machine=True, shared=True):
                 "from two parts each: lup routes a call to one part only"
             )
             raise RefusedError(message)
+        shadowed = plan.shadowed()
+        if shadowed:
+            message = (
+                f"{opening.repository}'s declaration names a module "
+                f"{', '.join(f'`{each}`' for each in shadowed)}, as the core's tools, "
+                "commands and views are typed at `lup`'s top level"
+            )
+            raise RefusedError(message)
         return plan
 
     async def placed(

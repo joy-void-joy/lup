@@ -11,8 +11,9 @@ lets that party call (`README.md` here).
 """
 
 from abc import ABC, abstractmethod
+from typing import get_args
 
-from lup.running.plan import Doorway, Plan
+from lup.running.plan import Doorway, Offerable, Plan
 from lup.running.wire import Call, Caller, Reply
 from lup.types import Model
 
@@ -41,7 +42,7 @@ class Offered(Model):
             Runnable(module=part.module, doorway=way)
             for part in self.plan.parts
             for way in part.doorways
-            if way.door in ("tool", "command", "view") and party in way.parties
+            if way.door in get_args(Offerable.__value__) and party in way.parties
         ]
 
     def modules(self) -> list[str]:
@@ -96,8 +97,9 @@ class Typed(Model):
     error: str = ""
     """What it printed on its standard error."""
     listed: list[str] | None = None
-    """What the help it showed lists, as each is typed: the modules, or one
-    module's tools, commands and views; none where it showed no such list."""
+    """What the help it showed lists, as each is typed: at the top, the tools,
+    commands and views of the module typed there and the other modules; under
+    a module, its own; none where it showed no such list."""
     call: Call | None = None
     """The call it made; none where nothing ran."""
     reply: Reply | None = None
