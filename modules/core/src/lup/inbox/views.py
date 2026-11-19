@@ -79,14 +79,20 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
     marks = [
         "friction" if concern.kind == "inbox:friction" else "",
         f"left by {inbox.called(standing.left_by)}" if standing.left_by else "",
-        "done, to clear" if standing.done is not None else "",
-        "cleared" if standing.cleared else "",
         "declined" if standing.declined is not None else "",
     ]
     said = ", ".join(each for each in marks if each)
+    stands = (
+        "done"
+        if standing.cleared or standing.declined is not None
+        else "waiting"
+        if standing.done is not None
+        else None
+    )
     return Fold(
         id=f"concern-{concern.number}",
         kind="concern",
+        standing=stands,
         summary=[
             Span(text=f"{inbox.called(concern)} ", tone="muted"),
             Span(text=concern.title, tone="strong"),
@@ -108,8 +114,6 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
     """Return `item` as its heading, who wrote it, of what kind, its number, whether it's new or waits, then its words."""
     new = item in inbox.new_to_operator()
     waits = item in inbox.waits_on_operator()
-    marks = ["new" if new else "", "waits on you" if waits else ""]
-    said = ", ".join(each for each in marks if each)
     writer = inbox.by(item)
     number = item.number or 0
     return [
@@ -121,8 +125,8 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
                     text=f" · {item.kind.removeprefix('inbox:')} · @{item.number}",
                     tone="muted",
                 ),
-                Span(text=f"  {said}" if said else "", tone="strong"),
             ],
+            standing="waiting" if waits else "new" if new else None,
             offers=[Offer.of(shows.comment, OnItem(item=number))],
             sighted=Offer.of(shows.seen, Showing(items=[number])),
         ),

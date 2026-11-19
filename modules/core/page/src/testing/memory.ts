@@ -35,7 +35,7 @@ export class Memory implements Source {
             version: null,
             offers: [],
             reaches: null,
-            sighted: null,
+            sighted: null, standing: null,
             spans: [{ text: comment.words.split("\n")[0] ?? "", tone: "strong", ticking: null, gauge: null, refers: null }],
         });
         const place = (id: string, summary: string, comments: readonly Comment[]): Block => ({
@@ -44,7 +44,7 @@ export class Memory implements Source {
             version: null,
             offers: [],
             reaches: null,
-            sighted: null,
+            sighted: null, standing: null,
             kind: "sent-to",
             summary: [{ text: summary, tone: "strong", ticking: null, gauge: null, refers: null }],
             open: null,

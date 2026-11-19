@@ -207,6 +207,11 @@ def commented_on(taken: Annotation) -> Annotation:
             return taken
 
 
+type Standing = Literal["new", "waiting", "done", "held"]
+"""How a block stands for the operator, the same for every module: new to them,
+waiting on them, done, or held back from a send."""
+
+
 class Shown(Model):
     """What every block has: the id its module keeps from one answer to the next, the version of what it shows, what it offers, and who a comment on it reaches.
 
@@ -232,6 +237,10 @@ class Shown(Model):
     """What being seen does: a command the page runs once the block has been on
     the operator's screen long enough, as marking an item read; none where
     being seen does nothing."""
+    standing: Standing | None = None
+    """How it stands for the operator: new to them, waiting on them, done, or
+    held back from a send; none where there's nothing to say. Drawn alike
+    wherever it shows, a glyph in its own colour, and said in its text form."""
     shows: ClassVar[dict[str, bool]] = {}
     """The fields saying what the block shows itself, apart from what's under
     it, each marked to include, which the version the core works out is a
@@ -303,6 +312,8 @@ class Fold(Shown):
         ['▸ Bash: ls  [call call=c1]']
         """
         summary = "".join(span.text for span in self.summary)
+        if self.standing is not None:
+            summary = f"{summary}  [{self.standing}]"
         if isinstance(self.content, Viewing):
             return [f"{indent}▸ {summary}  [{self.content.said()}]"]
         if not opened:
@@ -529,6 +540,8 @@ def lines(blocks: list[Block], indent: str = "") -> list[str]:
 
     def said(block: Block) -> list[str]:
         match block:
+            case Line(standing=str() as standing):
+                return [f"{indent}{block.said()}  [{standing}]"]
             case Line():
                 return [f"{indent}{block.said()}"]
             case Markdown():

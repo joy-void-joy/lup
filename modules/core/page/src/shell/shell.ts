@@ -5,14 +5,16 @@
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
 import { history } from "@codemirror/commands";
 import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, WidgetType, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
-import type { Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
+import type { Blocks, Comment, Delivered, Draft, Looks, Standing, Viewing } from "../generated/read";
 import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, opening, section, viewKey, type Change, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
+import { standings } from "./palette";
+import { framed } from "./frame";
 import { Outline } from "./outline";
 import { Panes } from "./panes";
 import { said, say, Window } from "./window";
@@ -46,6 +48,12 @@ export interface Placing {
     readonly aside?: HTMLElement | null;
     /** What holds the page's panes, whose keys pane mode hears first; none for no pane mode. */
     readonly page?: HTMLElement | null;
+    /** The header over the document, saying where its cursor is; none for no header. */
+    readonly header?: HTMLElement | null;
+    /** The line of keys under the document, saying what the keys do where the cursor of the pane the keys are in is; none for no line of keys. */
+    readonly keys?: HTMLElement | null;
+    /** More of the outline's own editor: how it's drawn, as the second lup's overview rows were. */
+    readonly outlining?: readonly Extension[];
 }
 
 
@@ -84,6 +92,12 @@ export class Shell {
     readonly outline: Outline | null;
     /** Pane mode, moving between the outline, the document and the window; none where the page has none. */
     readonly panes: Panes | null;
+    /** The ids of the blocks marked, each fold summary of one drawn so: in the outline, the folds the document shows. */
+    marked: ReadonlySet<string> = new Set();
+    readonly #header: HTMLElement | null;
+    readonly #keys: HTMLElement | null;
+    /** Whether the shell is made: its editor's first updates come while it's being made, before there's a frame to say them in. */
+    #made = false;
     /** The review of what the draft sends where, as the core last told it. */
     #review: Blocks = { blocks: [], summary: [], offers: [] };
     #stopReviews: () => void = () => {};
@@ -103,6 +117,8 @@ export class Shell {
         this.owner = placing.owner ?? null;
         this.document = new Document(section("root", root, { blocks: [], summary: [], offers: [] }));
         this.comments = new Comments(this);
+        this.#header = placing.header ?? null;
+        this.#keys = placing.keys ?? null;
         const extensions = placing.extensions ?? [];
         this.window =
             this.owner === null
@@ -117,7 +133,10 @@ export class Shell {
                               this.outline?.went();
                           }
                       });
-                      return new Shell(body, { module: null, view: "outline", given: {} }, looks, given, { extensions: [...extensions, went], owner: this });
+                      return new Shell(body, { module: null, view: "outline", given: {} }, looks, given, {
+                          extensions: [...(placing.outlining ?? extensions), went],
+                          owner: this,
+                      });
                   })
                 : null;
         const shell = this;
@@ -134,9 +153,16 @@ export class Shell {
                     EditorState.transactionExtender.of((transaction) => (transaction.annotation(fromCore) === true ? { annotations: Transaction.addToHistory.of(false) } : null)),
                     EditorView.updateListener.of((update) => {
                         shell.comments.changed(update);
+                        if (!shell.#made) {
+                            return;
+                        }
                         if (update.selectionSet) {
                             shell.outline?.followed();
                         }
+                        if (update.viewportChanged || update.docChanged) {
+                            shell.outline?.viewed();
+                        }
+                        (shell.owner ?? shell).reframe();
                     }),
                     foldState,
                     said,
@@ -151,6 +177,7 @@ export class Shell {
         this.comments.start();
         getCM(this.view)?.on("vim-mode-change", (event: { mode: string }) => {
             this.comments.moded(event.mode);
+            (this.owner ?? this).reframe();
         });
         const page = placing.page ?? null;
         this.panes = this.owner === null && page !== null ? new Panes(this, page) : null;
@@ -161,6 +188,7 @@ export class Shell {
                 window.reviewed(review);
             });
         }
+        this.#made = true;
         this.#stop = source.watch(root, (blocks) => {
             this.answered("root", blocks);
         });
@@ -320,6 +348,17 @@ export class Shell {
         this.view.dispatch({ effects: EditorView.scrollIntoView(at) });
     }
 
+    /** Say again, in the frame around the document, where its cursor is and what the keys do in the pane they're in. */
+    reframe(): void {
+        if (!this.#made || (this.#header === null && this.#keys === null)) {
+            return;
+        }
+        const panes = [this.window?.shell() ?? null, this.outline?.shell ?? null].filter((each): each is Shell => each !== null);
+        const keyed = panes.find((each) => each.view.hasFocus) ?? this;
+        framed(this, this.#header, null);
+        framed(keyed, null, this.#keys);
+    }
+
     /** Return the review of what the draft sends where, as the core last told it. */
     review(): Blocks {
         return this.#review;
@@ -398,6 +437,26 @@ function within(node: Node, keys: ReadonlySet<string>): boolean {
     return false;
 }
 
+/** How a block stands for the operator, drawn before its first line: its glyph, in its meaning's colour. */
+class Stands extends WidgetType {
+    constructor(readonly standing: Standing) {
+        super();
+    }
+
+    override eq(other: Stands): boolean {
+        return other.standing === this.standing;
+    }
+
+    override toDOM(): HTMLElement {
+        const glyph = document.createElement("span");
+        glyph.className = `lup-standing lup-standing-${this.standing}`;
+        glyph.textContent = `${standings[this.standing]} `;
+        glyph.style.color = `var(--lup-${this.standing})`;
+        glyph.title = this.standing;
+        return glyph;
+    }
+}
+
 /** The shell an editor shows, for the keymap's commands to find it by its editor. */
 export const shells = Facet.define<Shell, Shell | null>({ combine: (values) => values[0] ?? null });
 
@@ -450,6 +509,9 @@ const drawing = ViewPlugin.fromClass(
                     if (chosen.size > 0 && within(node, chosen)) {
                         classes.push("lup-chosen");
                     }
+                    if (heading && node.block !== null && shell.marked.has(node.block.id)) {
+                        classes.push("lup-marked");
+                    }
                     const colour =
                         heading && kind !== null
                             ? shell.kinds.folds.get(kind)?.colour
@@ -465,6 +527,10 @@ const drawing = ViewPlugin.fromClass(
                             },
                         }).range(line.from),
                     );
+                    const standing = start === line.from ? (node.block?.standing ?? null) : null;
+                    if (standing !== null) {
+                        ranges.push(Decoration.widget({ widget: new Stands(standing), side: -1 }).range(line.from));
+                    }
                     const spans =
                         node.block?.block === "line" ? node.block.spans : heading && node.block?.block === "fold" ? node.block.summary : [];
                     let at = line.from;
@@ -559,7 +625,8 @@ export const look = EditorView.theme(
             background: "var(--lup-float)",
             boxShadow: "inset 2px 0 0 var(--lup-comment)",
         },
-        ".lup-comment-first::before": { content: '"¶ "', color: "var(--lup-muted)" },
+        ".lup-comment-first::before": { content: '"» "', color: "var(--lup-muted)" },
+        ".lup-standing-waiting": { fontWeight: "700" },
         ".lup-quoted": { textDecoration: "underline 2px var(--lup-comment)", textUnderlineOffset: "3px" },
         ".lup-placeholder .lup-counted": { color: "var(--lup-comment)" },
         ".lup-comment-first::after": { content: '"  " attr(data-to)', color: "var(--lup-muted)", fontStyle: "italic" },
@@ -578,3 +645,15 @@ export const look = EditorView.theme(
     },
     { dark: true },
 );
+
+/**
+ * The outline's look, over the document's, as the second lup's overview rows were: a row a fold, set in by how deep it
+ * is, in its kind's colour, no band and no margin; the folds the document shows on screen with a bar beside them, and
+ * the one its cursor is in highlighted.
+ */
+export const overview = EditorView.theme({
+    ".lup-line.lup-summary": { fontWeight: "400" },
+    ".lup-line.lup-summary.lup-kind-party": { background: "none", borderTop: "none", boxShadow: "none", fontWeight: "700" },
+    ".lup-line.lup-summary.lup-marked": { boxShadow: "inset 3px 0 0 var(--lup-border)", background: "var(--lup-float)" },
+    ".cm-line.cm-activeLine": { background: "var(--lup-selection)" },
+});

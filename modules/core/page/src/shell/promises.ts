@@ -253,7 +253,7 @@ scenario("A view answering again keeps what an open fold read under it, the fold
         version: null,
         offers: [],
         reaches: null,
-        sighted: null,
+        sighted: null, standing: null,
         kind: "note",
         summary: [{ text: "note", tone: "plain", ticking: null, gauge: null, refers: null }],
         open: true,
@@ -428,11 +428,11 @@ scenario("Space s on a comment sends it to the party chosen in the window among 
         version: null,
         offers: [],
         reaches: { party: "pile", repository: "harness", path: name },
-        sighted: null,
+        sighted: null, standing: null,
         kind: "party",
         summary: [{ text: name, tone: "strong", ticking: null, gauge: null, refers: null }],
         open: null,
-        content: [{ block: "line", id: "said", version: null, offers: [], reaches: null, sighted: null, spans: [{ text: "said", tone: "plain", ticking: null, gauge: null, refers: null }] }],
+        content: [{ block: "line", id: "said", version: null, offers: [], reaches: null, sighted: null, standing: null, spans: [{ text: "said", tone: "plain", ticking: null, gauge: null, refers: null }] }],
     };
     const other: Fold = { ...party, id: "other", reaches: { party: "pile", repository: "harness", path: "other" }, summary: [{ text: "other", tone: "strong", ticking: null, gauge: null, refers: null }] };
     const { shell: opened, memory, parent } = shellOn([other, party]);
@@ -523,7 +523,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
         version: null,
         offers: [],
         reaches: null,
-        sighted: null,
+        sighted: null, standing: null,
         kind: "note",
         summary: [{ text: summary, tone: "plain", ticking: null, gauge: null, refers: null }],
         open: null,

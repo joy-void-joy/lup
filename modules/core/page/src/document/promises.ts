@@ -84,7 +84,7 @@ scenario("What a fold reads as it opens stays under it while its view answers ag
         version: null,
         offers: [],
         reaches: null,
-        sighted: null,
+        sighted: null, standing: null,
         kind: "note",
         summary: [{ text: "note 1", tone: "plain", ticking: null, gauge: null, refers: null }],
         open: null,

@@ -49,21 +49,90 @@ body {
     padding: 0 1ch;
 }
 
-/* The page's panes: the outline beside the document, the window under the document inside its editor. */
+/* The page's panes, as the second lup's windows were: each framed in the border colour, a title over it, the one the
+   keys are in outlined in the focus colour. The outline beside the document; over the document the header of where its
+   cursor is, under it the line of keys; the window under the document, inside its editor. */
 .lup-page {
     display: flex;
     height: 100%;
 }
 
-.lup-outline {
-    width: 44ch;
-    flex: none;
-    border-right: 1px solid var(--lup-rule);
+.lup-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--lup-border);
 }
 
+.lup-pane:focus-within {
+    outline: 2px solid var(--lup-focus);
+    outline-offset: -2px;
+}
+
+.lup-outline-pane {
+    flex: 0 0 34ch;
+    max-width: 40%;
+}
+
+.lup-document-pane {
+    flex: 1;
+    border-right: none;
+}
+
+.lup-pane-title,
+.lup-where {
+    padding: 0 1ch;
+    border-bottom: 1px solid var(--lup-border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: calc(var(--lup-lh) + 1px);
+    color: var(--lup-muted);
+}
+
+.lup-where {
+    display: flex;
+    gap: 0 1ch;
+    color: var(--lup-fg);
+}
+
+.lup-where-part {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.lup-where-part + .lup-where-part::before {
+    content: "› ";
+    color: var(--lup-muted);
+}
+
+.lup-where-letter {
+    margin-right: 1ch;
+}
+
+.lup-outline,
 .lup-main {
     flex: 1;
     min-width: 0;
+    min-height: 0;
+}
+
+/* The line of keys: the keys that do something where the cursor is, cut at the line's end where they don't fit. */
+.lup-keys {
+    display: flex;
+    gap: 0 2ch;
+    padding: 0 1ch;
+    border-top: 1px solid var(--lup-border);
+    white-space: nowrap;
+    overflow: hidden;
+    color: var(--lup-muted);
+}
+
+.lup-keys kbd {
+    font: inherit;
+    color: var(--lup-info);
 }
 
 /* Pane mode, plain to see: no cursor anywhere, since no key reaches a pane; the pane h, j, k and l chose framed thick

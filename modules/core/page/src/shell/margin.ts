@@ -12,6 +12,7 @@ import { EditorView, GutterMarker, gutter, type ViewUpdate } from "@codemirror/v
 
 import { depthOf, foldKind, foldRange, nodeAt, offsetOf, type Node as Laid } from "../document/tree";
 import { redrawn } from "./annotations";
+import { meanings } from "./palette";
 import { shells, type Shell } from "./shell";
 
 /** A fold's letter, on the line its summary is on. */
@@ -51,7 +52,8 @@ export function beside(shell: Shell, from: number, to: number, bright: ReadonlyS
         const kind = foldKind(node);
         if (kind !== null) {
             const declared = shell.kinds.folds.get(kind);
-            const colour = declared?.colour ?? "muted";
+            const standing = node.block?.standing ?? null;
+            const colour = standing === null ? (declared?.colour ?? "muted") : meanings[standing];
             const column = depthOf(node);
             const start = offsetOf(node);
             if (start === from) {
