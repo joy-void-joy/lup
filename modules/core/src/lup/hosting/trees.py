@@ -277,6 +277,10 @@ class Trees(Part, machine=True, shared=True):
     """How many files are read from git at a time, so a large commit's content
     is never held whole."""
 
+    def objects(self, common: Path) -> Objects:
+        """Return the object store of the repository whose common git directory is `common`, read through this part's git."""
+        return Objects(git=self.git, common=common)
+
     @lup.service
     async def exported(self, exporting: Exporting, by: Machine) -> Exported:
         """Write out a commit's files from git's objects, each what its id says, where they aren't already, and say where.
@@ -293,14 +297,14 @@ class Trees(Part, machine=True, shared=True):
             return Exported(commit=exporting.commit, path=into)
         files = [
             each
-            for each in await self.held(exporting.common, exporting.commit)
+            for each in await self.objects(exporting.common).held(exporting.commit)
             if each.kind == "blob"
         ]
         partial = emptied(into.with_name(f"{exporting.commit}.partial"))
         for chunk in batched(files, self.batch, strict=False):
             entries = list(chunk)
-            contents = await self.verified(
-                exporting.common, "blob", [each.object for each in entries]
+            contents = await self.objects(exporting.common).verified(
+                "blob", [each.object for each in entries]
             )
             written(partial, exporting.commit, entries, contents)
         partial.rename(into)
@@ -316,14 +320,14 @@ class Trees(Part, machine=True, shared=True):
         del by
         after = {
             str(each.path): each
-            for each in await self.held(comparing.common, comparing.after)
+            for each in await self.objects(comparing.common).held(comparing.after)
         }
         before = (
             {}
             if comparing.before is None
             else {
                 str(each.path): each
-                for each in await self.held(comparing.common, comparing.before)
+                for each in await self.objects(comparing.common).held(comparing.before)
             }
         )
 
@@ -392,13 +396,25 @@ class Trees(Part, machine=True, shared=True):
             raise TreeError(message)
         return Diffed(text=ran.text())
 
-    async def held(self, common: Path, commit: str) -> list[Entry]:
+
+class Objects(Model):
+    """A repository's object store, read through `git` pinned to its common git directory, each object hashed as git hashes one and compared with its id: what the machine's parts read a commit through, since a room writes the store.
+
+    `Trees` writes out an approved commit's files through it, and the trial
+    merges reviewed commits from what it reads (`lup/landing/README.md`).
+    """
+
+    git: Program
+    common: Path
+    """The repository's common git directory."""
+
+    async def held(self, commit: str) -> list[Entry]:
         """List every file of `commit`'s tree, its directories walked, read from each object's own bytes, a level at a time.
 
         Raise `TreeError` where an object can't be read or isn't what its id
         says.
         """
-        [content] = await self.verified(common, "commit", [commit])
+        [content] = await self.verified("commit", [commit])
         width = len(commit) // 2
         level = [
             Entry(
@@ -410,9 +426,7 @@ class Trees(Part, machine=True, shared=True):
         ]
         files: list[Entry] = []
         while level:
-            contents = await self.verified(
-                common, "tree", [each.object for each in level]
-            )
+            contents = await self.verified("tree", [each.object for each in level])
             found = [
                 entry
                 for each, read in zip(level, contents, strict=True)
@@ -422,15 +436,13 @@ class Trees(Part, machine=True, shared=True):
             level = [each for each in found if each.kind == "tree"]
         return files
 
-    async def verified(
-        self, common: Path, kind: Kind, objects: list[str]
-    ) -> list[bytes]:
+    async def verified(self, kind: Kind, objects: list[str]) -> list[bytes]:
         """Return the content of each of `objects`, each an object of `kind`, in order, each hashed as git hashes one.
 
         Raise `TreeError` where one isn't what its id says, or git can't read
         it.
         """
-        contents = await self.stored(common, objects)
+        contents = await self.stored(objects)
         unlike = [
             each
             for each, content in zip(objects, contents, strict=True)
@@ -444,7 +456,7 @@ class Trees(Part, machine=True, shared=True):
             raise TreeError(message)
         return contents
 
-    async def stored(self, common: Path, objects: list[str]) -> list[bytes]:
+    async def stored(self, objects: list[str]) -> list[bytes]:
         """Return what the store holds under each of `objects`, in order, read by one `git cat-file`, as it stands: only what checks it reads this.
 
         git answers each with its size on a line, the content, then a newline.
@@ -458,10 +470,10 @@ class Trees(Part, machine=True, shared=True):
             "cat-file",
             "--batch=%(objectsize)",
             given=asked,
-            env=pinned(common),
+            env=pinned(self.common),
         )
         if ran.status != 0:
-            message = f"git couldn't read objects in {common}: {ran.said()}"
+            message = f"git couldn't read objects in {self.common}: {ran.said()}"
             raise TreeError(message)
         answered = io.BytesIO(ran.output)
 
