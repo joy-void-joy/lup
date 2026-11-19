@@ -274,18 +274,19 @@ scenario("A view answering again keeps what an open fold read under it, the fold
     }
 });
 
-law(shell, "The outline holds every fold the document lays out, nested and open as the document has them", (step) => {
+law(shell, "The outline holds every fold of an outlined kind the document lays out, under the nearest outlined fold holding it, open as the document has it", (step) => {
     const after = step.after;
-    const keys = after.folds.map((fold) => fold.key);
-    if (JSON.stringify(after.outlined.map((each) => each.key)) !== JSON.stringify(keys)) {
+    const outlinedKinds = new Set(looks.folds.filter((each) => each.kind.outlined).map((each) => each.kind.name));
+    const shown = after.folds.filter((fold) => outlinedKinds.has(fold.kind));
+    if (JSON.stringify(after.outlined.map((each) => each.key)) !== JSON.stringify(shown.map((fold) => fold.key))) {
         return false;
     }
-    const spans = new Map(after.folds.map((fold) => [fold.key, fold]));
+    const spans = new Map(shown.map((fold) => [fold.key, fold]));
     return after.outlined.every((each) => {
         const fold = spans.get(each.key);
-        const holder = each.under === null ? null : spans.get(each.under);
-        const nested = holder === null || (holder !== undefined && fold !== undefined && holder.first < fold.first && fold.last <= holder.last);
-        return nested && each.open === !after.closed.includes(each.key);
+        const holders = shown.filter((other) => fold !== undefined && other.first < fold.first && fold.last <= other.last);
+        const nearest = holders.at(-1)?.key ?? null;
+        return each.under === nearest && each.open === !after.closed.includes(each.key);
     });
 });
 
@@ -307,7 +308,7 @@ function keyed(shell: Shell, key: string): void {
 }
 
 scenario("Moving in the outline takes the document to that fold, and the document's cursor marks its fold in the outline", async (by) => {
-    const content = by.any(blocks(2, kinds).filter((made) => made.some((block) => block.block === "fold")));
+    const content = by.any(blocks(2, kinds).filter((made) => made.some((block) => block.block === "fold" && block.kind === "note")));
     const { shell: opened, parent } = shellOn(content);
     try {
         const outline = opened.outline?.shell ?? null;
@@ -316,7 +317,8 @@ scenario("Moving in the outline takes the document to that fold, and the documen
             return;
         }
         const folds = every(outline.document.root).filter((node) => node.block?.block === "fold");
-        const chosen = folds[by.any(fc.integer({ min: 0, max: folds.length - 1 }))];
+        expect(folds.length).toBeGreaterThan(0);
+        const chosen = folds[by.any(fc.integer({ min: 0, max: Math.max(folds.length - 1, 0) }))];
         if (chosen === undefined || chosen.block === null) {
             return;
         }
@@ -325,7 +327,11 @@ scenario("Moving in the outline takes the document to that fold, and the documen
         expect(opened.foldAt()?.key).toBe(chosen.block.id);
         await press(opened, ["G"]);
         const marked = nodeAt(outline.document.root, outline.view.state.selection.main.head);
-        expect(marked.block?.id).toBe(opened.foldAt()?.key ?? marked.block?.id);
+        let around = opened.foldAt();
+        while (around !== null && !(around.block?.block === "fold" && around.block.kind === "note")) {
+            around = around.parent;
+        }
+        expect(marked.block?.id).toBe(around?.key ?? marked.block?.id);
     } finally {
         opened.destroy();
         parent.remove();

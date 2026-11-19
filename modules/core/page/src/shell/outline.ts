@@ -1,6 +1,7 @@
-// The outline: the document with its text taken out, beside it, as the second lup's overview was. Each fold the
-// document lays out is a fold here under its summary, nested as the document nests them, a fold read as it opens
-// holding what it read; lines, Markdown and comments are left out. It's drawn by a shell of its own as the document is,
+// The outline: the document with its text taken out, beside it, as the second lup's overview was. Each fold of a kind
+// that says it's outlined (`FoldKind.outlined`: a party, a concern, a file, a module's items) is a fold here under its
+// summary, nested as the document nests them, a fold read as it opens holding what it read; other folds, lines,
+// Markdown and comments are left out, what's outlined under them shown under the nearest fold that is. It's drawn by a shell of its own as the document is,
 // its look, margin and folds alike, and each moves with the other: the cursor in the document marks the fold it's in
 // here, and moving here takes the document there, opening what folds over it.
 
@@ -25,14 +26,14 @@ function summaryOf(node: Node): Span[] {
  * document's key for it, holding the folds under it, open as it is in the document (`open`); a section's folds as
  * its parent's, what a fold read as it opens laid out where it's read.
  */
-function outlined(node: Node, open: (node: Node) => boolean): Block[] {
+function outlined(node: Node, open: (node: Node) => boolean, shown: (kind: string) => boolean): Block[] {
     return node.children.flatMap((child): Block[] => {
         if (child.kind === "section") {
-            return outlined(child, open);
+            return outlined(child, open, shown);
         }
         const kind = foldKind(child);
-        if (kind === null) {
-            return [];
+        if (kind === null || !shown(kind)) {
+            return kind === null ? [] : outlined(child, open, shown);
         }
         return [
             {
@@ -45,7 +46,7 @@ function outlined(node: Node, open: (node: Node) => boolean): Block[] {
                 kind,
                 summary: summaryOf(child),
                 open: open(child),
-                content: outlined(child, open),
+                content: outlined(child, open, shown),
             },
         ];
     });
@@ -69,10 +70,14 @@ export class Outline {
         this.#source.set(this.#laidOut());
     }
 
-    /** Mark, here, the fold the document's cursor is in, as the document's cursor moves. */
+    /** Mark, here, the outlined fold the document's cursor is in, as the document's cursor moves. */
     followed(): void {
-        const fold = this.#owner.foldAt();
-        const here = fold === null ? null : this.#node(fold.key);
+        let fold = this.#owner.foldAt();
+        let here = fold === null ? null : this.#node(fold.key);
+        while (fold !== null && here === null) {
+            fold = fold.parent;
+            here = fold === null ? null : this.#node(fold.key);
+        }
         if (here !== null && !this.shell.view.hasFocus) {
             this.shell.go(offsetOf(here));
         }
@@ -101,7 +106,16 @@ export class Outline {
     }
 
     #laidOut(): Blocks {
-        return { blocks: outlined(this.#owner.document.root, (node) => this.#owner.isOpen(node)), summary: [], offers: [] };
+        const kinds = this.#owner.kinds.folds;
+        return {
+            blocks: outlined(
+                this.#owner.document.root,
+                (node) => this.#owner.isOpen(node),
+                (kind) => kinds.get(kind)?.outlined === true,
+            ),
+            summary: [],
+            offers: [],
+        };
     }
 
     /** Return the outline's fold for the document's node keyed `key`; none where the outline has none. */

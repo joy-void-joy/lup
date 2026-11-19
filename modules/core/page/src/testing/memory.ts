@@ -143,6 +143,6 @@ export const looks: Looks = {
     ...core,
     folds: [
         ...core.folds,
-        { module: "notes", kind: { name: "note", letter: "n", called: "note", level: 1, starts_open: false, colour: "cyan" } },
+        { module: "notes", kind: { name: "note", letter: "n", called: "note", level: 1, starts_open: false, colour: "cyan", outlined: true } },
     ],
 };
