@@ -48,3 +48,27 @@ body {
     color: var(--lup-err);
     padding: 0 1ch;
 }
+
+/* The page's panes: the outline beside the document, the window under the document inside its editor. */
+.lup-page {
+    display: flex;
+    height: 100%;
+}
+
+.lup-outline {
+    width: 44ch;
+    flex: none;
+    border-right: 1px solid var(--lup-rule);
+}
+
+.lup-main {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Pane mode: the pane h, j, k and l chose framed in the focus colour; the window, inside the document's editor, framed
+   alone where it's the one chosen. */
+.lup-paning .cm-editor.lup-pane-chosen {
+    outline: 2px solid var(--lup-focus);
+    outline-offset: -2px;
+}

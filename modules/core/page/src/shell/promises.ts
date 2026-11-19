@@ -9,7 +9,7 @@ import fc from "fast-check";
 import { expect, test } from "vitest";
 
 import type { Blocks, Fold, Viewing } from "../generated/read";
-import { every, foldKind, offsetOf, section } from "../document/tree";
+import { every, foldKind, nodeAt, offsetOf, section } from "../document/tree";
 import { blocks, fold } from "../testing/blocks";
 import { press } from "../testing/keys";
 import { Memory, looks } from "../testing/memory";
@@ -77,6 +77,8 @@ interface Seen extends ShellState {
     readonly outside: string;
     /** What the draft holds of each comment, by its node's key. */
     readonly drafted: Readonly<Record<string, string>>;
+    /** Each fold the outline shows, as the document's key for it, with the one holding it there and whether it's open. */
+    readonly outlined: readonly { readonly key: string; readonly under: string | null; readonly open: boolean }[];
 }
 
 /** Return what `shell` shows, its margin, its folds and its comments among it, and what `memory`'s draft holds. */
@@ -101,7 +103,18 @@ function seen(shell: Shell, memory: Memory): Seen {
         .sort((one, other) => other.from - one.from);
     const outside = cut.reduce((kept, range) => kept.slice(0, range.from) + kept.slice(range.to), text);
     const drafted = Object.fromEntries(memory.draft.comments.map((comment) => [`comment:${comment.id}`, comment.words]));
-    return { ...shell.state(), folds, margin, tree: shell.document.text(), outside, drafted };
+    const outline = shell.outline?.shell ?? null;
+    const outlined =
+        outline === null
+            ? []
+            : every(outline.document.root).flatMap((node) => {
+                  if (node.block?.block !== "fold") {
+                      return [];
+                  }
+                  const holder = node.parent?.block?.block === "fold" ? node.parent.block.id : null;
+                  return [{ key: node.block.id, under: holder, open: outline.isOpen(node) }];
+              });
+    return { ...shell.state(), folds, margin, tree: shell.document.text(), outside, drafted, outlined };
 }
 
 const shell: Machine<Running, Seen, Event> = {
@@ -110,8 +123,10 @@ const shell: Machine<Running, Seen, Event> = {
         const memory = new Memory();
         memory.set(root, answer(by.any(blocks(2, kinds))));
         const parent = document.createElement("div");
+        const aside = document.createElement("div");
+        parent.append(aside);
         document.body.append(parent);
-        return { shell: new Shell(parent, root, looks, memory), memory, parent };
+        return { shell: new Shell(parent, root, looks, memory, { aside }), memory, parent };
     },
     events: fc.oneof(
         { weight: 4, arbitrary: keys.map((typed): Event => ({ keys: typed })) },
@@ -259,14 +274,83 @@ scenario("A view answering again keeps what an open fold read under it, the fold
     }
 });
 
+law(shell, "The outline holds every fold the document lays out, nested and open as the document has them", (step) => {
+    const after = step.after;
+    const keys = after.folds.map((fold) => fold.key);
+    if (JSON.stringify(after.outlined.map((each) => each.key)) !== JSON.stringify(keys)) {
+        return false;
+    }
+    const spans = new Map(after.folds.map((fold) => [fold.key, fold]));
+    return after.outlined.every((each) => {
+        const fold = spans.get(each.key);
+        const holder = each.under === null ? null : spans.get(each.under);
+        const nested = holder === null || (holder !== undefined && fold !== undefined && holder.first < fold.first && fold.last <= holder.last);
+        return nested && each.open === !after.closed.includes(each.key);
+    });
+});
+
 /** Return a shell on `content`, its document's root answered from memory with the review at its top. */
 function shellOn(content: Blocks["blocks"]): { shell: Shell; memory: Memory; parent: HTMLElement } {
     const memory = new Memory();
     memory.set(root, answer(content));
     const parent = document.createElement("div");
+    const aside = document.createElement("div");
+    const main = document.createElement("div");
+    parent.append(aside, main);
     document.body.append(parent);
-    return { shell: new Shell(parent, root, looks, memory), memory, parent };
+    return { shell: new Shell(main, root, looks, memory, { aside, page: parent }), memory, parent };
 }
+
+/** Press `key` as the browser's keyboard does, a key event on `shell`'s editor, which the page's panes hear first. */
+function keyed(shell: Shell, key: string): void {
+    shell.view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
+scenario("Moving in the outline takes the document to that fold, and the document's cursor marks its fold in the outline", async (by) => {
+    const content = by.any(blocks(2, kinds).filter((made) => made.some((block) => block.block === "fold")));
+    const { shell: opened, parent } = shellOn(content);
+    try {
+        const outline = opened.outline?.shell ?? null;
+        expect(outline).not.toBeNull();
+        if (outline === null) {
+            return;
+        }
+        const folds = every(outline.document.root).filter((node) => node.block?.block === "fold");
+        const chosen = folds[by.any(fc.integer({ min: 0, max: folds.length - 1 }))];
+        if (chosen === undefined || chosen.block === null) {
+            return;
+        }
+        outline.go(offsetOf(chosen));
+        opened.outline?.went();
+        expect(opened.foldAt()?.key).toBe(chosen.block.id);
+        await press(opened, ["G"]);
+        const marked = nodeAt(outline.document.root, outline.view.state.selection.main.head);
+        expect(marked.block?.id).toBe(opened.foldAt()?.key ?? marked.block?.id);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("Esc twice in Normal mode enters pane mode, an Esc leaving insert mode not counted, and h then Enter goes into the outline", async (by) => {
+    const content = by.any(blocks(1, kinds).filter((made) => made.some((block) => block.block === "line")));
+    const { shell: opened, parent } = shellOn(content);
+    try {
+        await press(opened, ["G", "o", "x"]);
+        keyed(opened, "Escape");
+        keyed(opened, "Escape");
+        expect(opened.panes?.chosen()).toBeNull();
+        keyed(opened, "Escape");
+        expect(opened.panes?.chosen()).toBe("document");
+        keyed(opened, "h");
+        expect(opened.panes?.chosen()).toBe("outline");
+        keyed(opened, "Enter");
+        expect(opened.panes?.chosen()).toBeNull();
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
 
 /** Return the shell drawing `opened`'s window, which a scenario expects open. */
 function windowOf(opened: Shell): Shell {

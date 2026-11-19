@@ -73,6 +73,12 @@ Comments are written into the document as the second lup's page had them (`page/
 
 It's drawn as the second lup's page was (`page/src/shell/palette.ts`, `page/src/shell/margin.ts`): the first lup's dark palette, every colour reading at 7:1 or more on black, keyed by the core's `Colour` so a colour a module may name always has a value; one monospaced font, a row a line; and a margin beside the text, a column for each depth folds nest to, each fold's letter in its column on its summary's line, outlined where it's closed, and a bar beside each line under it, bright while the cursor's in it. A party's summary is a band across in its kind's colour, and a closed fold says how many lines it hides.
 
+### The outline and the panes
+
+The document is shown beside its outline (`page/src/shell/outline.ts`), as the second lup's overview was: each fold the document lays out, under its summary, nested and open as the document has them, its text taken out, drawn by a shell of its own as the document is. Each moves with the other: the document's cursor marks the fold it's in there, and moving there takes the document to that fold, opening what folds over it; Enter there goes into the document.
+
+Pane mode moves between the outline, the document and the window under it, as vim's `Ctrl+W` moves between windows (`page/src/shell/panes.ts`): entered by Space w, or by Esc twice in Normal mode, an Esc pressed out of insert or visual mode not counted, so pressing Esc to be sure never lands there. There h, j, k and l choose the pane to their side, and Enter or Esc goes into it.
+
 ### The window
 
 Every modal the page has is its window (`page/src/shell/window.ts`): a split under the document, as vim's `:split` is, the document staying in view above with its cursor where it was. The review of the draft (Ctrl+Enter) and the picker of whom a comment reaches (Space s) are shown there, and so will what comes after them, the palette of commands (Ctrl+K) among them. What it shows is a document of its own, drawn by a shell of its own as the page's is, its look, margin and folds alike, whose commands act for the page's shell, moved through and searched as the document is (`/`, `n`); in a picker, Enter chooses the line the cursor is on. Esc closes it. The page's status line is drawn there too; no other module draws a panel, a dialog or an overlay, which a promise holds the page to.

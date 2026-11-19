@@ -26,7 +26,15 @@ const server: Server = new Server(
             said.textContent = "The home repository's declaration names no document.";
             return;
         }
-        const shell = new Shell(parent, opened.root, opened.looks, server, { extensions: [look, margin(), placeholder] });
+        const page = document.createElement("div");
+        page.className = "lup-page";
+        const aside = document.createElement("div");
+        aside.className = "lup-outline";
+        const main = document.createElement("div");
+        main.className = "lup-main";
+        page.append(aside, main);
+        parent.append(page);
+        const shell = new Shell(main, opened.root, opened.looks, server, { extensions: [look, margin(), placeholder], aside, page });
         shell.view.focus();
     },
     (refused) => {
