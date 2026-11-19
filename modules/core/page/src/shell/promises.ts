@@ -461,6 +461,28 @@ test("Every modal the page draws is the window: no module but its own draws a pa
     expect(drawn).toEqual(["shell/window.ts"]);
 });
 
+scenario("Ctrl+K lists every command with its keys in the window, and Enter on one runs it, as zR there opens every fold", async (by) => {
+    const content = by.any(blocks(2, kinds).filter((made) => made.some((block) => block.block === "fold")));
+    const { shell: opened, parent } = shellOn(content);
+    try {
+        await press(opened, ["z", "M", "<C-k>"]);
+        expect(opened.window?.role()).toBe("pick");
+        const inner = windowOf(opened);
+        const line = every(inner.document.root).find((node) => node.block?.block === "line" && (node.head[0] ?? "").startsWith("zR "));
+        expect(line).not.toBeUndefined();
+        if (line === undefined) {
+            return;
+        }
+        inner.go(offsetOf(line));
+        await press(inner, ["<CR>"]);
+        expect(opened.window?.role()).toBeNull();
+        expect(opened.state().closed).toEqual([]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
 /** A source answering `root` with `blocks` alone. */
 function single(blocks: Blocks): Memory {
     const memory = new Memory();

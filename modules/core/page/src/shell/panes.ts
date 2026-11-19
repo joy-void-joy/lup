@@ -54,7 +54,7 @@ export class Panes {
         this.#chosen = this.#focused() ?? "document";
         this.#escaped = false;
         this.#drawn();
-        this.#owner.say("panes: h, j, k and l choose one, Enter or Esc goes into it");
+        this.#owner.say("PANES  ·  h, j, k and l choose the outline, the document or the window  ·  Enter or Esc goes into it");
     }
 
     /** Leave pane mode into the pane chosen. */
