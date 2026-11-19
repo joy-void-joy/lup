@@ -7,6 +7,7 @@
 
 import type { Block, Blocks, Span } from "../generated/read";
 import { foldKind, nodeAt, offsetOf, type Node } from "../document/tree";
+import { redrawn } from "./annotations";
 import { Given } from "./given";
 import type { Shell, Source } from "./shell";
 
@@ -68,6 +69,30 @@ export class Outline {
     /** Lay the outline out again as the document stands: after each view answers, and each fold opens or closes. */
     laid(): void {
         this.#source.set(this.#laidOut());
+    }
+
+    /** Mark, here, the folds the document shows on screen, a bar beside them, as it scrolls and changes. */
+    viewed(): void {
+        const { from, to } = this.#owner.view.viewport;
+        const shown = new Set<string>();
+        const visit = (node: Node): void => {
+            if (node.block?.block === "fold") {
+                const there = this.#owner.document.node(node.block.id);
+                const start = there === null ? -1 : offsetOf(there);
+                if (there !== null && start <= to && start + there.size >= from) {
+                    shown.add(node.block.id);
+                }
+            }
+            node.children.forEach(visit);
+        };
+        visit(this.shell.document.root);
+        if (shown.size === this.shell.marked.size && [...shown].every((key) => this.shell.marked.has(key))) {
+            return;
+        }
+        this.shell.marked = shown;
+        queueMicrotask(() => {
+            this.shell.view.dispatch({ effects: redrawn.of(null) });
+        });
     }
 
     /** Mark, here, the outlined fold the document's cursor is in, as the document's cursor moves. */
