@@ -66,9 +66,29 @@ body {
     min-width: 0;
 }
 
-/* Pane mode: the pane h, j, k and l chose framed in the focus colour; the window, inside the document's editor, framed
-   alone where it's the one chosen. */
+/* Pane mode, plain to see: no cursor anywhere, since no key reaches a pane; the pane h, j, k and l chose framed thick
+   in the focus colour and tinted with it; every other pane's text set far back. Each editor's text is dimmed apart
+   from its panels, so the window, drawn in the document's editor, stays bright where it's the one chosen. */
+.lup-paning .cm-cursorLayer,
+.lup-paning .cm-fat-cursor {
+    visibility: hidden;
+}
+
+.lup-paning .cm-editor:not(.lup-pane-chosen) > .cm-scroller {
+    opacity: 0.3;
+}
+
 .lup-paning .cm-editor.lup-pane-chosen {
-    outline: 2px solid var(--lup-focus);
-    outline-offset: -2px;
+    outline: 3px solid var(--lup-focus);
+    outline-offset: -3px;
+}
+
+.lup-paning .cm-editor.lup-pane-chosen > .cm-scroller {
+    background: color-mix(in srgb, var(--lup-focus) 10%, var(--lup-bg));
+}
+
+.lup-paning .lup-status {
+    color: var(--lup-bg);
+    background: var(--lup-focus);
+    font-weight: 700;
 }
