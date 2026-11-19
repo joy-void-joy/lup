@@ -18,3 +18,4 @@ Each module's doc is in its directory:
 - `modules/core/src/lup/setup/README.md`: setting a repository up for lup, `lup init` and `lup new`, and what they write.
 - `modules/core/src/lup/store/README.md`: the store, the records modules keep their state as, and the database keeping them.
 - `modules/core/src/lup/inbox/README.md`: the inbox, parties, concerns and piles, what's said between them, and where each stands.
+- `modules/core/src/lup/gate/README.md`: the gate, the steps every module declares, run on a worktree's files, and a pass recorded by the files it passed on.
