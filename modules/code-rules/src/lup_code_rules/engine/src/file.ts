@@ -982,6 +982,43 @@ export class File {
         return [...slices, ...islices];
     }
 
+    // The slices keeping a head or a tail at a size, rather than at a place the data
+    // says: a cut (`cuts`), and a slice of a cut's shape at a bound the function's
+    // caller gives, a parameter or read off one (`text[:limit]`, `text[: query.limit]`,
+    // `text[-limit:]`).
+    sizedSlices(): Sliced[] {
+        const cut = new Set<ParseNode>(this.cuts().map((each) => each.node));
+        return this.slices().filter((sliced) => {
+            if (cut.has(sliced.node)) {
+                return true;
+            }
+            if (sliced.step) {
+                return false;
+            }
+            const fromStart = sliced.start === undefined || this.integerLiteral(sliced.start) === 0;
+            if (fromStart && sliced.end && this.isGivenBound(sliced.end)) {
+                return true;
+            }
+            const start = sliced.start;
+            const negated = start?.nodeType === ParseNodeType.UnaryOperation && start.d.operator === OperatorType.Subtract;
+            return sliced.end === undefined && negated && this.isGivenBound(start.d.expr);
+        });
+    }
+
+    // Whether a bound is given by the caller of the function reading it: a parameter,
+    // or read off one (`limit`, `query.limit`).
+    private isGivenBound(node: ExpressionNode): boolean {
+        let root = node;
+        while (root.nodeType === ParseNodeType.MemberAccess) {
+            root = root.d.leftExpr;
+        }
+        if (root.nodeType !== ParseNodeType.Name) {
+            return false;
+        }
+        const declarations = this.evaluator.getDeclInfoForNameNode(root)?.decls ?? [];
+        return declarations.length > 0 && declarations.every((declaration) => declaration.type === DeclarationType.Param);
+    }
+
     // The bound an expression fixes where the code is written (`Bound`): an integer
     // literal; a name bound to one, or to another fixed bound, wherever it's bound; or a
     // field of what the method is bound to. None for a bound from anywhere else: a

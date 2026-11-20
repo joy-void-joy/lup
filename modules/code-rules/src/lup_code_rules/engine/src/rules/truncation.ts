@@ -6,14 +6,13 @@ import { python } from '../examples';
 export const truncation = {
     'silent-truncation': {
         category: 'design',
-        mistake: 'A sequence cut at a fixed bound to make it fit drops what lies past it, and nothing says so.',
+        mistake: 'A sequence or a text cut at a fixed bound to make it fit drops what lies past it, and nothing says so.',
         steer: 'Keep the whole value; where a format forces a limit, save the full copy, point at it, and say so in an `ignore`.',
         check(file) {
             for (const cut of file.cuts()) {
-                // A bound a field sets is a setting, which a caller can change. A cut of
-                // text is `string-slice`'s, and a cut serving a tool `fixed-tool-limit`'s.
-                const text = cut.receiver !== undefined && file.isText(cut.receiver);
-                if (cut.bound.source === 'field' || text || file.servedTool(cut.node) !== undefined) {
+                // A bound a field sets is a setting, which a caller can change. A cut
+                // serving a tool is `fixed-tool-limit`'s.
+                if (cut.bound.source === 'field' || file.servedTool(cut.node) !== undefined) {
                     continue;
                 }
                 const what = cut.receiver ? `a \`${file.printType(cut.receiver)}\`` : 'an iterable';
@@ -74,6 +73,18 @@ export const truncation = {
                                 return f"{len(self.rows)} rows, in {saved}"
                     `,
                 },
+                {
+                    code: python`
+                        def notification(sender: str, body: str) -> str:
+                            """Return the notification of a message: who sent it, and what it says."""
+                            return f"{sender}: {body[:200]}"
+                    `,
+                    rewritten: python`
+                        def notification(sender: str, body: str) -> str:
+                            """Return the notification of a message: who sent it, and what it says."""
+                            return f"{sender}: {body}"
+                    `,
+                },
             ],
             passes: [
                 python`
@@ -105,10 +116,8 @@ export const truncation = {
                 constant: 'a constant',
                 field: 'a field of what the tool is bound to',
             };
-            // A cut of text is `string-slice`'s.
-            const cuts = file.cuts().filter((cut) => cut.receiver === undefined || !file.isText(cut.receiver));
             const capped = [
-                ...cuts.map((cut) => ({ node: cut.node, bound: cut.bound, what: `\`${cut.text}\` stops at` })),
+                ...file.cuts().map((cut) => ({ node: cut.node, bound: cut.bound, what: `\`${cut.text}\` stops at` })),
                 ...file.limitsGiven().map((given) => ({ node: given.node, bound: given.bound, what: `\`${given.name}\` is given` })),
             ];
             for (const { node, bound, what } of capped) {
@@ -224,6 +233,59 @@ export const truncation = {
                                 full = len(found) == query.limit
                                 more = ["More may match: a larger \`limit\` lists them."] if full else []
                                 return "\\n".join([*found, *more])
+                    `,
+                },
+                {
+                    code: python`
+                        import lup
+                        from lup.types import Model
+
+
+                        class Reading(Model):
+                            """Notes to read, by their topic."""
+
+                            topic: str
+                            """What the notes are about."""
+
+
+                        class Notes(lup.Part):
+                            """Notes an agent reads."""
+
+                            text: str = ""
+
+                            @lup.tool
+                            async def read_notes(self, reading: Reading) -> str:
+                                """Read the notes on a topic."""
+                                found = [line for line in self.text.splitlines() if reading.topic in line]
+                                return "\\n".join(found)[:2000]
+                    `,
+                    rewritten: python`
+                        import lup
+                        from lup.types import Model
+
+
+                        class Reading(Model):
+                            """Notes to read, by their topic."""
+
+                            topic: str
+                            """What the notes are about."""
+                            limit: int = 2000
+                            """How many characters to read at most."""
+
+
+                        class Notes(lup.Part):
+                            """Notes an agent reads."""
+
+                            text: str = ""
+
+                            @lup.tool
+                            async def read_notes(self, reading: Reading) -> str:
+                                """Read the notes on a topic."""
+                                found = "\\n".join(line for line in self.text.splitlines() if reading.topic in line)
+                                shown = found[: reading.limit]
+                                more = len(found) - len(shown)
+                                said = f"\\n{more} more characters: a larger \`limit\` reads them." if more else ""
+                                return shown + said
                     `,
                 },
             ],
