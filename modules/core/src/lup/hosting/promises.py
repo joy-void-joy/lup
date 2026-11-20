@@ -47,13 +47,21 @@ class Planned(Model):
     source: str | None = None
     tools: list[str] = []
     services: list[str] = []
+    here: list[str] = []
+    """Commands of the operator's that `lup` answers where it's typed."""
 
     def plan(self) -> JsonValue:
         """Return it as a plan says it, as JSON: promises read lup's plan only through what crosses."""
         doorways: list[JsonValue] = [
-            {"door": door, "name": name, "parties": ["Agent"]}
-            for door, names in [("tool", self.tools), ("service", self.services)]
-            for name in names
+            *(
+                {"door": door, "name": name, "parties": ["Agent"]}
+                for door, names in [("tool", self.tools), ("service", self.services)]
+                for name in names
+            ),
+            *(
+                {"door": "command", "name": name, "parties": ["Operator"], "here": True}
+                for name in self.here
+            ),
         ]
         return {
             "module": self.module,
@@ -1444,3 +1452,45 @@ class WithoutPromises(Part):
             ]
             assert any(each.startswith("--log-opt=max-size=") for each in command)
         assert all("--log-driver=none" in command for command in planned)
+
+
+class HereCommand(Model):
+    """A command `lup` answers where it's typed, as a promise names one."""
+
+    name: Literal["init", "new", "check"]
+
+
+class HerePromises(Part):
+    """What the operator can count on of a command `lup` answers where it's typed: the machine never carries it."""
+
+    @lup.promise
+    async def a_command_answered_where_typed_is_never_carried(
+        self, by: Testing
+    ) -> None:
+        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever."""
+        command = by.any(HereCommand).name
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        plan = plan_of(
+            Planned(module="notes", part="Notes", tools=["note"], here=[command])
+        )
+        directory = await placed(started, "harmon", plan, ["notes.Notes"])
+        here: JsonValue = {
+            "format": 1,
+            "kind": "command",
+            "module": "notes",
+            "command": command,
+            "given": {},
+        }
+        tool: JsonValue = {"format": 1, "kind": "tool", "tool": "note", "given": {}}
+        refused = await started.serve(
+            "routed", {"directory": directory, "call": here}, Machine()
+        )
+        carried = await started.serve(
+            "routed", {"directory": directory, "call": tool}, Machine()
+        )
+        assert isinstance(refused, Refused)
+        assert isinstance(carried, Accepted)

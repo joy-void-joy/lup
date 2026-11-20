@@ -37,6 +37,7 @@ from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
 from lup.testing.harness import (
+    Acting,
     Broken,
     BrokenLawError,
     Call,
@@ -356,7 +357,7 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
 class StandIn(Model, Runs, arbitrary_types_allowed=True):
     """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with, or by the code the promise wrote for it."""
 
-    scripts: dict[str, Scripted | Responding] = {}
+    scripts: dict[str, Scripted | Responding | Acting] = {}
     heard: Heard
 
     async def ran(
@@ -393,6 +394,8 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
                 )
             case Responding() as responding:
                 answer = responding.answered(arguments, given)
+            case Acting() as acting:
+                answer = acting.ran(arguments, given, env, cwd)
         if answer is None:
             message = (
                 f"`{program.name} {' '.join(arguments)}` has no answer in the "
@@ -520,7 +523,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted | Responding] | None = None,
+        programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
     ) -> Started:

@@ -1,0 +1,17 @@
+# The runtimes
+
+The runtimes lup holds sessions on, Claude Code and Codex, behind one interface, so nothing outside `lup.runtimes` names one (`AGENTS.md`, *lup's code*).
+
+## Records
+
+Each runtime writes a record of every conversation it holds, a line of JSON at a time, and only ever adds to it: Claude Code a `.jsonl` for a session and one for each subagent, Codex a rollout for each thread. `Records` (`records.py`) is the interface every runtime fills to read them, so the dashboard's conversation buffer and transcripts read every conversation in one shape:
+- **`found(home, under=…)`** lists the records in one of the runtime's homes, its own directory or a copy kept in its layout: each a `Record`, its path, the runtime's ids for the session and, for a subagent, their conversation, who spawned them and with which call, and the directory it ran in. A file that isn't one of the runtime's records is left out.
+- **`read(record, since)`** reads the steps a record added since the read that stopped at `since`, and says where this read stopped (`Reading`): a byte offset, a digest of the first line, and what the runtime's reader carries from one read to the next, as JSON its caller keeps. So a record is never read whole again as it grows. Only whole lines are read, and a line still being written waits for the next read. A line past `longest` is skipped without being held, since a record is the room's to write. A record that shrank, or whose first line changed, is read again from its start, and `again` says so.
+
+**Steps**, in the order the record has them, each with its place (the byte its line starts at, and its index among that line's steps, which never moves as the record grows), when it was written, and the runtime's own id for it where there is one (Claude Code's `uuid`, the same on a fork's copy of a parent's line as on the parent's):
+- `Said`: words, and who said them: the operator in the runtime's terminal, the agent, lup writing into the session (a turn it held, a hook's context), another conversation (a subagent's brief, a peer's message), or the runtime itself. Words sent while the agent works are `queued`.
+- `Called` and `Returned`: a call by the runtime's id for it, the one its hooks and lup's events carry, the tool named as the hooks name it (`mcp__lup__ask` on both runtimes), and what it returned, whole. A call made inside another, as Codex's code mode calls tools from an `exec` cell, says which (`within`). `Refused` is a call a hook refused before it ran.
+- `Ended`, a turn's end; `Compacted`; `Titled`, a name, the operator's or lup's winning over the runtime's; `Forked` and `Continued`, a conversation going on from another's history or in another record.
+- `Counted`, the context the latest request took; `Planned`, the agent's task list as it stands.
+
+What each runtime's lines are read as, and what that rests on, is in its reader's docstring (`claude_records.py`, `codex_records.py`), against `docs/field-notes.md`. Reading a record is never done on the machine itself: a room writes its records, and a link planted among them would reach the operator's files. Where each stretch of a session ran, and when it was resumed, isn't the record's to say: lup knows, since it starts every session.
