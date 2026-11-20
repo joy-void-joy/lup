@@ -121,8 +121,16 @@ class RepositoryLayout(Model):
     @property
     def local(self) -> Path:
         """The repository's own local layer, named after its declaration (`lup_project.local.py`), in its main worktree."""
-        declaration = self.declaration
-        return self.main / declaration.with_suffix(f".local{declaration.suffix}").name
+        return local_layer(self.main, self.declaration)
+
+
+def local_layer(main: Path, declaration: Path) -> Path:
+    """Return a repository's own local layer, named after its declaration, in its main worktree `main`, which every worktree shares.
+
+    >>> local_layer(Path("/src/app.git"), Path("lup_project.py"))
+    PosixPath('/src/app.git/lup_project.local.py')
+    """
+    return main / declaration.with_suffix(f".local{declaration.suffix}").name
 
 
 class MachineLayout(Model):

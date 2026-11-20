@@ -27,6 +27,7 @@ from lup.declaration.project import Project
 from lup.environment.doors import Doors
 from lup.errors import LupError
 from lup.gate.module import Gate
+from lup.landing.module import Landing
 from lup.running.plan import typed
 from lup.shell.looks import Looks
 from lup.store.records import Edge, Kinds, Node, Recorded
@@ -52,7 +53,7 @@ class Resolved(Model):
 
 def default() -> list[Module]:
     """List lup's default modules, in their order: what `Modules.default()` starts from."""
-    return [Core(), Gate()]
+    return [Core(), Gate(), Landing()]
 
 
 def shipped() -> list[Module]:

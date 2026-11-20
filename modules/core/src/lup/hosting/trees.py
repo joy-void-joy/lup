@@ -414,16 +414,24 @@ class Objects(Model):
         Raise `TreeError` where an object can't be read or isn't what its id
         says.
         """
+        return await self.files(await self.tree(commit))
+
+    async def tree(self, commit: str) -> str:
+        """Return the tree `commit` names, read from the commit's own bytes.
+
+        Raise `TreeError` where it can't be read or isn't what its id says.
+        """
         [content] = await self.verified("commit", [commit])
-        width = len(commit) // 2
-        level = [
-            Entry(
-                mode="40000",
-                kind="tree",
-                object=tree_of(commit, content),
-                path=PurePosixPath(),
-            )
-        ]
+        return tree_of(commit, content)
+
+    async def files(self, tree: str) -> list[Entry]:
+        """List every file of `tree`, its directories walked, read from each object's own bytes, a level at a time.
+
+        Raise `TreeError` where an object can't be read or isn't what its id
+        says.
+        """
+        width = len(tree) // 2
+        level = [Entry(mode="40000", kind="tree", object=tree, path=PurePosixPath())]
         files: list[Entry] = []
         while level:
             contents = await self.verified("tree", [each.object for each in level])

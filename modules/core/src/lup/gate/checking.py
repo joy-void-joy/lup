@@ -112,7 +112,7 @@ class Gating(Part):
         )
         recorded = await self.recorded(layout)
         tree = await self.tree(layout.root)
-        key = keyed(tree, layout)
+        key = keyed(tree, layout.local)
         if not checking.again and passed(recorded, key) is not None:
             return (
                 f"The gate passed on these files already (tree `{tree}`), so "
@@ -218,11 +218,15 @@ def copied(index: Path, to: Path) -> None:
         shutil.copyfile(index, to)
 
 
-def keyed(tree: str, layout: RepositoryLayout) -> str:
-    """Return what a pass on the worktree at `layout`, whose files git would commit as `tree`, is recorded by: those files, and the layers of the declaration outside them, the repository's own and the machine's, which change what runs."""
+def keyed(tree: str, local: Path) -> str:
+    """Return what a pass on files git would commit as `tree` is recorded by: those files, and the layers of the declaration outside them, the repository's own at `local` and the machine's, which change what runs.
+
+    A landing reads a branch's pass by it too, so a pass recorded in a room is
+    found wherever the same files are checked.
+    """
     machine = MachineLayout(configuration=GateSettings().xdg_config_home)
     digest = hashlib.sha256(tree.encode())
-    for layer in [layout.local, machine.layer]:
+    for layer in [local, machine.layer]:
         digest.update(b"\0")
         digest.update(layer.read_bytes() if layer.is_file() else b"")
     return digest.hexdigest()
