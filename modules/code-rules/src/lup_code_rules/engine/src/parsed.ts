@@ -1,7 +1,7 @@
-// A file read from its parse alone, with no project loaded and no types: what a
-// landing reads of each version of a file it changes, which a type check would
-// hold up. It's the file's `# lup:` directives, read as a check reads them, and
-// its public surface, a package root's names from a binding of the file alone. No rule runs, and no import is resolved: an import
+// A file read from its parse alone, with no project loaded and no types: what the
+// review reads of each version of a file it shows, which a type check would hold
+// up. It's the file's public surface, a package root's names from a binding of the
+// file alone. No rule runs, and no import is resolved: an import
 // binds its names all the same, but a package root's `from x import *`, or an
 // `__all__` extended with another module's, adds nothing to its names here.
 
@@ -22,7 +22,6 @@ import { DiagnosticSink, TextRangeDiagnosticSink } from 'pyright/common/diagnost
 import { Uri } from 'pyright/common/uri/uri';
 import { ParseFileResults, ParseOptions, Parser } from 'pyright/parser/parser';
 
-import { readDirectives } from './directives';
 import { FileReport, ParsedSource } from './protocol';
 import { surfaceOf } from './surface';
 
@@ -38,7 +37,6 @@ export function parsedReport(source: ParsedSource): FileReport {
     return {
         path: source.path,
         findings: [],
-        directives: readDirectives(parse),
         surface: surfaceOf(parse, bound(parse, source.path, options.isStubFile), isPackageRoot),
         imports: [],
     };

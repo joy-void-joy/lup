@@ -6,7 +6,6 @@ import { Uri } from 'pyright/common/uri/uri';
 import { ParseFileResults } from 'pyright/parser/parser';
 
 import { Rule } from './catalog';
-import { readDirectives } from './directives';
 import { File } from './file';
 import { WarmProgram } from './program';
 import { FileReport, Finding } from './protocol';
@@ -14,7 +13,8 @@ import { positionOf } from './spans';
 import { surfaceOf } from './surface';
 
 // The file's full report: pyright's errors and warnings, the selected rules' findings,
-// its directives, its public surface and its imports.
+// its public surface and its imports. Its `# lup:` comments are read by the client
+// with Python's own parser (`lup_code_rules/reading.py`).
 export function fullReport(warm: WarmProgram, uri: Uri, reportedPath: string, rules: [string, Rule][]): FileReport {
     const diagnostics = warm.check(uri);
     const parse = warm.parseResults(uri);
@@ -44,21 +44,19 @@ export function fullReport(warm: WarmProgram, uri: Uri, reportedPath: string, ru
     return {
         path: reportedPath,
         findings: [...pyrightFindings(parse, diagnostics, reportedPath), ...lup],
-        directives: readDirectives(parse),
         surface: surfaceOf(parse, reader, isPackageRoot),
         imports: [...new Set(file.importedModules().map((imported) => imported.module))].sort(),
     };
 }
 
 // A file's report for type errors only, as the importers pass needs: pyright's
-// findings, and the directives that may keep them.
+// findings.
 export function typeReport(warm: WarmProgram, uri: Uri, reportedPath: string): FileReport {
     const diagnostics = warm.check(uri);
     const parse = warm.parseResults(uri);
     return {
         path: reportedPath,
         findings: pyrightFindings(parse, diagnostics, reportedPath),
-        directives: readDirectives(parse),
         surface: { exported: [], classes: [], functions: [], places: [] },
         imports: [],
     };

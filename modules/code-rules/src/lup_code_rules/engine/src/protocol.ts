@@ -2,7 +2,7 @@
 // (`lup_code_rules/environment/engine.py`), one JSON object per line.
 //
 // The reports mirror the client's models field for field
-// (`lup_code_rules/environment/reports.py`, `lup_code_rules/directives.py`): the
+// (`lup_code_rules/reports.py`, `lup_code_rules/engine.py`): the
 // client validates every answer into them, so a field renamed here fails there at
 // once.
 
@@ -51,45 +51,6 @@ export interface Surface {
     places: Placed[];
 }
 
-export interface Ignore {
-    kind: 'ignore';
-    line: number;
-    // The column its `#` is at, counted from 1.
-    column: number;
-    covers: number;
-    rule: string;
-    why: string;
-    issue: number | string | null;
-}
-
-export interface Defer {
-    kind: 'defer';
-    line: number;
-    // The column its `#` is at, counted from 1.
-    column: number;
-    why: string;
-    issue: number | string | null;
-    when: string | null;
-}
-
-export interface Note {
-    kind: 'note';
-    line: number;
-    // The column its `#` is at, counted from 1.
-    column: number;
-    text: string;
-}
-
-export interface Malformed {
-    kind: 'malformed';
-    line: number;
-    // The column its `#` is at, counted from 1.
-    column: number;
-    text: string;
-    problem: string;
-}
-
-export type Directive = Ignore | Defer | Note | Malformed;
 
 // A TypeScript file's `// lup:` comment, as `comments` finds it (`typescript.ts`):
 // its line and the column its `//` is at, each counted from 1, what it says after
@@ -105,7 +66,6 @@ export interface LupComment {
 export interface FileReport {
     path: string;
     findings: Finding[];
-    directives: Directive[];
     surface: Surface;
     imports: string[];
 }

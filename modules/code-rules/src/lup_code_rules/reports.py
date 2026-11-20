@@ -78,7 +78,7 @@ class Surface(Model):
 
 
 class FileReport(Model):
-    """Everything the engine reports about one file: its findings, its `# lup:` comments, its public surface and its imports."""
+    """Everything known of one file: the engine's findings, public surface and imports, and the `# lup:` comments read beside them (`reading.py`)."""
 
     path: str
     findings: list[Finding] = []
