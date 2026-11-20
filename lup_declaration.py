@@ -8,5 +8,6 @@ in `pyproject.toml`'s pytest settings).
 
 from lup import Modules, Project
 from lup.hosting.module import Hosting
+from lup.sessions.part import Sessions
 
-project = Project(modules=Modules.default().add(Hosting()))
+project = Project(modules=Modules.default().add(Hosting(), Sessions()))

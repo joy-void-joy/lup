@@ -1,0 +1,403 @@
+"""`Held`: the machine's part holding every session lup starts, from its start to its end, and `Sessions`, the module of the parts a session needs on the machine.
+
+A session is kept for good once started: its project, its runtime, the id each
+gives it, its worktree, its name. While it runs, a holder of its own holds its
+runtime over its room's socket (`lup.sessions.held`), and its room runs its
+runtime (`Rooms`). Every hook of its runtime reaches the machine through the
+room's socket (`hooked`): read with the session's runtime as lup's event, what
+waits for the agent told beside it, a call to lup's own tools by a subagent
+stamped with the conversation making it.
+
+Between hooks, a sweep looks at each session (`swept`): an idle one with
+something told for it is woken with a turn; one idle past its profile's idle
+time is ended, its room stopped; and one not running with something for it is
+started again, its whole conversation resumed, so a reply always reaches it
+(`README.md` here).
+"""
+
+import asyncio
+import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from pydantic import TypeAdapter, ValidationError
+
+import lup
+from lup.doors.door import RefusedError
+from lup.doors.events import Starting
+from lup.doors.parties import Agent, Operator
+from lup.doors.parts import Data, Part, Runtime
+from lup.hosting.carrying import Carrying, Leaving, Naming, SessionRoom
+from lup.hosting.containers import Named
+from lup.hosting.projects import Locating, Projects, Telling
+from lup.rooms.part import RoomFor, Rooms
+from lup.runtimes.known import named
+from lup.runtimes.runtime import Answer, Begin, Spoken, Stamp
+from lup.sessions.events import (
+    Happened,
+    SessionEnded,
+    SessionStarted,
+    TurnEnded,
+    TurnStarted,
+)
+from lup.sessions.held import Holds, Order, Standing
+from lup.sessions.said import Hooked
+from lup.types import Model
+
+
+class Session(Model):
+    """A session lup started, kept for good: its project, its runtime and the ids each gives it, where it works, and what it's called."""
+
+    session: str
+    """lup's id for the session, its own agent's."""
+    repository: str
+    common: Path
+    """The project's common git directory on the machine."""
+    runtime: str
+    known_as: str | None = None
+    """The runtime's own id for the session, once it's said."""
+    worktree: Path
+    name: str
+    account: str = "default"
+    model: str | None = None
+    effort: str | None = None
+    ended: bool = False
+    """Whether it was ended, by the operator or by its own `stop`: a reply
+    still starts it again."""
+
+
+class Run(Model):
+    """A session running: its room, its holder's control socket, and when it was last heard from or told something."""
+
+    container: str
+    sockets: Path
+    control: Path
+    busy: bool = False
+    heard: datetime
+
+
+SESSIONS = TypeAdapter(dict[str, Session])
+
+
+class NewSession(Model):
+    """A session to start: in which project, on which runtime, called what, where, and the first words it's told."""
+
+    repository: str
+    """The project, as lup names it: one running (`lup hosting open`)."""
+    runtime: str = "claude"
+    """The runtime, by lup's name for it: `claude` or `codex`."""
+    name: str | None = None
+    """What it's called, and its branch and worktree where it gets new ones;
+    left out, a name of its own."""
+    worktree: Path | None = None
+    """An existing worktree of the project to work in, that no running session
+    holds; left out, a new one, on a new branch, from `start`."""
+    start: str = "dev"
+    """The branch a new worktree starts from."""
+    model: str | None = None
+    effort: str | None = None
+    said: str = ""
+    """The first words it's told, its first turn; nothing to start it idle."""
+
+
+class Called(Model):
+    """A session, by its name."""
+
+    name: str
+
+
+class Held(Part, machine=True, shared=True):
+    """The machine's part holding every session lup starts: starting each, telling it what's for it, waking it, interrupting it, ending it, and starting it again."""
+
+    module: Sessions
+    holder: lup.Program = lup.Program(
+        name="lup-hold",
+        optional=True,
+        why="holds each session's runtime over its room's socket, outliving the machine's restarts",
+        install="lup-core's own command, installed with it",
+    )
+    registry: Data
+    """Every session started, kept for good."""
+    controls: Runtime
+    """Each running session's holder's control socket, and its log."""
+    running: dict[str, Run] = {}
+    """Each session running, by lup's id for it."""
+    sweeping: timedelta = timedelta(seconds=2)
+    """How often the sweep looks at each session."""
+    connecting: timedelta = timedelta(minutes=1)
+    """How long a session's room has to connect its runtime to its holder."""
+
+    def kept(self) -> dict[str, Session]:
+        """Return every session started, by lup's id for it."""
+        place = self.registry.path / "sessions.json"
+        if not place.is_file():
+            return {}
+        return SESSIONS.validate_json(place.read_bytes())
+
+    def keep(self, session: Session) -> None:
+        """Keep `session`, in place of what was kept of it."""
+        kept = {**self.kept(), session.session: session}
+        (self.registry.path / "sessions.json").write_bytes(SESSIONS.dump_json(kept))
+
+    def called(self, name: str) -> Session:
+        """Return the session called `name`, or whose id it is.
+
+        Raise `RefusedError` where none is.
+        """
+        found = [
+            each for each in self.kept().values() if name in [each.name, each.session]
+        ]
+        if not found:
+            message = f"no session lup started is called `{name}`"
+            raise RefusedError(message)
+        return found[-1]
+
+    @lup.command
+    async def start(self, starting: NewSession, by: Operator) -> str:
+        """Start a session in a room of its own, held by lup, and say what it's called.
+
+        Refused where the project isn't running, the runtime isn't one lup
+        holds, the limit on sessions running is reached, or its room doesn't
+        start.
+        """
+        del by
+        named(starting.runtime)
+        located = await Projects.located(Locating(repository=starting.repository))
+        self.limited(starting.repository)
+        session = str(uuid.uuid4())
+        name = starting.name or f"{starting.runtime}-{uuid.UUID(session).time_low:08x}"
+        if starting.worktree is None:
+            message = "a session's own worktree is made in its room: give `worktree` until it is"
+            raise RefusedError(message)
+        kept = Session(
+            session=session,
+            repository=starting.repository,
+            common=located.opening.common,
+            runtime=starting.runtime,
+            worktree=starting.worktree,
+            name=name,
+            model=starting.model,
+            effort=starting.effort,
+        )
+        self.keep(kept)
+        await self.opened(kept, Begin(begun="start", session=session))
+        if starting.said:
+            await self.ordered(session, Order(order="turn", text=starting.said))
+        return f"started {name}, a {starting.runtime} session in {starting.worktree}"
+
+    def limited(self, repository: str) -> None:
+        """Refuse a session past the limits on sessions running: on the machine, and of one repository."""
+        running = [self.kept()[each] for each in self.running if each in self.kept()]
+        if len(running) >= self.module.most:
+            message = f"{len(running)} sessions run already, the most lup runs at once"
+            raise RefusedError(message)
+        own = [each for each in running if each.repository == repository]
+        if len(own) >= self.module.most_per_repository:
+            message = f"{len(own)} sessions of {repository} run already, the most lup runs of one"
+            raise RefusedError(message)
+
+    async def opened(self, session: Session, begin: Begin) -> Run:
+        """Start a session's holder, then its room, which connects its runtime to the holder, and keep it running.
+
+        Raise `RefusedError` where either doesn't start.
+        """
+        agent = Agent.of(session.session)
+        guidance = await Projects.guided(
+            Telling(repository=session.repository, agent=agent)
+        )
+        container = f"lup-{session.repository}-{session.session}"
+        sockets = (await Carrying.directory(Naming(container=container))).path
+        control = self.controls.path / f"{session.session}.sock"
+        holds = Holds(
+            session=session.session,
+            runtime=session.runtime,
+            begin=begin,
+            worktree=session.worktree,
+            room=sockets / "session.sock",
+            control=control,
+        )
+        log = self.controls.path / f"{session.session}.log"
+        started = await self.holder.ran(
+            "start", "--log", str(log), given=holds.model_dump_json()
+        )
+        if started.status != 0:
+            message = f"{session.name}'s holder didn't start: {started.said()}"
+            raise RefusedError(message)
+        await Carrying.seated(
+            SessionRoom(
+                repository=session.repository,
+                session=session.session,
+                container=container,
+                directory=sockets,
+            )
+        )
+        located = await Projects.located(Locating(repository=session.repository))
+        await Rooms.readied(
+            RoomFor(
+                repository=session.repository,
+                common=session.common,
+                session=session.session,
+                runtime=session.runtime,
+                begin=begin.model_copy(
+                    update={"model": session.model, "effort": session.effort}
+                ),
+                worktree=session.worktree,
+                guidance=guidance.text(),
+                account=session.account,
+                packages=located.opened.plan.packages,
+            )
+        )
+        run = Run(
+            container=container,
+            sockets=sockets,
+            control=control,
+            heard=datetime.now(UTC),
+        )
+        self.running = {**self.running, session.session: run}
+        return run
+
+    async def ordered(self, session: str, order: Order) -> Standing:
+        """Tell the holder of the session lup knows as `session` `order`, and return where it stands after.
+
+        Raise `RefusedError` where it isn't running, or its holder doesn't answer.
+        """
+        run = self.running.get(session)
+        if run is None:
+            message = "the session isn't running"
+            raise RefusedError(message)
+        answered = await self.holder.ran(
+            "order", str(run.control), given=order.model_dump_json()
+        )
+        if answered.status != 0:
+            message = f"the session's holder didn't answer: {answered.said()}"
+            raise RefusedError(message)
+        try:
+            return Standing.model_validate_json(answered.output)
+        except ValidationError as wrong:
+            message = f"the session's holder answered what lup doesn't read: {wrong}"
+            raise RefusedError(message) from wrong
+
+    @lup.command
+    async def interrupt(self, called: Called, by: Operator) -> str:
+        """Interrupt the turn a session has under way: its foreground command ended, what waits for it told at its next turn."""
+        del by
+        session = self.called(called.name)
+        await self.ordered(session.session, Order(order="interrupt"))
+        return f"interrupted {session.name}"
+
+    @lup.command
+    async def end(self, called: Called, by: Operator) -> str:
+        """End a session: its turn under way finishes, then its runtime and room end; a reply starts it again."""
+        del by
+        session = self.called(called.name)
+        self.keep(session.model_copy(update={"ended": True}))
+        if session.session in self.running:
+            await self.ended(session)
+        return f"ended {session.name}"
+
+    async def ended(self, session: Session) -> None:
+        """End a running session: its holder told to end, which closes its runtime's input, its room stopped, and calls from it refused from then on."""
+        run = self.running.get(session.session)
+        if run is None:
+            return
+        try:
+            await self.ordered(session.session, Order(order="end"))
+        except RefusedError:
+            pass
+        await Rooms.closed(Named(name=run.container))
+        await Carrying.left(Leaving(session=session.session))
+        self.running = {
+            each: kept for each, kept in self.running.items() if each != session.session
+        }
+
+    @lup.service
+    async def hooked(self, given: Hooked, by: Agent) -> Spoken:
+        """Answer one of a session's hooks, as its runtime ran it in the room: read as lup's event, the agent told what waits for them, a subagent's call to lup's own tools stamped with their conversation.
+
+        Raise `RefusedError` where the session isn't one lup started, or its
+        runtime doesn't read the payload as one of the hook's.
+        """
+        session = self.kept().get(by.session)
+        if session is None:
+            message = "the room's session isn't one lup started"
+            raise RefusedError(message)
+        runtime = named(session.runtime)
+        payload = given.payload.encode()
+        try:
+            heard = runtime.hooks.heard(given.hook, payload, by.session)
+        except (ValueError, ValidationError) as wrong:
+            message = f"`{given.hook}` isn't read as one of {session.runtime}'s hooks: {wrong}"
+            raise RefusedError(message) from wrong
+        self.heard(session, heard.event)
+        stamp = (
+            Stamp(conversation=heard.conversation)
+            if heard.ours and heard.conversation is not None
+            else None
+        )
+        answer = Answer(stamp=stamp)
+        return runtime.hooks.answered(given.hook, payload, answer)
+
+    def heard(self, session: Session, event: Happened | None) -> None:
+        """Keep what a session's event says of it: the runtime's id at its start, and whether its own conversation has a turn under way."""
+        run = self.running.get(session.session)
+        own = Agent.of(session.session)
+        match event:
+            case SessionStarted(known_as=known_as) if known_as != session.known_as:
+                self.keep(session.model_copy(update={"known_as": known_as}))
+            case TurnStarted(agent=agent) if run is not None and agent == own:
+                run = run.model_copy(update={"busy": True})
+            case TurnEnded(agent=agent) if run is not None and agent == own:
+                run = run.model_copy(update={"busy": False})
+            case SessionEnded():
+                run = None
+            case _:
+                pass
+        if run is not None and session.session in self.running:
+            stamped = run.model_copy(update={"heard": datetime.now(UTC)})
+            self.running = {**self.running, session.session: stamped}
+
+    @lup.on(Starting)
+    async def swept(self, starting: Starting) -> None:
+        """Look at each session running every `sweeping`, as long as the part runs: one whose holder is gone is taken for stopped, and one idle past its idle time is ended."""
+        del starting
+        while True:
+            await asyncio.sleep(self.sweeping.total_seconds())
+            for session, run in list(self.running.items()):
+                kept = self.kept().get(session)
+                if kept is None:
+                    continue
+                try:
+                    standing = await self.ordered(session, Order(order="standing"))
+                except RefusedError:
+                    await self.gone(kept)
+                    continue
+                idle = datetime.now(UTC) - run.heard
+                if not standing.busy and idle > self.module.idle:
+                    await self.ended(kept)
+
+    async def gone(self, session: Session) -> None:
+        """Take a session whose holder is gone for stopped: its room stopped, where it still runs, and calls from it refused from then on."""
+        run = self.running.get(session.session)
+        if run is None:
+            return
+        await Rooms.closed(Named(name=run.container))
+        await Carrying.left(Leaving(session=session.session))
+        self.running = {
+            each: kept for each, kept in self.running.items() if each != session.session
+        }
+
+
+class Sessions(lup.Module):
+    """Sessions lup starts and holds itself, each in a room of its own, on Claude Code or Codex: the machine's parts holding them and making their rooms."""
+
+    name = "sessions"
+    parts: lup.Parts = lup.Parts.of(Held, Rooms)
+    idle: timedelta = timedelta(hours=1)
+    """How long a session may stay idle before its process and room are
+    stopped: about as long as the runtime's prompt cache lasts, so starting it
+    again costs little."""
+    most: int = 32
+    """The most sessions running at once on the machine, against a loop of
+    spawns rather than as a budget."""
+    most_per_repository: int = 16
+    """The most sessions of one repository running at once."""

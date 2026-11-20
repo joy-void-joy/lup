@@ -15,6 +15,7 @@ from pydantic import StringConstraints
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
+from lup.rooms.packages import Package
 from lup.types import JsonObject, Model
 
 CORE = "core"
@@ -115,6 +116,9 @@ class Plan(Model):
     parts: list[PartPlan] = []
     tools: list[ToolSpec] = []
     """What a session is told of each tool the project's modules serve."""
+    packages: list[Package] = []
+    """What its modules add to the standard machine in its sessions' rooms
+    (`lup.rooms`)."""
     files: list[str] = []
     """The files of the project loading the declaration imported, relative to
     its root: what an approval may point at, never what it approves, which is

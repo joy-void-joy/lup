@@ -53,6 +53,7 @@ from lup.runtimes.runtime import (
     Rooming,
     Runtime,
     Spoken,
+    Stamp,
 )
 from lup.sessions.events import (
     Begun,
@@ -246,7 +247,7 @@ def patched(patch: str, markers: list[str]) -> list[Path]:
 
     The format has no parser outside Codex, and names one file a line.
 
-    >>> patched("*** Begin Patch\\n*** Add File: a.py\\n+x\\n*** End Patch", ["*** Add File: "])
+    >>> patched("*** Begin Patch\n*** Add File: a.py\n+x\n*** End Patch", ["*** Add File: "])
     [PosixPath('a.py')]
     """
     return [
@@ -276,9 +277,6 @@ class CodexHooks(Hooks):
     ours: str = "mcp__lup__"
     """What the names of lup's own tools start with, as Codex names a server's
     tools."""
-    stamp: str = "lup_conversation"
-    """The field lup stamps into a call to its own tools, naming the
-    conversation making it, which its tool server reads back and removes."""
     patching: str = "apply_patch"
     """The tool writing files, named in its patch."""
     markers: list[str] = ["*** Add File: ", "*** Update File: ", "*** Move to: "]
@@ -372,12 +370,12 @@ class CodexHooks(Hooks):
                     "permissionDecision": "deny",
                     "permissionDecisionReason": refused,
                 }
-            case "PreToolUse", Answer(stamp=str() as stamp):
+            case "PreToolUse", Answer(stamp=Stamp() as stamp):
                 given = Payload.model_validate_json(payload).tool_input
                 stamped = given if isinstance(given, dict) else {}
                 decided = {
                     "permissionDecision": "allow",
-                    "updatedInput": {**stamped, self.stamp: stamp},
+                    "updatedInput": {**stamped, stamp.field: stamp.conversation},
                 }
             case _:
                 decided = {}

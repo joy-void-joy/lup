@@ -48,6 +48,7 @@ from lup.runtimes.runtime import (
     Rooming,
     Runtime,
     Spoken,
+    Stamp,
 )
 from lup.sessions.events import (
     Begun,
@@ -101,6 +102,10 @@ class ClaudeRooming(Rooming):
     """What lup's settings set, outranking the operator's own: no auto memory,
     which one room would write and every later one read, and subagents' prompt
     cache kept an hour, as the main conversation's is."""
+    kept_days: int = 36_500
+    """How long Claude Code keeps a session's record after its last use
+    (`cleanupPeriodDays`, 30 by default): for good, since transcripts read
+    the records where the runtime keeps them."""
 
     @override
     def prepared(
@@ -131,6 +136,7 @@ class ClaudeRooming(Rooming):
             "hooks": json.loads(json.dumps(hooks)),
             "permissions": {"deny": list[JsonValue](self.denied)},
             "idleCompaction": False,
+            "cleanupPeriodDays": self.kept_days,
             "disableClaudeAiConnectors": True,
             "skipDangerousModePermissionPrompt": True,
         }
@@ -293,9 +299,6 @@ class ClaudeHooks(Hooks):
     ours: str = "mcp__lup__"
     """What the names of lup's own tools start with, as Claude Code names a
     server's tools."""
-    stamp: str = "lup_conversation"
-    """The field lup stamps into a call to its own tools, naming the
-    conversation making it, which its tool server reads back and removes."""
     files: list[str] = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
     """The tools writing the file named in what they're given."""
 
@@ -387,10 +390,10 @@ class ClaudeHooks(Hooks):
                     "permissionDecision": "deny",
                     "permissionDecisionReason": refused,
                 }
-            case "PreToolUse", Answer(stamp=str() as stamp):
+            case "PreToolUse", Answer(stamp=Stamp() as stamp):
                 given = Payload.model_validate_json(payload).tool_input
                 stamped = given if isinstance(given, dict) else {}
-                decided = {"updatedInput": {**stamped, self.stamp: stamp}}
+                decided = {"updatedInput": {**stamped, stamp.field: stamp.conversation}}
             case _:
                 pass
         if not told and not decided:

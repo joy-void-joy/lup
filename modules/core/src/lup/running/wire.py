@@ -184,6 +184,20 @@ class Planning(Model):
     """Its declaration, relative to the root."""
 
 
+class Rendering(Model):
+    """How a container's program is asked for what a session is told at its start, which it prints and ends: the declaration's guidance rendered for the session's agent."""
+
+    format: int = 1
+    kind: Literal["render"] = "render"
+    root: Path
+    """The project's tree, at the commit the session's guidance is of, as
+    mounted in the container."""
+    declaration: Path
+    """Its declaration, relative to the root."""
+    agent: Agent
+    """The session's own agent, whom what's rendered is told to."""
+
+
 class Start(Model):
     """How a container's program is started: which project, which of its parts, and where it listens and calls out."""
 
@@ -236,8 +250,9 @@ class Host(Model):
     108 bytes."""
 
 
-type Asked = Annotated[Planning | Start | Host, Field(discriminator="kind")]
-"""What the program is given to do: plan, start a container's parts, or host the machine's."""
+type Asked = Annotated[Planning | Rendering | Start | Host, Field(discriminator="kind")]
+"""What the program is given to do: plan, render a session's guidance, start a
+container's parts, or host the machine's."""
 
 
 def read[M](text: bytes | str, kind: TypeAdapter[M], reads: int = 1) -> M:

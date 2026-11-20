@@ -1,0 +1,1 @@
+"""Sessions' environment side: the process holding each session (`lup-hold`), and the programs a session's room runs for lup, its first program handing the runtime its connection, its hooks and its tool server."""

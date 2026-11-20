@@ -88,6 +88,14 @@ class Prepared(Model):
     """The runtime's command in the room, its CLI's path first."""
 
 
+class Stamp(Model):
+    """lup's stamp on a call to one of its own tools: the conversation making it, in the field of what the call is given that lup's tool server reads it back from and removes."""
+
+    field: str = "lup_conversation"
+    conversation: str
+    """The runtime's own id for the subagent making the call."""
+
+
 class Answer(Model):
     """lup's answer to one of a runtime's hooks, before the runtime spells it."""
 
@@ -97,10 +105,9 @@ class Answer(Model):
     refused: str | None = None
     """For a call about to run, the words it's refused with, which the agent
     reads as its answer; none to let it run."""
-    stamp: str | None = None
-    """For a call to lup's own tools, the conversation making it, stamped into
-    what the call is given, which lup's tool server reads back; none to leave
-    it."""
+    stamp: Stamp | None = None
+    """For a call to lup's own tools by a subagent, the conversation making
+    it, stamped into what the call is given; none to leave it."""
 
 
 class Spoken(Model):

@@ -16,6 +16,7 @@ from lup.doors.door import is_model
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.declaration import Resolved, load, resolve
+from lup.rooms.packages import Packages
 from lup.running.plan import Doorway, ModulePlan, PartPlan, Plan
 from lup.shell.view import ViewDoor
 
@@ -44,6 +45,9 @@ def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> 
         parts=[part_plan(each, entries, root) for each in resolved.doors.served],
         tools=resolved.doors.tools(),
         files=loaded,
+        packages=[
+            package for each in resolved.modules for package in each.held(Packages)
+        ],
     )
 
 
