@@ -10,7 +10,10 @@ one connection and closes its socket.
 
 With `--sync`, it first starts syncing the worktree's environment in the
 background (`uv sync --frozen`), so the runtime starts at once and the project's
-environment follows it.
+environment follows it. With `--serving`, it also starts the room's own parts
+in the background, from the worktree's own code in that environment, answering
+on the room's socket (`lup.environment.running`), as a project's container
+answers on its own.
 """
 
 import os
@@ -32,6 +35,10 @@ def connected(
     sync: Annotated[
         Path | None, typer.Option(help="Sync the worktree's environment, logging here.")
     ] = None,
+    serving: Annotated[
+        str | None,
+        typer.Option(help="Start the room's own parts, as this start says (JSON)."),
+    ] = None,
 ) -> None:
     """Connect to the holder, then run the runtime on that connection, in this program's place."""
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -41,6 +48,18 @@ def connected(
     connection.close()
     if sync is not None:
         detached("uv", "sync", "--frozen", "--quiet", log=sync)
+    if serving is not None and sync is not None:
+        detached(
+            "env",
+            f"LUP_ASKED={serving}",
+            "uv",
+            "run",
+            "--frozen",
+            "python",
+            "-m",
+            "lup.environment.running",
+            log=sync.with_name("parts.log"),
+        )
     # lup: ignore("os-shell", why="the runtime takes this program's place, its input and output the holder's connection: no child process lup.programs could run")
     os.execvp(command[0], command)
 

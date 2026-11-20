@@ -108,11 +108,33 @@ class ViewCalled(Model):
     other caller. None for the session's own conversation."""
 
 
+class EventCalled(Model):
+    """An event the methods run at it are run at where a project's parts run: its class, by its name, and its facts, as the machine carries a session's to every part hearing it."""
+
+    format: int = 1
+    kind: Literal["event"] = "event"
+    event: str
+    """The event's class, by its name."""
+    given: JsonValue
+    """The event, as JSON."""
+    by: Caller | None = None
+    """Who the event is about, as the machine vouches: the agent of the
+    session it's of."""
+    conversation: str | None = None
+
+
 type Call = Annotated[
     ToolCalled | ServiceCalled | CommandCalled | ViewCalled,
     Field(discriminator="kind"),
 ]
 """A call through any door, as it crosses: the one of each kind it is."""
+
+type Crossed = Annotated[
+    ToolCalled | ServiceCalled | CommandCalled | ViewCalled | EventCalled,
+    Field(discriminator="kind"),
+]
+"""What crosses to a container from the machine: a call through a door, or an
+event its parts' methods run at."""
 
 
 class Offering(Model):

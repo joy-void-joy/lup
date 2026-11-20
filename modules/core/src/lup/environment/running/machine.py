@@ -22,12 +22,19 @@ from lup.doors.parties import Machine
 from lup.environment.declaration import load, resolve
 from lup.environment.running.container import answered, asked, declined, listening
 from lup.environment.running.planning import plan_of
-from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
+from lup.hosting.carrying import (
+    Arrival,
+    Carrying,
+    Forwards,
+    Listens,
+    Route,
+    Visiting,
+)
 from lup.hosting.containers import ContainerError
 from lup.hosting.projects import Resuming
 from lup.running.plan import Plan
 from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
-from lup.types import MutableModel
+from lup.types import Model, MutableModel
 lazy from lup.doors.parts import Runs
 lazy from lup.environment.doors import Running
 
@@ -60,6 +67,17 @@ async def carried(running: Running, directory: Path, text: bytes) -> bytes:
         return await asked(route.to, vouched)
     except (OSError, ValueError) as lost:
         return declined(f"the container answering it can't be reached: {lost}")
+
+
+class Forwarder(Model, Forwards):
+    """What carries a message from the machine to a container's socket, a message past `limit` bytes refused."""
+
+    limit: int
+
+    @override
+    async def forwarded(self, socket: Path, text: bytes) -> bytes:
+        """Send `text` on `socket`, a container's, and return its answer."""
+        return await asked(socket, text, limit=self.limit)
 
 
 class Binder(MutableModel, Listens, arbitrary_types_allowed=True):
@@ -132,6 +150,7 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         raise ProjectError(message)
     binder = Binder(running=running, limit=limit)
     carrying.listens = binder
+    carrying.forwards = Forwarder(limit=limit)
     hosting = plan_of(resolve(load(host.root / host.declaration)), [], host.root)
     unrun = [each.part for each in running.unrun]
     machine = [

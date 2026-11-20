@@ -26,10 +26,10 @@ from pydantic import TypeAdapter, ValidationError
 
 import lup
 from lup.doors.door import RefusedError
-from lup.doors.events import Starting
+from lup.doors.events import Heeded, Starting
 from lup.doors.parties import Agent, Machine, Operator
 from lup.doors.parts import Data, Part, Runtime
-from lup.hosting.carrying import Carrying, Leaving, Naming, SessionRoom
+from lup.hosting.carrying import Carrying, Hearing, Leaving, Naming, SessionRoom
 from lup.hosting.containers import Named
 from lup.hosting.projects import Locating, Projects, Telling
 from lup.inbox.part import Inboxes
@@ -310,6 +310,8 @@ class Held(Part, machine=True, shared=True):
                 guidance=guidance.text(),
                 account=session.account,
                 packages=located.opened.plan.packages,
+                declaration=located.opening.declaration,
+                serving=[each.named() for each in located.opened.plan.rooms()],
             )
         )
         run = Run(
@@ -423,10 +425,23 @@ class Held(Part, machine=True, shared=True):
         )
         match heard.event:
             case TurnStarted() | CallStarting() | CallFinished() | SessionStarted():
-                told = await self.telling(session, heard.event.agent)
+                waiting = await self.telling(session, heard.event.agent)
             case _:
-                told = ""
-        answer = Answer(stamp=stamp, told=told)
+                waiting = ""
+        heeded = (
+            Heeded()
+            if heard.event is None
+            else await Carrying.heard(
+                Hearing(
+                    repository=session.repository,
+                    session=session.session,
+                    event=type(heard.event).__name__,
+                    given=heard.event.model_dump(mode="json"),
+                )
+            )
+        )
+        told = "\n\n".join(each for each in [*heeded.told, waiting] if each)
+        answer = Answer(stamp=stamp, told=told, refused=heeded.refused)
         return runtime.hooks.answered(given.hook, payload, answer)
 
     async def kept_words(self, session: Session, event: Happened | None) -> None:

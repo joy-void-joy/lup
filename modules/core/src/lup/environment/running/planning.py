@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from lup.doors.command import CommandDoor
 from lup.doors.door import is_model
+from lup.doors.on import OnDoor
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.declaration import Resolved, load, resolve
@@ -76,6 +77,13 @@ def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPl
             for entry in entries
             if entry.serves == serves and (way := doorway(entry)) is not None
         ],
+        hears=list(
+            dict.fromkeys(
+                entry.method.door.event.__name__
+                for entry in entries
+                if entry.serves == serves and isinstance(entry.method.door, OnDoor)
+            )
+        ),
     )
 
 

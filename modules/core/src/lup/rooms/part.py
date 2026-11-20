@@ -27,6 +27,7 @@ from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec
 from lup.rooms.layout import InRoom, Kept, digest
 from lup.rooms.packages import Package
 from lup.running.plan import Name
+from lup.running.wire import Start
 from lup.runtimes.known import known, named
 from lup.runtimes.runtime import Begin, Bridge, Fetched, Got, Placed, Runtime
 from lup.types import Model
@@ -48,6 +49,11 @@ class RoomFor(Model):
     account: str = "default"
     packages: list[Package] = []
     """What the project's modules add to the standard machine."""
+    declaration: Path = Path("lup_project.py")
+    """The project's declaration, relative to its root, which the room's own
+    parts are made from, at the worktree."""
+    serving: list[str] = []
+    """The parts run in the room, each `module.Part`: none starts nothing."""
     held: bool = True
     """Whether lup holds it over its input and output; a terminal's otherwise."""
 
@@ -240,6 +246,21 @@ class Rooms(Part, machine=True, shared=True):
             sockets=sockets,
             interpreters=interpreters,
         )
+        serving = (
+            []
+            if not room.serving
+            else [
+                "--serving",
+                Start(
+                    root=room.worktree,
+                    declaration=room.declaration,
+                    repository=room.repository,
+                    parts=room.serving,
+                    listening=self.inside.sockets / "listening.sock",
+                    calling=self.inside.calling(),
+                ).model_dump_json(),
+            ]
+        )
         command = [
             str(python),
             "-I",
@@ -247,6 +268,7 @@ class Rooms(Part, machine=True, shared=True):
             "lup.environment.sessions.connected",
             "--sync",
             str(home / "sync.log"),
+            *serving,
             str(self.inside.holder()),
             "--",
             *prepared.command,
