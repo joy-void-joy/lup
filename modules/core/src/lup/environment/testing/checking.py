@@ -12,7 +12,7 @@ import hashlib
 import inspect
 from typing import TYPE_CHECKING
 
-from hypothesis import HealthCheck, given, seed, settings
+from hypothesis import HealthCheck, Phase, given, seed, settings
 from hypothesis import strategies as st
 
 from lup.declaration.project import Project
@@ -69,7 +69,12 @@ class Check(Model, arbitrary_types_allowed=True):
         return self.entry.method.taken.qualified
 
     def checked(self, exploring: Exploring) -> Kept | Broken:
-        """Check the promise over as many runs as `exploring` says, and say how it fared: kept, or broken by the smallest run hypothesis found."""
+        """Check the promise over as many runs as `exploring` says, and say how it fared: kept, or broken by the smallest run hypothesis found.
+
+        Hypothesis's explain phase is left out: a broken promise is told by its
+        own run, its calls and their slices, and explaining which of its values
+        matter runs it again hundreds of times.
+        """
         runs: list[Run] = []
 
         def once(data: st.DataObject) -> None:
@@ -87,6 +92,7 @@ class Check(Model, arbitrary_types_allowed=True):
             database=None,
             deadline=None,
             max_examples=exploring.runs,
+            phases=[each for each in Phase if each is not Phase.explain],
             report_multiple_bugs=False,
             suppress_health_check=[HealthCheck.too_slow, HealthCheck.nested_given],
         )(test)

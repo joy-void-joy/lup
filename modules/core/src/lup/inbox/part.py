@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
-from lup.doors.parties import Agent, Codebase, Operator
+from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import Data, Part
 from lup.inbox import views
 from lup.inbox.inbox import Inbox, InboxError, first_line
@@ -36,6 +36,7 @@ from lup.inbox.said import (
     ConcernOf,
     ConcernSaid,
     Declining,
+    Ended,
     Ending,
     Everywhere,
     FrictionSaid,
@@ -55,6 +56,8 @@ from lup.inbox.said import (
     Spoken,
     Told,
     ToldItem,
+    Untelling,
+    Untold,
     Uttered,
     WithdrawSaid,
     Words,
@@ -251,10 +254,13 @@ class Inboxes(Part, approved=True, shared=True):
             self.state_at = database.writes
         return self.state
 
+    # What sessions say, from the machine's own part holding them
+
     @lup.service
-    async def told(self, given: Ending, by: Codebase) -> Told:
+    async def told(self, given: Ending, by: Machine) -> Told:
         """Tell an agent each item for them not told yet, once: what reaches them at their next call."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         items = inbox.taken(inbox.agent(given.agent))
         return Told(
             items=[
@@ -269,23 +275,43 @@ class Inboxes(Part, approved=True, shared=True):
         )
 
     @lup.service
-    async def agent_named(self, given: Naming, by: Codebase) -> None:
+    async def untold(self, given: Untelling, by: Machine) -> Untold:
+        """List each agent of a repository who has something not yet told them: whom a session wakes, or starts again."""
+        del by
+        inbox = self.inbox(given.repository)
+        return Untold(
+            agents=[each.caller() for each in inbox.agents() if inbox.untold(each)]
+        )
+
+    @lup.service
+    async def turn_ended(self, given: Ended, by: Machine) -> str:
+        """Keep an agent's last words of a turn, answering what the operator told them since their last."""
+        del by
+        inbox = self.inbox(given.repository)
+        item = inbox.turn_ended(inbox.agent(given.agent), given.text)
+        return f"Kept, @{item.number}."
+
+    @lup.service
+    async def agent_named(self, given: Naming, by: Machine) -> None:
         """Name an agent, as their session says its name, under the agent who spawned them where one did."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         spawner = None if given.spawner is None else inbox.agent(given.spawner)
         with refusing():
             inbox.agent(given.agent, given.name, spawner)
 
     @lup.service
-    async def agent_ended(self, given: Ending, by: Codebase) -> None:
+    async def agent_ended(self, given: Ending, by: Machine) -> None:
         """Say an agent's session ended: what they held reads as in `no-agent` until they start again."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         inbox.end(inbox.agent(given.agent))
 
     @lup.service
-    async def agent_started(self, given: Ending, by: Codebase) -> None:
+    async def agent_started(self, given: Ending, by: Machine) -> None:
         """Say an agent started again: what they held is theirs again."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         inbox.start(inbox.agent(given.agent))
 
     # The operator's acts

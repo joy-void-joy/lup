@@ -11,6 +11,7 @@ from typing import Annotated, ClassVar, Literal
 
 from annotated_types import Ge, Lt
 
+from lup.doors.parties import Agent
 from lup.store.records import Edge, Kinds, Name, Node
 from lup.types import Model
 
@@ -54,6 +55,10 @@ class AgentRecord(PartyRecord):
     """lup's id for the agent, which the doors hand a method as `by: Agent`."""
     session: str
     """lup's id for the session they're in (`lup.Agent.session`)."""
+
+    def caller(self) -> Agent:
+        """Return the agent as the doors hand them to a method: `by: Agent`."""
+        return Agent(id=self.id, session=self.session)
 
 
 class PileRecord(PartyRecord):
