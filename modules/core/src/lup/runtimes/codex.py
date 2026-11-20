@@ -36,6 +36,7 @@ from typing import Literal, override
 from pydantic import Field, JsonValue, ValidationError
 
 from lup.doors.parties import Agent
+from lup.runtimes.codex_records import CodexRecords
 from lup.runtimes.runtime import (
     Answer,
     Begin,
@@ -69,6 +70,7 @@ from lup.sessions.events import (
     TurnStarted,
 )
 from lup.types import Model
+lazy from lup.runtimes.records import Records
 
 NAME = "codex"
 """lup's name for Codex, which its sessions, a profile's defaults and an
@@ -685,3 +687,4 @@ class Codex(Runtime):
     hooks: Hooks = Field(default_factory=CodexHooks)
     holder: Holder = Field(default_factory=CodexHolder)
     channel: Channel = Field(default_factory=CodexChannel)
+    records: Records = Field(default_factory=CodexRecords)

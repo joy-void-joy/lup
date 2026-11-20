@@ -1,11 +1,12 @@
 """The one interface every runtime lup holds sessions on is behind, so nothing outside `lup.runtimes` names one.
 
-A runtime is four interfaces, each filled by the runtime's own class: its room
+A runtime is five interfaces, each filled by the runtime's own class: its room
 (`Rooming`), what a session's room needs to run it, the files lup writes for it,
 its variables and its command, held by lup or in a terminal, where it keeps its
 login and the history rooms share; its hooks (`Hooks`), read as lup's events and
 answered; how a session held over its input and output is spoken to
-(`Holder`); and where its newest CLI is fetched from (`Channel`). Each runtime
+(`Holder`); where its newest CLI is fetched from (`Channel`); and how its
+records of each conversation are read (`Records`). Each runtime
 is an entry of the `Runtimes` selection `Core` holds, so a project drops or
 replaces one as it would any entry (`README.md` here).
 """
@@ -15,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, override
 
 from lup.declaration.grammar import Named
+from lup.runtimes.records import Records
 from lup.sessions.events import Happened
 from lup.types import Model, MutableModel
 
@@ -268,6 +270,8 @@ class Runtime(Model):
     hooks: Hooks
     holder: Holder
     channel: Channel
+    records: Records
+    """How its records of each conversation are read (`records.py`)."""
 
 
 class Runtimes(Named[Runtime]):

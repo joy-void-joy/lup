@@ -32,6 +32,7 @@ from typing import Literal, override
 from pydantic import Field, JsonValue, ValidationError
 
 from lup.doors.parties import Agent
+from lup.runtimes.claude_records import ClaudeRecords
 from lup.runtimes.runtime import (
     Answer,
     Begin,
@@ -64,6 +65,7 @@ from lup.sessions.events import (
     TurnStarted,
 )
 from lup.types import Model
+lazy from lup.runtimes.records import Records
 
 NAME = "claude"
 """lup's name for Claude Code, which its sessions, a profile's defaults and an
@@ -546,3 +548,4 @@ class ClaudeCode(Runtime):
     hooks: Hooks = Field(default_factory=ClaudeHooks)
     holder: Holder = Field(default_factory=ClaudeHolder)
     channel: Channel = Field(default_factory=ClaudeChannel)
+    records: Records = Field(default_factory=ClaudeRecords)
