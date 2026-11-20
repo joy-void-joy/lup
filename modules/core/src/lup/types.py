@@ -11,6 +11,7 @@ pydantic's own `use_attribute_docstrings` reads each class's source as it's
 defined, which made importing lup's models about half as slow again.
 """
 
+from functools import cache
 from itertools import pairwise
 from typing import dataclass_transform
 lazy import ast
@@ -22,8 +23,9 @@ from pydantic._internal._model_construction import ModelMetaclass
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+@cache
 def written(model: type) -> dict[str, str]:
-    """Return the docstring written under each field the class `model` itself declares, by the field's name: a string standing alone just after it; none where its source can't be read."""
+    """Return the docstring written under each field the class `model` itself declares, by the field's name: a string standing alone just after it; none where its source can't be read. A class's source is read once, at the first schema written for it."""
     try:
         tree = ast.parse(textwrap.dedent(inspect.getsource(model)))
     except OSError, TypeError, SyntaxError:
