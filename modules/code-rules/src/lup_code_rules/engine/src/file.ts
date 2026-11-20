@@ -148,7 +148,8 @@ export interface DeclaredClass {
     listsABC: boolean;
     // The bases that are ABCs of the project, by their full names.
     ourABCBases: string[];
-    // The methods its body defines, abstract and concrete.
+    // The methods its body defines, abstract and concrete; an `@overload`, a signature
+    // for the type checker over the method it overloads, is neither.
     abstract: FunctionNode[];
     concrete: FunctionNode[];
 }
@@ -476,7 +477,8 @@ export class File {
                 isInstantiableClass(base) && isOurABC(this.program, base) ? [base.shared.fullName] : []
             );
             const methods = node.d.suite.d.statements.filter(
-                (statement): statement is FunctionNode => statement.nodeType === ParseNodeType.Function
+                (statement): statement is FunctionNode =>
+                    statement.nodeType === ParseNodeType.Function && !this.isOverload(statement)
             );
             return {
                 node,
@@ -496,6 +498,13 @@ export class File {
     // Whether a method is decorated `@abstractmethod`.
     private isAbstract(method: FunctionNode): boolean {
         return method.d.decorators.some((decorator) => this.namesOf(decorator.d.expr).includes('abc.abstractmethod'));
+    }
+
+    // Whether a function is decorated `@overload`: a signature for the type checker alone.
+    private isOverload(method: FunctionNode): boolean {
+        return method.d.decorators.some((decorator) =>
+            this.namesOf(decorator.d.expr).some((name) => ['typing.overload', 'typing_extensions.overload'].includes(name))
+        );
     }
 
     // The project's ABCs the class an expression names implements; none where it
@@ -534,7 +543,8 @@ export class File {
         return isPrivate(this.info.fileUri.stripAllExtensions().fileName);
     }
 
-    // The loops filling a collection their block created empty before them.
+    // The loops filling a collection their block created empty before them, and doing
+    // nothing else: one entry each time, under one `if` at most.
     collectionLoops(): FilledLoop[] {
         const blocks = [this.parse.parserOutput.parseTree.d.statements, ...this.nodes.suites.map((suite) => suite.d.statements)];
         return blocks.flatMap((statements) => filledLoops(statements, (node) => this.isEmptyCollection(node)));
@@ -658,19 +668,35 @@ export class File {
         });
     }
 
-    // The root error of the file's package, by the name the conventions give it:
-    // `LupDevError` for `lup_dev`.
-    get packageRootError(): string {
-        const [top] = this.moduleName.split('.');
-        return `${top
-            .split('_')
-            .map((part) => part.charAt(0).toUpperCase() + part.substring(1))
-            .join('')}Error`;
+    // The root error of the file's package, named for it: `LupCodeRulesError` for
+    // `lup_code_rules`. None for a file in no package (`packageName`).
+    get packageRootError(): string | undefined {
+        const top = this.packageName;
+        if (top === undefined) {
+            return undefined;
+        }
+        const words = top.split('_').map((part) => part.charAt(0).toUpperCase() + part.substring(1));
+        return `${words.join('')}Error`;
     }
 
-    // The file's top-level package: `lup_dev` for `lup_dev.policy.judge`.
-    get packageName(): string {
-        const [top] = this.moduleName.split('.');
+    // The file's top-level package, as Python imports it: along pyright's import name
+    // for the file, the outermost directory holding `__init__.py`, walking up from the
+    // file's own until one doesn't. `lup_code_rules` for `lup_code_rules.errors`; `lup`
+    // for `modules.core.src.lup.errors`, the name pyright gives from the project's root
+    // a file its environment doesn't import. None for a file in no package: a script
+    // at the root, a `conftest.py`.
+    get packageName(): string | undefined {
+        const parts = this.moduleName.split('.');
+        const files = this.program.fileSystem;
+        let directory = this.info.fileUri.getDirectory();
+        let top: string | undefined;
+        for (let index = parts.length - (this.isPackageRoot ? 1 : 2); index >= 0; index -= 1) {
+            if (directory.fileName !== parts[index] || !files.existsSync(directory.combinePaths('__init__.py'))) {
+                break;
+            }
+            top = parts[index];
+            directory = directory.getDirectory();
+        }
         return top;
     }
 
@@ -880,6 +906,37 @@ export class File {
         return describeType(this.evaluator, node, []).every((member) => member.kind === 'none');
     }
 
+    // Whether a reference is what a call calls relative to an open directory, given its
+    // descriptor: `os.unlink(name, dir_fd=directory)`, `src_dir_fd=`, `dst_dir_fd=`.
+    isCalledInDirectory(node: ParseNode): boolean {
+        const call = node.parent;
+        const descriptors = ['dir_fd', 'src_dir_fd', 'dst_dir_fd'];
+        return (
+            call?.nodeType === ParseNodeType.Call &&
+            call.d.leftExpr === node &&
+            call.d.args.some(
+                (arg) => arg.d.name !== undefined && descriptors.includes(arg.d.name.d.value) && !this.isNone(arg.d.valueExpr)
+            )
+        );
+    }
+
+    // Whether an expression is spread whole into a new mapping, none of its keys read:
+    // `{**os.environ, "GIT_DIR": d}`, `dict(**os.environ, GIT_DIR=d)`.
+    isSpreadWhole(node: ParseNode): boolean {
+        const parent = node.parent;
+        if (parent?.nodeType === ParseNodeType.DictionaryExpandEntry) {
+            return parent.d.expr === node;
+        }
+        const call = parent?.parent;
+        return (
+            parent?.nodeType === ParseNodeType.Argument &&
+            parent.d.argCategory === ArgCategory.UnpackedDictionary &&
+            call?.nodeType === ParseNodeType.Call &&
+            call.d.args.includes(parent) &&
+            this.namesOf(call.d.leftExpr).includes('builtins.dict')
+        );
+    }
+
     // Whether pyright finds the expression to be a mapping; a `TypedDict` read by its
     // keys is already the typed shape, so it isn't one here.
     isMapping(node: ExpressionNode): boolean {
@@ -897,6 +954,16 @@ export class File {
                     part.nodeType === ParseNodeType.String && (part.d.token.flags & StringTokenFlags.Bytes) === 0
             )
         );
+    }
+
+    // The text a `str` or `bytes` literal holds, its escapes read: `"\0"` holds NUL. None
+    // for anything else, an f-string among them.
+    literalText(node: ExpressionNode | undefined): string | undefined {
+        if (node?.nodeType !== ParseNodeType.StringList) {
+            return undefined;
+        }
+        const parts = node.d.strings.flatMap((part) => (part.nodeType === ParseNodeType.String ? [part.d.value] : []));
+        return parts.length === node.d.strings.length ? parts.join('') : undefined;
     }
 
     // The type expressions naming one of `classes`: `tuple[int, str]`, `Tuple`, a bare
@@ -971,6 +1038,43 @@ export class File {
             return bound && !bound.fromEnd ? [{ node: call.node, text: this.text(call.node), receiver: undefined, bound }] : [];
         });
         return [...slices, ...islices];
+    }
+
+    // The slices keeping a head or a tail at a size, rather than at a place the data
+    // says: a cut (`cuts`), and a slice of a cut's shape at a bound the function's
+    // caller gives, a parameter or read off one (`text[:limit]`, `text[: query.limit]`,
+    // `text[-limit:]`).
+    sizedSlices(): Sliced[] {
+        const cut = new Set<ParseNode>(this.cuts().map((each) => each.node));
+        return this.slices().filter((sliced) => {
+            if (cut.has(sliced.node)) {
+                return true;
+            }
+            if (sliced.step) {
+                return false;
+            }
+            const fromStart = sliced.start === undefined || this.integerLiteral(sliced.start) === 0;
+            if (fromStart && sliced.end && this.isGivenBound(sliced.end)) {
+                return true;
+            }
+            const start = sliced.start;
+            const negated = start?.nodeType === ParseNodeType.UnaryOperation && start.d.operator === OperatorType.Subtract;
+            return sliced.end === undefined && negated && this.isGivenBound(start.d.expr);
+        });
+    }
+
+    // Whether a bound is given by the caller of the function reading it: a parameter,
+    // or read off one (`limit`, `query.limit`).
+    private isGivenBound(node: ExpressionNode): boolean {
+        let root = node;
+        while (root.nodeType === ParseNodeType.MemberAccess) {
+            root = root.d.leftExpr;
+        }
+        if (root.nodeType !== ParseNodeType.Name) {
+            return false;
+        }
+        const declarations = this.evaluator.getDeclInfoForNameNode(root)?.decls ?? [];
+        return declarations.length > 0 && declarations.every((declaration) => declaration.type === DeclarationType.Param);
     }
 
     // The bound an expression fixes where the code is written (`Bound`): an integer
@@ -1149,55 +1253,33 @@ export class File {
         return undefined;
     }
 
-    // The functions serving a tool of lup's library (`lup.tools`), each with the name of
-    // the tool's own: a function decorated `@lup.tool`, marked or not
-    // (`@lup.tool(reads=True)`), or handed to `lup.tool(…)`; a
-    // `Tool`'s `function`; the `call` of a class implementing `AgentTool` or `Toolset`;
-    // and each function of this file one of them names, which serves the same tool.
+    // The functions serving one of lup's tools, each with the tool's name, its method's:
+    // a method behind `@lup.tool`, marked or not (`@lup.tool(reads=True)`), on a part
+    // (`lup/doors/README.md`, *The doors*); and each function of this file one of them
+    // names, which serves the same tool.
     private serving(): Map<ParseNode, string> {
         if (this.served) {
             return this.served;
         }
-        const functions = new Set<ParseNode>(
-            this.nodes.scopes.filter(
-                (node) => node.nodeType === ParseNodeType.Function || node.nodeType === ParseNodeType.Lambda
-            )
-        );
-        const named = (node: ExpressionNode | undefined): (FunctionNode | LambdaNode)[] => {
-            if (node?.nodeType === ParseNodeType.Lambda) {
-                return [node];
-            }
-            const name =
-                node?.nodeType === ParseNodeType.Name
-                    ? node
-                    : node?.nodeType === ParseNodeType.MemberAccess
-                    ? node.d.member
-                    : undefined;
-            return (name ? this.evaluator.getDeclInfoForNameNode(name)?.decls ?? [] : []).flatMap((declaration) => {
+        const functions = new Set<ParseNode>(this.nodes.scopes.filter((node) => node.nodeType === ParseNodeType.Function));
+        const named = (node: NameNode | MemberAccessNode): FunctionNode[] => {
+            const name = node.nodeType === ParseNodeType.Name ? node : node.d.member;
+            return (this.evaluator.getDeclInfoForNameNode(name)?.decls ?? []).flatMap((declaration) => {
                 const resolved = this.evaluator.resolveAliasDeclaration(declaration, /* resolveLocalNames */ true);
                 return resolved?.type === DeclarationType.Function && functions.has(resolved.node) ? [resolved.node] : [];
             });
         };
-        const decorated = this.nodes.scopes.filter(
-            (node): node is FunctionNode =>
-                node.nodeType === ParseNodeType.Function &&
-                node.d.decorators.some((decorator) => {
-                    const written = decorator.d.expr;
-                    const maker = written.nodeType === ParseNodeType.Call ? written.d.leftExpr : written;
-                    return this.namesOf(maker).includes(toolMaker);
-                })
-        );
-        const handed = this.callsTo([toolMaker]).flatMap((call) => named(call.argument('function', 0)));
-        const functionOfTool = this.nodes.calls
-            .filter((call) => this.buildsTool(call))
-            .flatMap((call) => named(argumentOf(call, 'function')));
-        const calls = this.classes()
-            .filter((declared) => declared.ancestors.some((ancestor) => toolInterfaces.includes(ancestor)))
-            .flatMap((declared) => declared.concrete.filter((method) => method.d.name.d.value === 'call'));
-        const pending = [...decorated, ...handed, ...functionOfTool, ...calls].map((node) => ({
-            node,
-            tool: node.nodeType === ParseNodeType.Function ? node.d.name.d.value : 'lambda',
-        }));
+        const pending = this.nodes.scopes
+            .filter(
+                (node): node is FunctionNode =>
+                    node.nodeType === ParseNodeType.Function &&
+                    node.d.decorators.some((decorator) => {
+                        const written = decorator.d.expr;
+                        const door = written.nodeType === ParseNodeType.Call ? written.d.leftExpr : written;
+                        return this.namesOf(door).includes(toolDoor);
+                    })
+            )
+            .map((node) => ({ node, tool: node.d.name.d.value }));
         const served = new Map<ParseNode, string>();
         for (let next = pending.pop(); next; next = pending.pop()) {
             const { node, tool } = next;
@@ -1210,18 +1292,6 @@ export class File {
         }
         this.served = served;
         return served;
-    }
-
-    // Whether a call makes one of lup's `Tool`s: `Tool[Query, str](…)`, or a class
-    // deriving from it.
-    private buildsTool(call: CallNode): boolean {
-        const callee = call.d.leftExpr.nodeType === ParseNodeType.Index ? call.d.leftExpr.d.leftExpr : call.d.leftExpr;
-        const type = this.evaluator.getType(callee);
-        return (
-            type !== undefined &&
-            isInstantiableClass(type) &&
-            [type.shared.fullName, ...ancestorsOf(type)].includes('lup.tools.tool.Tool')
-        );
     }
 
     // Every item read by a single key, as opposed to assigned or deleted:
@@ -1286,32 +1356,33 @@ export class File {
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
 
-// What marks a function as a tool in lup's library (`lup.doors`): the decorator, which
-// also takes a function as its argument; and the interfaces a class serving tools
-// implements, whose `call` serves one.
-const toolMaker = 'lup.doors.tool';
-const toolInterfaces = ['lup.tools.tool.AgentTool', 'lup.tools.serving.Toolset'];
+// The door putting a method behind a tool: `@lup.tool`, which `lup` re-exports.
+const toolDoor = 'lup.doors.tool.tool';
 
-// What follows `max_` in a parameter's or an option's name saying how many of something
-// a call returns at most: `max_results`, `--max-count`.
-const counted = ['count', 'results', 'items', 'lines', 'rows', 'entries', 'matches', 'hits', 'records', 'chars', 'bytes', 'tokens'];
+// What a call's answer is counted in, beside `max` or `limit` in a parameter's or an
+// option's name saying how many of it the call returns at most: `max_results`,
+// `line_limit`, `--max-count`.
+const counted = [
+    'count',
+    ...['result', 'item', 'line', 'row', 'hit', 'record', 'char', 'byte', 'token'].flatMap((each) => [each, `${each}s`]),
+    ...['match', 'matches', 'entry', 'entries'],
+];
 
 // Whether a parameter's or a command-line option's name says how many of something a
-// call returns at most: `limit`, `holds_limit`, `--limit`, `most`, `maxlen`,
-// `max_results`, `--max-count`.
+// call returns at most, so that it cuts the call's answer: `limit`, `--limit`, `most`,
+// `maxlen`, `max_results`, `line_limit`, `--max-count`. A limit on something else,
+// `time_limit` or `--pids-limit`, cuts no answer.
 function namesALimit(name: string): boolean {
     const words = name
         .toLowerCase()
         .split('-')
         .flatMap((part) => part.split('_'))
         .filter((word) => word !== '');
-    if (words.includes('limit')) {
-        return true;
+    const [first, second, ...more] = words;
+    if (second === undefined) {
+        return ['limit', 'most', 'maxlen'].includes(first);
     }
-    if (words.length === 1) {
-        return ['most', 'maxlen'].includes(words[0]);
-    }
-    return words.length === 2 && words[0] === 'max' && counted.includes(words[1]);
+    return more.length === 0 && ((first === 'max' && counted.includes(second)) || (second === 'limit' && counted.includes(first)));
 }
 
 // The name of the parameter a function takes at `position` among its arguments given by

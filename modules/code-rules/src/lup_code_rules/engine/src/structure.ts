@@ -10,10 +10,8 @@ import { isUserCode } from 'pyright/analyzer/sourceFileInfoUtils';
 import { ClassType, isClass, isInstantiableClass } from 'pyright/analyzer/types';
 import { TextRange } from 'pyright/common/textRange';
 import {
-    CallNode,
     ExpressionNode,
     ForNode,
-    IndexNode,
     NameNode,
     ParseNode,
     ParseNodeType,
@@ -141,37 +139,62 @@ export interface FilledLoop {
     created: NameNode;
 }
 
-const fillers = ['append', 'add', 'extend', 'update', 'insert', 'setdefault'];
+// The methods filling a collection with one entry: a list's, a set's.
+const fillers = ['append', 'add'];
 
-// The names among `names` a loop's body fills, by one of their methods or by
-// assigning an item.
-class Fills extends ParseTreeWalker {
-    readonly filled: string[] = [];
+// The collection a loop fills, by its name among `names`, where filling it is all the
+// loop does: a `for`, with no `else`, whose body is one `rows.append(…)`, `seen.add(…)`
+// or `table[key] = …`, alone or under one `if` with no `else`, the collection read
+// nowhere else in the loop. A loop doing more, a fold carrying state from one
+// iteration to the next among them, fills none here: a comprehension holds only that.
+function soleFill(loop: ForNode | WhileNode, names: string[]): string | undefined {
+    if (loop.nodeType !== ParseNodeType.For || loop.d.elseSuite) {
+        return undefined;
+    }
+    const [statement, ...more] = loop.d.forSuite.d.statements;
+    const guarded = statement?.nodeType === ParseNodeType.If && more.length === 0 && !statement.d.elseSuite;
+    const body = guarded ? statement.d.ifSuite.d.statements : loop.d.forSuite.d.statements;
+    const [only, ...rest] = body;
+    if (only?.nodeType !== ParseNodeType.StatementList || rest.length > 0 || only.d.statements.length !== 1) {
+        return undefined;
+    }
+    const filled = filledBy(only.d.statements[0]);
+    if (!filled || !names.includes(filled.d.value)) {
+        return undefined;
+    }
+    const reads = new Reads(filled.d.value);
+    reads.walk(loop);
+    return reads.count === 1 ? filled.d.value : undefined;
+}
 
-    constructor(private readonly names: string[]) {
+// The collection a simple statement fills with one entry, as named: the list or set
+// it calls `append` or `add` on, or the dict it assigns an item of.
+function filledBy(statement: ParseNode): NameNode | undefined {
+    if (statement.nodeType === ParseNodeType.Call) {
+        const callee = statement.d.leftExpr;
+        const filling = callee.nodeType === ParseNodeType.MemberAccess && fillers.includes(callee.d.member.d.value);
+        return filling && callee.d.leftExpr.nodeType === ParseNodeType.Name ? callee.d.leftExpr : undefined;
+    }
+    if (statement.nodeType !== ParseNodeType.Assignment || statement.d.leftExpr.nodeType !== ParseNodeType.Index) {
+        return undefined;
+    }
+    const item = statement.d.leftExpr;
+    const [key, ...more] = item.d.items;
+    const single = key !== undefined && more.length === 0 && key.d.valueExpr.nodeType !== ParseNodeType.Slice;
+    return single && item.d.leftExpr.nodeType === ParseNodeType.Name ? item.d.leftExpr : undefined;
+}
+
+// How many times a name is read within a node.
+class Reads extends ParseTreeWalker {
+    count = 0;
+
+    constructor(private readonly name: string) {
         super();
     }
 
-    override visitCall(node: CallNode) {
-        const callee = node.d.leftExpr;
-        if (callee.nodeType !== ParseNodeType.MemberAccess || !fillers.includes(callee.d.member.d.value)) {
-            return true;
-        }
-        const target = callee.d.leftExpr;
-        if (target.nodeType === ParseNodeType.Name && this.names.includes(target.d.value)) {
-            this.filled.push(target.d.value);
-        }
-        return true;
-    }
-
-    override visitIndex(node: IndexNode) {
-        const parent = node.parent;
-        const assigned =
-            (parent?.nodeType === ParseNodeType.Assignment || parent?.nodeType === ParseNodeType.AugmentedAssignment) &&
-            parent.d.leftExpr === node;
-        const target = node.d.leftExpr;
-        if (assigned && target.nodeType === ParseNodeType.Name && this.names.includes(target.d.value)) {
-            this.filled.push(target.d.value);
+    override visitName(node: NameNode) {
+        if (node.d.value === this.name) {
+            this.count += 1;
         }
         return true;
     }
@@ -206,7 +229,8 @@ function headerOf(loop: ForNode | WhileNode): TextRange {
 }
 
 // The loops of a block that fill a collection the block created empty before them,
-// `rows = []` and then `for …: rows.append(…)`, the fill at any depth below.
+// and do nothing else (`soleFill`): `rows = []`, then `for …: rows.append(…)`, the
+// loop at any depth below.
 export function filledLoops(statements: StatementNode[], isEmpty: (node: ExpressionNode) => boolean): FilledLoop[] {
     const created = new Map<string, NameNode>();
     const found: FilledLoop[] = [];
@@ -214,9 +238,8 @@ export function filledLoops(statements: StatementNode[], isEmpty: (node: Express
         const walker = new Loops();
         walker.walk(statement);
         for (const loop of walker.loops) {
-            const fills = new Fills([...created.keys()]);
-            fills.walk(loop);
-            for (const name of new Set(fills.filled)) {
+            const name = soleFill(loop, [...created.keys()]);
+            if (name !== undefined) {
                 found.push({ header: headerOf(loop), name, created: created.get(name)! });
             }
         }

@@ -271,8 +271,12 @@ export const libraries = {
                 'getcwd',
                 'getcwdb',
             ];
+            // A call relative to an open directory follows no link on the way to it, which
+            // no call of `pathlib` makes.
             for (const used of file.uses(operations.map((name) => `os.${name}`))) {
-                file.report(used.node, `this uses \`${used.name}\``);
+                if (!file.isCalledInDirectory(used.node)) {
+                    file.report(used.node, `this uses \`${used.name}\``);
+                }
             }
         },
         examples: {
@@ -305,6 +309,15 @@ export const libraries = {
                         """Return this process's id."""
                         return os.getpid()
                 `,
+                python`
+                    import os
+
+
+                    def moved(name: str, source: int, target: int) -> None:
+                        """Move \`name\` from the open directory \`source\` to \`target\`, following no link on the way."""
+                        os.link(name, name, src_dir_fd=source, dst_dir_fd=target, follow_symlinks=False)
+                        os.unlink(name, dir_fd=source)
+                `,
             ],
         },
     },
@@ -322,8 +335,13 @@ export const libraries = {
                 ...['environ', 'environb', 'getenv', 'getenvb'].map((name) => `os.${name}`),
                 ...['load_dotenv', 'dotenv_values'].map((name) => `dotenv.main.${name}`),
             ];
+            // The environment spread whole into a mapping, as a child process's is
+            // handed on with more set, reads no variable.
+            const whole = ['os.environ', 'os.environb'];
             for (const used of file.uses(readers)) {
-                file.report(used.node, `this uses \`${used.name}\``);
+                if (!(whole.includes(used.name) && file.isSpreadWhole(used.node))) {
+                    file.report(used.node, `this uses \`${used.name}\``);
+                }
             }
         },
         examples: {
@@ -361,6 +379,21 @@ export const libraries = {
                     def process() -> int:
                         """Return this process's id."""
                         return os.getpid()
+                `,
+                python`
+                    import os
+
+                    from lup.programs import run
+
+
+                    def log(git_dir: str) -> str:
+                        """Return the log of the repository whose git directory is \`git_dir\`."""
+                        return run("git", "log", env={**os.environ, "GIT_DIR": git_dir}).text()
+
+
+                    def status(git_dir: str) -> str:
+                        """Return the status of the repository whose git directory is \`git_dir\`."""
+                        return run("git", "status", env=dict(**os.environ, GIT_DIR=git_dir)).text()
                 `,
             ],
         },

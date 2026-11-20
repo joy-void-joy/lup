@@ -12,8 +12,8 @@ export const constants = {
         steer:
             'A number or a duration becomes a default a caller can override, a parameter\'s or a field\'s, and a ' +
             "list a caller might change a field's default on the model that uses it; a closed set of options " +
-            'becomes a `Literal` type, its members read with `typing.get_args`: ' +
-            '`name in get_args(Format.__value__)` to test one, `list(get_args(Format.__value__))` to keep them; ' +
+            "becomes a `Literal` type, its members read with `typing.get_args` from the `Literal`'s " +
+            '`__value__`, inline to test one (`name in get_args(…)`), and `list(get_args(…))` to keep them; ' +
             'a fixed table from one vocabulary to another becomes a function that `match`es; ' +
             "a path goes in the package's `layout.py`, an " +
             "environment variable's name in its `settings.py`, and a runtime's wire spelling in its adapter, as a " +

@@ -7,9 +7,7 @@ export const collections = {
     'collection-loop': {
         category: 'spelling',
         mistake: 'A collection created empty and filled in a loop spreads one value over several statements.',
-        steer:
-            'Build it with a comprehension, or, where the loop has control flow a comprehension can\'t hold, a ' +
-            'nested function that `yield`s.',
+        steer: "Build it with a comprehension, the loop's `if` its condition.",
         check(file) {
             for (const loop of file.collectionLoops()) {
                 file.report(loop.header, `this loop fills \`${loop.name}\`, created empty before it`);
@@ -32,6 +30,22 @@ export const collections = {
                             return [number * number for number in numbers]
                     `,
                 },
+                {
+                    code: python`
+                        def lengths(words: list[str]) -> dict[str, int]:
+                            """Map each word that isn't empty to its length."""
+                            found: dict[str, int] = {}
+                            for word in words:
+                                if word:
+                                    found[word] = len(word)
+                            return found
+                    `,
+                    rewritten: python`
+                        def lengths(words: list[str]) -> dict[str, int]:
+                            """Map each word that isn't empty to its length."""
+                            return {word: len(word) for word in words if word}
+                    `,
+                },
             ],
             passes: [
                 python`
@@ -41,6 +55,25 @@ export const collections = {
                         for key, value in extra.items():
                             total[key] = total.get(key, 0) + value
                         return total
+                `,
+                python`
+                    def running(numbers: list[int]) -> list[int]:
+                        """Return the running total after each number."""
+                        totals: list[int] = []
+                        total = 0
+                        for number in numbers:
+                            total += number
+                            totals.append(total)
+                        return totals
+                `,
+                python`
+                    def distinct(names: list[str]) -> list[str]:
+                        """Return the names, each once, in the order first seen."""
+                        kept: list[str] = []
+                        for name in names:
+                            if name not in kept:
+                                kept.append(name)
+                        return kept
                 `,
             ],
         },

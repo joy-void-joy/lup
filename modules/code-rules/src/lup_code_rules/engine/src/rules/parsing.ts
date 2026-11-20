@@ -59,14 +59,18 @@ export const parsing = {
             "Read the text with its format's parser: `shlex.split` for a command line, `urllib.parse` for a URL, " +
             '`email` for headers, `csv` for rows.',
         check(file) {
+            // Records ended by NUL, as git's `-z` output is, are parsed whole by a split
+            // on it.
+            const nul = '\0';
             for (const call of file.methodCalls(['split', 'rsplit'])) {
                 const separator = call.argument('sep', 0);
-                if (separator && !file.isNone(separator) && file.isText(call.receiver)) {
+                const parsed = file.literalText(separator) === nul;
+                if (separator && !file.isNone(separator) && !parsed && file.isText(call.receiver)) {
                     file.report(call.node, `\`.${call.method}(…)\` splits a \`${file.printType(call.receiver)}\``);
                 }
             }
             for (const call of file.methodCalls(['partition', 'rpartition'])) {
-                if (file.isText(call.receiver)) {
+                if (file.literalText(call.argument('sep', 0)) !== nul && file.isText(call.receiver)) {
                     file.report(call.node, `\`.${call.method}(…)\` splits a \`${file.printType(call.receiver)}\``);
                 }
             }
@@ -98,6 +102,19 @@ export const parsing = {
                         """Split a command line as a shell would, and a sentence on its spaces."""
                         return [*shlex.split(line), *line.split(), *line.split(None, 1)]
                 `,
+                python`
+                    from lup.programs import run
+
+
+                    def changed() -> list[str]:
+                        """Return the paths git says changed, from its output of paths each ended by NUL."""
+                        return run("git", "diff", "--name-only", "-z").text().split("\\0")
+
+
+                    def untracked() -> list[bytes]:
+                        """Return the paths git doesn't track, as git writes them."""
+                        return run("git", "ls-files", "--others", "-z").output.split(b"\\0")
+                `,
             ],
         },
     },
@@ -107,8 +124,11 @@ export const parsing = {
         mistake: 'Taking text apart by position breaks quietly as soon as its layout shifts.',
         steer: "Read the text with its format's parser, which says what each part is.",
         check(file) {
+            // A head or a tail kept at a size is truncation, `silent-truncation`'s, and
+            // `fixed-tool-limit`'s in a tool.
+            const sized = new Set(file.sizedSlices().map((slice) => slice.node));
             for (const slice of file.slices()) {
-                if (file.isText(slice.receiver)) {
+                if (file.isText(slice.receiver) && !sized.has(slice.node)) {
                     file.report(slice.node, `\`${slice.text}\` slices a \`${file.printType(slice.receiver)}\``);
                 }
             }
@@ -136,6 +156,11 @@ export const parsing = {
                     def rest(items: list[int], name: str) -> list[int]:
                         """Return all but the first item, and the length of \`name\`'s first letter."""
                         return [*items[1:], len(name[0])]
+                `,
+                python`
+                    def notification(sender: str, body: str, width: int) -> str:
+                        """Return the notification of a message: who sent it, and how its text starts and ends."""
+                        return f"{sender}: {body[:200]} ... {body[-50:]}, {body[:width]}"
                 `,
             ],
         },

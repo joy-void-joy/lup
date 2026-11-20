@@ -202,17 +202,22 @@ export const errors = {
         category: 'design',
         mistake: 'An exception outside its package\'s root error escapes a caller catching everything the package raises.',
         steer:
-            "Derive it from the package's root error, named for the package (`LupDevError` in `lup_dev`), or from " +
-            'an error below it.',
+            "Derive it from the package's root error, named for its package (`LupError` in `lup`), or from an " +
+            'error below it.',
         check(file) {
+            const top = file.packageName;
             const root = file.packageRootError;
+            // A module in no package, a script or a `conftest.py`, has no root error.
+            if (top === undefined || root === undefined) {
+                return;
+            }
             for (const declared of file.classes()) {
                 const name = declared.node.d.name.d.value;
                 if (!declared.ancestors.includes('builtins.BaseException') || name === root) {
                     continue;
                 }
                 const rooted = declared.ancestors.some(
-                    (ancestor) => ancestor.startsWith(`${file.packageName}.`) && ancestor.endsWith(`.${root}`)
+                    (ancestor) => `.${ancestor}`.includes(`.${top}.`) && ancestor.endsWith(`.${root}`)
                 );
                 if (!rooted) {
                     file.report(declared.node.d.name, `\`${name}\` doesn't descend from \`${root}\``);
