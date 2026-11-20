@@ -1158,55 +1158,33 @@ export class File {
         return undefined;
     }
 
-    // The functions serving a tool of lup's library (`lup.tools`), each with the name of
-    // the tool's own: a function decorated `@lup.tool`, marked or not
-    // (`@lup.tool(reads=True)`), or handed to `lup.tool(…)`; a
-    // `Tool`'s `function`; the `call` of a class implementing `AgentTool` or `Toolset`;
-    // and each function of this file one of them names, which serves the same tool.
+    // The functions serving one of lup's tools, each with the tool's name, its method's:
+    // a method behind `@lup.tool`, marked or not (`@lup.tool(reads=True)`), on a part
+    // (`lup/doors/README.md`, *The doors*); and each function of this file one of them
+    // names, which serves the same tool.
     private serving(): Map<ParseNode, string> {
         if (this.served) {
             return this.served;
         }
-        const functions = new Set<ParseNode>(
-            this.nodes.scopes.filter(
-                (node) => node.nodeType === ParseNodeType.Function || node.nodeType === ParseNodeType.Lambda
-            )
-        );
-        const named = (node: ExpressionNode | undefined): (FunctionNode | LambdaNode)[] => {
-            if (node?.nodeType === ParseNodeType.Lambda) {
-                return [node];
-            }
-            const name =
-                node?.nodeType === ParseNodeType.Name
-                    ? node
-                    : node?.nodeType === ParseNodeType.MemberAccess
-                    ? node.d.member
-                    : undefined;
-            return (name ? this.evaluator.getDeclInfoForNameNode(name)?.decls ?? [] : []).flatMap((declaration) => {
+        const functions = new Set<ParseNode>(this.nodes.scopes.filter((node) => node.nodeType === ParseNodeType.Function));
+        const named = (node: NameNode | MemberAccessNode): FunctionNode[] => {
+            const name = node.nodeType === ParseNodeType.Name ? node : node.d.member;
+            return (this.evaluator.getDeclInfoForNameNode(name)?.decls ?? []).flatMap((declaration) => {
                 const resolved = this.evaluator.resolveAliasDeclaration(declaration, /* resolveLocalNames */ true);
                 return resolved?.type === DeclarationType.Function && functions.has(resolved.node) ? [resolved.node] : [];
             });
         };
-        const decorated = this.nodes.scopes.filter(
-            (node): node is FunctionNode =>
-                node.nodeType === ParseNodeType.Function &&
-                node.d.decorators.some((decorator) => {
-                    const written = decorator.d.expr;
-                    const maker = written.nodeType === ParseNodeType.Call ? written.d.leftExpr : written;
-                    return this.namesOf(maker).includes(toolMaker);
-                })
-        );
-        const handed = this.callsTo([toolMaker]).flatMap((call) => named(call.argument('function', 0)));
-        const functionOfTool = this.nodes.calls
-            .filter((call) => this.buildsTool(call))
-            .flatMap((call) => named(argumentOf(call, 'function')));
-        const calls = this.classes()
-            .filter((declared) => declared.ancestors.some((ancestor) => toolInterfaces.includes(ancestor)))
-            .flatMap((declared) => declared.concrete.filter((method) => method.d.name.d.value === 'call'));
-        const pending = [...decorated, ...handed, ...functionOfTool, ...calls].map((node) => ({
-            node,
-            tool: node.nodeType === ParseNodeType.Function ? node.d.name.d.value : 'lambda',
-        }));
+        const pending = this.nodes.scopes
+            .filter(
+                (node): node is FunctionNode =>
+                    node.nodeType === ParseNodeType.Function &&
+                    node.d.decorators.some((decorator) => {
+                        const written = decorator.d.expr;
+                        const door = written.nodeType === ParseNodeType.Call ? written.d.leftExpr : written;
+                        return this.namesOf(door).includes(toolDoor);
+                    })
+            )
+            .map((node) => ({ node, tool: node.d.name.d.value }));
         const served = new Map<ParseNode, string>();
         for (let next = pending.pop(); next; next = pending.pop()) {
             const { node, tool } = next;
@@ -1219,18 +1197,6 @@ export class File {
         }
         this.served = served;
         return served;
-    }
-
-    // Whether a call makes one of lup's `Tool`s: `Tool[Query, str](…)`, or a class
-    // deriving from it.
-    private buildsTool(call: CallNode): boolean {
-        const callee = call.d.leftExpr.nodeType === ParseNodeType.Index ? call.d.leftExpr.d.leftExpr : call.d.leftExpr;
-        const type = this.evaluator.getType(callee);
-        return (
-            type !== undefined &&
-            isInstantiableClass(type) &&
-            [type.shared.fullName, ...ancestorsOf(type)].includes('lup.tools.tool.Tool')
-        );
     }
 
     // Every item read by a single key, as opposed to assigned or deleted:
@@ -1295,32 +1261,33 @@ export class File {
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
 
-// What marks a function as a tool in lup's library (`lup.doors`): the decorator, which
-// also takes a function as its argument; and the interfaces a class serving tools
-// implements, whose `call` serves one.
-const toolMaker = 'lup.doors.tool';
-const toolInterfaces = ['lup.tools.tool.AgentTool', 'lup.tools.serving.Toolset'];
+// The door putting a method behind a tool: `@lup.tool`, which `lup` re-exports.
+const toolDoor = 'lup.doors.tool.tool';
 
-// What follows `max_` in a parameter's or an option's name saying how many of something
-// a call returns at most: `max_results`, `--max-count`.
-const counted = ['count', 'results', 'items', 'lines', 'rows', 'entries', 'matches', 'hits', 'records', 'chars', 'bytes', 'tokens'];
+// What a call's answer is counted in, beside `max` or `limit` in a parameter's or an
+// option's name saying how many of it the call returns at most: `max_results`,
+// `line_limit`, `--max-count`.
+const counted = [
+    'count',
+    ...['result', 'item', 'line', 'row', 'hit', 'record', 'char', 'byte', 'token'].flatMap((each) => [each, `${each}s`]),
+    ...['match', 'matches', 'entry', 'entries'],
+];
 
 // Whether a parameter's or a command-line option's name says how many of something a
-// call returns at most: `limit`, `holds_limit`, `--limit`, `most`, `maxlen`,
-// `max_results`, `--max-count`.
+// call returns at most, so that it cuts the call's answer: `limit`, `--limit`, `most`,
+// `maxlen`, `max_results`, `line_limit`, `--max-count`. A limit on something else,
+// `time_limit` or `--pids-limit`, cuts no answer.
 function namesALimit(name: string): boolean {
     const words = name
         .toLowerCase()
         .split('-')
         .flatMap((part) => part.split('_'))
         .filter((word) => word !== '');
-    if (words.includes('limit')) {
-        return true;
+    const [first, second, ...more] = words;
+    if (second === undefined) {
+        return ['limit', 'most', 'maxlen'].includes(first);
     }
-    if (words.length === 1) {
-        return ['most', 'maxlen'].includes(words[0]);
-    }
-    return words.length === 2 && words[0] === 'max' && counted.includes(words[1]);
+    return more.length === 0 && ((first === 'max' && counted.includes(second)) || (second === 'limit' && counted.includes(first)));
 }
 
 // The name of the parameter a function takes at `position` among its arguments given by

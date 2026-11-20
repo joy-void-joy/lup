@@ -122,8 +122,6 @@ export const truncation = {
             flags: [
                 {
                     code: python`
-                        from pydantic import Field
-
                         import lup
                         from lup.types import Model
 
@@ -131,13 +129,14 @@ export const truncation = {
                         class Query(Model):
                             """A search of the notes."""
 
-                            words: str = Field(description="The words a note holds.")
+                            words: str
+                            """The words a note holds."""
 
 
-                        class Notes(Model):
+                        class Notes(lup.Part):
                             """Notes an agent searches."""
 
-                            notes: list[str]
+                            notes: list[str] = []
                             shown: int = 50
 
                             @lup.tool
@@ -147,8 +146,6 @@ export const truncation = {
                                 return "\\n".join(found[: self.shown])
                     `,
                     rewritten: python`
-                        from pydantic import Field, PositiveInt
-
                         import lup
                         from lup.types import Model
 
@@ -156,14 +153,16 @@ export const truncation = {
                         class Query(Model):
                             """A search of the notes."""
 
-                            words: str = Field(description="The words a note holds.")
-                            limit: PositiveInt = Field(default=50, description="How many notes to list at most.")
+                            words: str
+                            """The words a note holds."""
+                            limit: int = 50
+                            """How many notes to list at most."""
 
 
-                        class Notes(Model):
+                        class Notes(lup.Part):
                             """Notes an agent searches."""
 
-                            notes: list[str]
+                            notes: list[str] = []
 
                             @lup.tool
                             async def find_notes(self, query: Query) -> str:
@@ -177,46 +176,54 @@ export const truncation = {
                 },
                 {
                     code: python`
-                        from pydantic import Field
-
                         import lup
-                        from lup.programs import run
+                        from lup.programs import awaited
                         from lup.types import Model
 
 
                         class Query(Model):
                             """A search of the repository's issues."""
 
-                            words: str = Field(description="What to search for, in GitHub's search syntax.")
+                            words: str
+                            """What to search for, in GitHub's search syntax."""
 
 
-                        @lup.tool
-                        async def find_issues(query: Query) -> str:
-                            """Search the repository's issues."""
-                            return run("gh", "search", "issues", "--limit=100", "--", query.words).text()
+                        class Issues(lup.Part):
+                            """The repository's issues, searched."""
+
+                            @lup.tool
+                            async def find_issues(self, query: Query) -> str:
+                                """Search the repository's issues."""
+                                ran = await awaited("gh", "search", "issues", "--limit=100", "--", query.words)
+                                return ran.text()
                     `,
                     rewritten: python`
-                        from pydantic import Field, PositiveInt
-
                         import lup
-                        from lup.programs import run
+                        from lup.programs import awaited
                         from lup.types import Model
 
 
                         class Query(Model):
                             """A search of the repository's issues."""
 
-                            words: str = Field(description="What to search for, in GitHub's search syntax.")
-                            limit: PositiveInt = Field(default=100, description="How many issues to list at most.")
+                            words: str
+                            """What to search for, in GitHub's search syntax."""
+                            limit: int = 100
+                            """How many issues to list at most."""
 
 
-                        @lup.tool
-                        async def find_issues(query: Query) -> str:
-                            """Search the repository's issues."""
-                            ran = run("gh", "search", "issues", f"--limit={query.limit}", "--", query.words)
-                            found = ran.text().splitlines()
-                            more = ["More may match: a larger \`limit\` lists them."] if len(found) == query.limit else []
-                            return "\\n".join([*found, *more])
+                        class Issues(lup.Part):
+                            """The repository's issues, searched."""
+
+                            @lup.tool
+                            async def find_issues(self, query: Query) -> str:
+                                """Search the repository's issues."""
+                                limit = f"--limit={query.limit}"
+                                ran = await awaited("gh", "search", "issues", limit, "--", query.words)
+                                found = ran.text().splitlines()
+                                full = len(found) == query.limit
+                                more = ["More may match: a larger \`limit\` lists them."] if full else []
+                                return "\\n".join([*found, *more])
                     `,
                 },
             ],
@@ -236,8 +243,6 @@ export const truncation = {
                             return self.notes[: self.shown]
                 `,
                 python`
-                    from pydantic import Field, PositiveInt
-
                     import lup
                     from lup.types import Model
 
@@ -245,8 +250,10 @@ export const truncation = {
                     class Query(Model):
                         """A search of the notes."""
 
-                        words: str = Field(description="The words a note holds.")
-                        limit: PositiveInt = Field(default=50, description="How many notes to list at most.")
+                        words: str
+                        """The words a note holds."""
+                        limit: int = 50
+                        """How many notes to list at most."""
 
 
                     def search(notes: list[str], words: str, limit: int) -> list[str]:
@@ -254,15 +261,42 @@ export const truncation = {
                         return [note for note in notes if words in note][:limit]
 
 
-                    class Notes(Model):
+                    class Notes(lup.Part):
                         """Notes an agent searches."""
 
-                        notes: list[str]
+                        notes: list[str] = []
 
                         @lup.tool
                         async def find_notes(self, query: Query) -> str:
-                            """Find the notes holding some words, \`limit\` at most."""
+                            """Find notes holding some words, \`limit\` at most."""
                             return "\\n".join(search(self.notes, query.words, query.limit))
+                `,
+                python`
+                    import lup
+                    from lup.types import Model
+
+
+                    class Query(Model):
+                        """A position to look at."""
+
+                        position: str
+                        """The position, in the notation the engine reads."""
+
+
+                    def best_move(position: str, time_limit: int) -> str:
+                        """Return the best move from \`position\`, searched for \`time_limit\` seconds."""
+                        return f"{position}: searched for {time_limit}s"
+
+
+                    class Chess(lup.Part):
+                        """A chess engine an agent asks."""
+
+                        patience: int = 5
+
+                        @lup.tool
+                        async def best(self, query: Query) -> str:
+                            """Find the best move from a position."""
+                            return best_move(query.position, time_limit=self.patience)
                 `,
             ],
         },
