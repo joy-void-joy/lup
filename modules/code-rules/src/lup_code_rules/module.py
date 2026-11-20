@@ -21,14 +21,14 @@ from lup import (
 from lup.declaration.layout import RepositoryLayout
 from lup.hosting.git import nul_separated
 from lup_code_rules.checking import Checked, Exemptions, Settling, Table
-from lup_code_rules.engine import Engine, EngineLayout, Source
+from lup_code_rules.engine import Engine, EngineLayout, Source, Written
 from lup_code_rules.errors import LupCodeRulesError
 from lup_code_rules.examples import Examples
 from lup_code_rules.guidance import told
 from lup_code_rules.promises import CodeRulesPromises
-from lup_code_rules.reading import read_directives
+from lup_code_rules.reading import read_directives, typescript_directives
 from lup_code_rules.reporting import Report
-from lup_code_rules.reports import RuleInfo
+from lup_code_rules.reports import FileReport, RuleInfo
 from lup_code_rules.ruff import ruff_findings
 
 
@@ -224,8 +224,11 @@ class Checker(Part):
         placed = self.module.rules.resolve(known, known)
         return [each.entry for each in placed]
 
-    async def files(self, root: Path, paths: list[Path]) -> list[str]:
-        """Return the Python files to check, from `root`: those `paths` name or hold, of those git would commit."""
+    async def files(
+        self, root: Path, paths: list[Path], suffixes: list[str] | None = None
+    ) -> list[str]:
+        """Return the files to check, from `root`: those `paths` name or hold, of those git would commit, ending with one of `suffixes`, Python's by default."""
+        endings = suffixes or [".py"]
         within = [path.resolve().relative_to(root).as_posix() for path in paths]
         listed = await self.git.ran(
             "-C",
@@ -246,7 +249,7 @@ class Checker(Part):
             dict.fromkeys(
                 name
                 for name in names
-                if name.endswith(".py") and (root / name).is_file()
+                if Path(name).suffix in endings and (root / name).is_file()
             )
         )
 
@@ -266,6 +269,18 @@ class Checker(Part):
             ruffs = await ruff_findings(self.ruff, layout.root, files)
         except LupCodeRulesError as failed:
             raise RefusedError(str(failed)) from failed
+        written = [
+            Written(path=each, content=(layout.root / each).read_text())
+            for each in await self.files(layout.root, paths, [".ts", ".tsx"])
+        ]
+        try:
+            commented = await engine.comments(written) if written else []
+        except LupCodeRulesError as failed:
+            raise RefusedError(str(failed)) from failed
+        typescript = [
+            FileReport(path=each.path, directives=typescript_directives(found))
+            for each, found in zip(written, commented, strict=True)
+        ]
         settling = Settling(
             table=table,
             exemptions=Exemptions(patterns=list(self.module.exempt.given())),
@@ -283,7 +298,8 @@ class Checker(Part):
             )
             for report in reports
         ]
-        return Report(checked=checked, table=table)
+        notes = [settling.settled(report, []) for report in typescript]
+        return Report(checked=[*checked, *notes], table=table)
 
 
 def removing(root: Path, checked: Checked) -> int:

@@ -7,7 +7,10 @@
         "noEmit": true,
         "rootDir": ".",
         "paths": {
-            "pyright/*": ["./pyright/packages/pyright-internal/src/*"]
+            "pyright/*": ["./pyright/packages/pyright-internal/src/*"],
+            // TypeScript's own parser, which reads a TypeScript file's `// lup:`
+            // comments, from pyright's source, which builds with it.
+            "typescript": ["./pyright/node_modules/typescript"]
         },
         "typeRoots": [
             "./pyright/packages/pyright-internal/node_modules/@types",

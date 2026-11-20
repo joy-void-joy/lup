@@ -233,6 +233,19 @@ class Engine(Model):
         )
         return answered(listed, list[RuleInfo])
 
+    async def comments(self, written: list[Written]) -> list[list[LupComment]]:
+        """Return each TypeScript file's `// lup:` comments, in the order given, found with TypeScript's own parser, so a `//` in a string or a regular expression is never one."""
+        bundle = await self.built()
+        found = succeeded(
+            await self.node.ran(
+                str(bundle),
+                "comments",
+                given=TypeAdapter(list[Written]).dump_json(written).decode(),
+            ),
+            "reading TypeScript's `// lup:` comments",
+        )
+        return answered(found, list[list[LupComment]])
+
     async def checked(
         self, root: Path, venv: Path, rules: list[str], sources: list[Source]
     ) -> list[FileReport]:
@@ -259,6 +272,22 @@ class Engine(Model):
             "checking with the engine",
         )
         return answered(checked, list[FileReport])
+
+
+class Written(Model):
+    """A file's text, by its path: what the engine reads with no project loaded."""
+
+    path: str
+    content: str
+
+
+class LupComment(Model):
+    """A TypeScript file's `// lup:` comment, as the engine finds it with TypeScript's own parser: where it is, what it says after `lup:`, and the line an `ignore` there keeps."""
+
+    line: int
+    column: int
+    body: str
+    covers: int
 
 
 class Source(Model):

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from lup.types import Model
 from lup_code_rules.directives import Defer, Directive, Ignore, Malformed, Note
+from lup_code_rules.engine import LupComment
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -69,6 +70,17 @@ def read_directives(source: str, forms: Forms | None = None) -> list[Directive]:
             yield directive(body, line, column + 1, covered(tokens, at), told)
 
     return list(read())
+
+
+def typescript_directives(
+    comments: list[LupComment], forms: Forms | None = None
+) -> list[Directive]:
+    """Return the directives a TypeScript file's `// lup:` comments say, as the engine found them, each read with the grammar a Python file's is."""
+    told = forms or Forms()
+    return [
+        directive(each.body, each.line, each.column, each.covers, told)
+        for each in comments
+    ]
 
 
 def tokens_of(source: str) -> Generator[tokenize.TokenInfo]:
@@ -270,10 +282,6 @@ class Deferrals(Model):
 def changed_deferrals(before: str | None, after: str | None) -> Deferrals:
     r"""Return the deferrals a change of a Python file adds, removes and rewords, from its text `before` and `after`, none where it's made or deleted.
 
-    A deferral moved to another line is the same one, so it's neither added nor
-    removed; one whose issue and condition stay while its reason changes is
-    reworded, not removed and added.
-
     >>> changed = changed_deferrals(
     ...     '# lup: defer(issue=1, why="a")\n',
     ...     'x = 1\n# lup: defer(issue=1, why="b")\n# lup: defer(issue=2, why="c")\n',
@@ -281,10 +289,19 @@ def changed_deferrals(before: str | None, after: str | None) -> Deferrals:
     >>> [each.issue for each in changed.added], len(changed.reworded)
     ([2], 1)
     """
+    return deferrals_changed(
+        read_directives(before) if before is not None else [],
+        read_directives(after) if after is not None else [],
+    )
 
-    def deferred(text: str | None) -> list[Defer]:
-        found = read_directives(text) if text is not None else []
-        return [each for each in found if isinstance(each, Defer)]
+
+def deferrals_changed(before: list[Directive], after: list[Directive]) -> Deferrals:
+    """Return the deferrals a change adds, removes and rewords, from a file's directives `before` and `after` it, however they were read: a Python file's (`read_directives`) or a TypeScript file's (`typescript_directives`).
+
+    A deferral moved to another line is the same one, so it's neither added nor
+    removed; one whose issue and condition stay while its reason changes is
+    reworded, not removed and added.
+    """
 
     def same(left: Defer, right: Defer) -> bool:
         return (left.issue, left.when, left.why) == (right.issue, right.when, right.why)
@@ -292,8 +309,8 @@ def changed_deferrals(before: str | None, after: str | None) -> Deferrals:
     def tracked(left: Defer, right: Defer) -> bool:
         return (left.issue, left.when) == (right.issue, right.when)
 
-    old = deferred(before)
-    new = deferred(after)
+    old = [each for each in before if isinstance(each, Defer)]
+    new = [each for each in after if isinstance(each, Defer)]
     gone = [each for each in old if not any(same(each, kept) for kept in new)]
     come = [each for each in new if not any(same(each, was) for was in old)]
     reworded = [

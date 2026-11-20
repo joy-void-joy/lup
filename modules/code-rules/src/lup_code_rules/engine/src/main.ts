@@ -7,6 +7,10 @@
 //       listens. Its client runs this; the engine outlives it.
 //   serve --root R --socket S --idle-seconds N --venv V --environment-files F
 //       Be that engine, in the foreground.
+//   comments
+//       Find TypeScript files' `// lup:` comments with TypeScript's own parser: a JSON
+//       list of `{path, content}` on its input, and each file's comments printed as
+//       JSON, in the same order.
 //   check --root R --venv V --environment-files F
 //       Check files once, with no engine left running: `{"rules": […], "sources":
 //       […]}` on its input, as a check request carries them, and each file's report
@@ -39,6 +43,7 @@ import { Engine } from './engine';
 import { parsedReport } from './parsed';
 import { Environment, ParsedSource, SourceRequest } from './protocol';
 import { Server, ServeOptions } from './server';
+import { lupComments } from './typescript';
 
 interface Arguments {
     command: string;
@@ -98,7 +103,7 @@ function parse(argv: string[]): Arguments {
     const listed = (name: string) => strings(name, need(name));
     // `rules` and `parse` load no project, so they take nothing; `check` serves on
     // no socket.
-    const alone = command === 'rules' || command === 'parse';
+    const alone = command === 'rules' || command === 'parse' || command === 'comments';
     const served = command === 'start' || command === 'serve';
     return {
         command,
@@ -114,7 +119,8 @@ function parse(argv: string[]): Arguments {
 
 // The files `parse` reads, as its input gives them.
 function sources(text: string): ParsedSource[] {
-    const refused = () => new Error('`parse` reads a JSON list of `{"path": …, "content": …}` strings on its input');
+    const refused = () =>
+        new Error('`parse` and `comments` read a JSON list of `{"path": …, "content": …}` strings on their input');
     let given: unknown;
     try {
         given = JSON.parse(text);
@@ -251,6 +257,9 @@ async function main() {
         case 'parse':
             process.stdout.write(JSON.stringify(sources(fs.readFileSync(0, 'utf8')).map(parsedReport)) + '\n');
             return;
+        case 'comments':
+            process.stdout.write(JSON.stringify(sources(fs.readFileSync(0, 'utf8')).map(lupComments)) + '\n');
+            return;
         case 'check': {
             const asked = checking(fs.readFileSync(0, 'utf8'));
             const engine = new Engine(args.root, args.environment);
@@ -267,7 +276,7 @@ async function main() {
         }
         default:
             throw new Error(
-                `no command named ${JSON.stringify(args.command)}: it's start, serve, check, rules or parse`
+                `no command named ${JSON.stringify(args.command)}: it's start, serve, check, comments, rules or parse`
             );
     }
 }

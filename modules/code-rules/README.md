@@ -36,12 +36,14 @@ Its report says lup's findings first, since they're about design, each line `pat
 
 ## `# lup:` comments
 
-How code speaks to its next reader, read with pyright's own expression parser (`engine/src/directives.ts`) into models (`directives.py`). A comment starting `# lup:` is a call:
+How code speaks to its next reader, read into models (`directives.py`) with Python's own tokenizer and parser (`reading.py`), so a check, a landing and a review read them alike, with no engine or project loaded. A TypeScript file's `// lup:` comments are found with TypeScript's own parser, through the engine, so a `//` inside a string or a regular expression is never one, and what each says is read with the same grammar. A comment starting `# lup:` is a call:
 - **`ignore("<rule>", why="…", issue=…)`** keeps one finding of that rule, on its own line, or, standing alone, on the next line holding code. One keeping nothing is itself a finding, `unused-ignore`, which `fix` removes. `issue` names what it waits on, a fix to the rule say;
 - **`defer(issue=…, when=…, why=…)`** marks work knowingly left undone, with an issue tracking it, here by its number or elsewhere as `owner/repo#7`, or a condition a module declares, by its name;
 - **anything else is a note**, `note("…")` or free text alike, which can't be wrong.
 
 An `ignore` or a `defer` written wrong, or a call of another name passing `issue` or `when`, is `malformed-directive`, never read as a note, so a mistyped one can't sit there doing nothing.
+
+`changed_deferrals` says which deferrals a change of a Python file adds, removes and rewords, from its text before and after (`deferrals_changed` from any file's directives, a TypeScript file's among them): what a landing lists. A deferral moved to another line is neither added nor removed, and one whose issue and condition stay while its reason changes is reworded.
 
 ## The engine
 

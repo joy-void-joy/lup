@@ -86,12 +86,12 @@ class Worktree(Model):
 
     root: Path
 
-    def python(self) -> list[str]:
-        """List the worktree's Python files, from its root, as git would."""
+    def files(self) -> list[str]:
+        """List the worktree's files, from its root, as git would."""
         return sorted(
             each.relative_to(self.root).as_posix()
-            for each in self.root.rglob("*.py")
-            if ".git" not in each.relative_to(self.root).parts
+            for each in self.root.rglob("*")
+            if each.is_file() and ".git" not in each.relative_to(self.root).parts
         )
 
 
@@ -116,7 +116,7 @@ class Git(Model, Responding):
                 return Answering(output="false\n")
             case ["-C", _, "ls-files", "-z", *_]:
                 return Answering(
-                    output="".join(f"{each}\0" for each in self.worktree.python())
+                    output="".join(f"{each}\0" for each in self.worktree.files())
                 )
             case ["clone", *_, target]:
                 stubs = Path(target) / "packages" / "pyright-internal"
@@ -144,9 +144,12 @@ class Engine(Model, Responding):
     """node, stood in for: building the engine by writing its bundle where it's asked to, listing the stood-in table, and answering each file's findings and `# lup:` comments as `reports` says, none for a file it doesn't name."""
 
     reports: dict[str, FileReport] = {}
+    comments: dict[str, list[Commented]] = {}
+    """Each TypeScript file's `// lup:` comments, by its path, as TypeScript's
+    parser would find them; none for a file it doesn't name."""
 
     def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
-        """Answer a step of the engine's build, its rules, or a check."""
+        """Answer a step of the engine's build, its rules, a check, or a TypeScript file's `// lup:` comments."""
         match arguments:
             case ["--version"]:
                 return Answering(output="v26.7.0\n")
@@ -160,6 +163,12 @@ class Engine(Model, Responding):
                 )
                 Path(written).write_text("// the engine, as the promises build it\n")
                 return Answering()
+            case [_, "comments"]:
+                asked = TypeAdapter(list[Source]).validate_json(given or b"")
+                found = [self.comments.get(each.path, []) for each in asked]
+                return Answering(
+                    output=TypeAdapter(list[list[Commented]]).dump_json(found).decode()
+                )
             case [_, "rules"]:
                 return Answering(
                     output=TypeAdapter(list[RuleInfo]).dump_json(TABLE).decode()
@@ -175,6 +184,15 @@ class Engine(Model, Responding):
                 )
             case _:
                 return None
+
+
+class Commented(Model):
+    """A TypeScript file's `// lup:` comment, as the engine answers it: where it is, what it says after `lup:`, and the line it keeps."""
+
+    line: int
+    column: int
+    body: str
+    covers: int
 
 
 class Ruff(Model, Responding):
@@ -433,6 +451,27 @@ class CodeRulesPromises(Part):
                 "code-rules", "check", Checking(paths=[at.root]), party
             )
         assert isinstance(checked, Refused if typed else Accepted)
+
+    @lup.promise
+    async def a_typescript_comment_written_wrong_fails_the_check(
+        self, by: Testing
+    ) -> None:
+        """A TypeScript file's `// lup:` comment is read with the grammar a Python file's is: a `defer` with no way back fails the check, a note never does."""
+        wrong = by.any(bool)
+        party = by.any(Agent) if by.any(bool) else Operator()
+        path = "page/main.ts"
+        body = 'defer(why="no way back")' if wrong else "why not a map?"
+        said = Commented(line=1, column=1, body=body, covers=2)
+        with worktree("main.py") as at:
+            (at.root / "page").mkdir()
+            (at.root / path).write_text(f"// lup: {body}\nexport const held = 1;\n")
+            programs = standing(at)
+            programs["node"] = Engine(comments={path: [said]})
+            started = await by.started(project(), programs=programs)
+            checked = await started.run(
+                "code-rules", "check", Checking(paths=[at.root]), party
+            )
+        assert isinstance(checked, Refused if wrong else Accepted)
 
     @lup.promise
     async def a_fix_removes_each_ignore_keeping_nothing_and_no_other(

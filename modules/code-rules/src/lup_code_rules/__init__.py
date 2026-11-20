@@ -5,7 +5,9 @@ from lup_code_rules.reading import (
     Deferrals,
     Reworded,
     changed_deferrals,
+    deferrals_changed,
     read_directives,
+    typescript_directives,
 )
 from lup_code_rules.reports import (
     Examples,
@@ -40,5 +42,7 @@ __all__ = [
     "Rules",
     "Span",
     "changed_deferrals",
+    "deferrals_changed",
     "read_directives",
+    "typescript_directives",
 ]

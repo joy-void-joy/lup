@@ -91,6 +91,17 @@ export interface Malformed {
 
 export type Directive = Ignore | Defer | Note | Malformed;
 
+// A TypeScript file's `// lup:` comment, as `comments` finds it (`typescript.ts`):
+// its line and the column its `//` is at, each counted from 1, what it says after
+// `lup:`, which the client reads as a Python file's, and the line an `ignore` there
+// would keep.
+export interface LupComment {
+    line: number;
+    column: number;
+    body: string;
+    covers: number;
+}
+
 export interface FileReport {
     path: string;
     findings: Finding[];
