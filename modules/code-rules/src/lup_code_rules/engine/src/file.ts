@@ -148,7 +148,8 @@ export interface DeclaredClass {
     listsABC: boolean;
     // The bases that are ABCs of the project, by their full names.
     ourABCBases: string[];
-    // The methods its body defines, abstract and concrete.
+    // The methods its body defines, abstract and concrete; an `@overload`, a signature
+    // for the type checker over the method it overloads, is neither.
     abstract: FunctionNode[];
     concrete: FunctionNode[];
 }
@@ -476,7 +477,8 @@ export class File {
                 isInstantiableClass(base) && isOurABC(this.program, base) ? [base.shared.fullName] : []
             );
             const methods = node.d.suite.d.statements.filter(
-                (statement): statement is FunctionNode => statement.nodeType === ParseNodeType.Function
+                (statement): statement is FunctionNode =>
+                    statement.nodeType === ParseNodeType.Function && !this.isOverload(statement)
             );
             return {
                 node,
@@ -496,6 +498,13 @@ export class File {
     // Whether a method is decorated `@abstractmethod`.
     private isAbstract(method: FunctionNode): boolean {
         return method.d.decorators.some((decorator) => this.namesOf(decorator.d.expr).includes('abc.abstractmethod'));
+    }
+
+    // Whether a function is decorated `@overload`: a signature for the type checker alone.
+    private isOverload(method: FunctionNode): boolean {
+        return method.d.decorators.some((decorator) =>
+            this.namesOf(decorator.d.expr).some((name) => ['typing.overload', 'typing_extensions.overload'].includes(name))
+        );
     }
 
     // The project's ABCs the class an expression names implements; none where it

@@ -249,6 +249,24 @@ export const interfaces = {
                             """Return the square's area."""
                             return self.side * self.side
                 `,
+                python`
+                    from abc import ABC, abstractmethod
+                    from typing import overload
+
+                    from lup.types import Model
+
+
+                    class Asker(ABC):
+                        """Something that answers a prompt, in words or as a model."""
+
+                        @overload
+                        def ask(self, prompt: str) -> str: ...
+                        @overload
+                        def ask[O: Model](self, prompt: str, output: type[O]) -> O: ...
+                        @abstractmethod
+                        def ask[O: Model](self, prompt: str, output: type[O] | None = None) -> str | O:
+                            """Answer \`prompt\`, as \`output\` where it's given."""
+                `,
             ],
         },
     },
