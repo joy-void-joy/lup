@@ -6,7 +6,7 @@ vouches for (`lup.Agent.of`): an event a room sends naming another is refused.
 Each is named on the wire by its `kind`, which a hook's call carries it with.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 lazy from pathlib import Path
 
 from pydantic import Field, JsonValue
@@ -28,6 +28,7 @@ class SessionEvent(Event):
 class SessionStarted(SessionEvent):
     """A session's conversation began: started, resumed, forked, cleared or compacted."""
 
+    answered: ClassVar[bool] = True
     kind: Literal["session-started"] = "session-started"
     begun: Begun
     runtime: str
@@ -41,6 +42,7 @@ class SessionStarted(SessionEvent):
 class TurnStarted(SessionEvent):
     """A conversation's turn started on a prompt, or a prompt reached a turn under way."""
 
+    answered: ClassVar[bool] = True
     kind: Literal["turn-started"] = "turn-started"
     prompt: str
 
@@ -48,6 +50,7 @@ class TurnStarted(SessionEvent):
 class CallStarting(SessionEvent):
     """A tool call is about to run: a method hearing it may refuse it, raising `RefusedError` with the words the agent reads as its answer."""
 
+    answered: ClassVar[bool] = True
     kind: Literal["call-starting"] = "call-starting"
     call: str
     """The runtime's id for the call, the same at its start and its end."""
@@ -63,6 +66,7 @@ class CallStarting(SessionEvent):
 class CallFinished(SessionEvent):
     """A tool call finished: a method hearing it may answer words, told to the agent beside the call's result."""
 
+    answered: ClassVar[bool] = True
     kind: Literal["call-finished"] = "call-finished"
     call: str
     tool: str
