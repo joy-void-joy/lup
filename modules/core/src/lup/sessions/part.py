@@ -35,7 +35,8 @@ from lup.hosting.projects import Locating, Projects, Telling
 from lup.inbox.part import Inboxes
 from lup.inbox.said import Ended, Ending, ToldItem, Untelling
 from lup.inbox.said import Naming as Named2
-from lup.rooms.part import RoomFor, Rooms
+from lup.rooms.part import RoomFor, Rooms, WorktreeFor
+from lup.running.plan import Name
 from lup.runtimes.known import named
 from lup.runtimes.runtime import Answer, Begin, Spoken, Stamp
 from lup.sessions.events import (
@@ -117,13 +118,13 @@ class NewSession(Model):
     """The project, as lup names it: one running (`lup hosting open`)."""
     runtime: str = "claude"
     """The runtime, by lup's name for it: `claude` or `codex`."""
-    name: str | None = None
+    name: Name | None = None
     """What it's called, and its branch and worktree where it gets new ones;
     left out, a name of its own."""
     worktree: Path | None = None
     """An existing worktree of the project to work in, that no running session
     holds; left out, a new one, on a new branch, from `start`."""
-    start: str = "dev"
+    start: Name = "dev"
     """The branch a new worktree starts from."""
     model: str | None = None
     effort: str | None = None
@@ -214,15 +215,26 @@ class Held(Part, machine=True, shared=True):
         self.limited(starting.repository)
         session = str(uuid.uuid4())
         name = starting.name or f"{starting.runtime}-{uuid.UUID(session).time_low:08x}"
-        if starting.worktree is None:
-            message = "a session's own worktree is made in its room: give `worktree` until it is"
-            raise RefusedError(message)
+        worktree = (
+            starting.worktree
+            or (
+                await Rooms.worktree(
+                    WorktreeFor(
+                        repository=starting.repository,
+                        common=located.opening.common,
+                        name=name,
+                        start=starting.start,
+                        packages=located.opened.plan.packages,
+                    )
+                )
+            ).path
+        )
         kept = Session(
             session=session,
             repository=starting.repository,
             common=located.opening.common,
             runtime=starting.runtime,
-            worktree=starting.worktree,
+            worktree=worktree,
             name=name,
             model=starting.model,
             effort=starting.effort,
@@ -234,7 +246,7 @@ class Held(Part, machine=True, shared=True):
         )
         if starting.said:
             await self.ordered(session, Order(order="turn", text=starting.said))
-        return f"started {name}, a {starting.runtime} session in {starting.worktree}"
+        return f"started {name}, a {starting.runtime} session in {worktree}"
 
     def limited(self, repository: str) -> None:
         """Refuse a session past the limits on sessions running: on the machine, and of one repository."""

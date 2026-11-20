@@ -23,8 +23,9 @@ from lup.doors.door import RefusedError
 from lup.doors.parties import Machine
 from lup.doors.parts import Data, Part, Program
 from lup.hosting.carrying import Carrying, Naming
-from lup.hosting.containers import Bind, Containers, Image, Named, Spec
+from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec
 from lup.rooms.layout import InRoom, Kept, digest
+from lup.running.plan import Name
 from lup.rooms.packages import Package
 from lup.runtimes.known import known, named
 from lup.runtimes.runtime import Begin, Bridge, Fetched, Got, Placed, Runtime
@@ -49,6 +50,26 @@ class RoomFor(Model):
     """What the project's modules add to the standard machine."""
     held: bool = True
     """Whether lup holds it over its input and output; a terminal's otherwise."""
+
+
+class WorktreeFor(Model):
+    """A session's own worktree to make: in which repository, on a new branch of its name, from which branch."""
+
+    repository: str
+    common: Path
+    name: Name
+    """Its branch's name, and its directory's under the repository's `tree/`."""
+    start: Name
+    """The branch it starts from."""
+    packages: list[Package] = []
+    """The room's packages, whose image runs git."""
+
+
+class Worktree(Model):
+    """A worktree made: where it is, and its branch."""
+
+    path: Path
+    branch: str
 
 
 class Roomed(Model):
@@ -230,6 +251,62 @@ class Rooms(Part, machine=True, shared=True):
         )
         await Containers.started(started)
         return Roomed(container=container, sockets=sockets)
+
+    @lup.service
+    async def worktree(self, making: WorktreeFor, by: Machine) -> Worktree:
+        """Make a session's own worktree, at `tree/<name>` in the repository's git directory, on a new branch named so, from `start`, by git in a container of the room's image run to its end, never by the machine's own git.
+
+        A room writes the repository's git directory, so git run on the
+        machine could be led by what a room planted there (a filter, a hook,
+        `core.fsmonitor`); in a container, the most it could do is what a
+        room can. Raise `RefusedError` where git refuses, a branch or a
+        directory of that name being there already among it.
+        """
+        del by
+        image = Image(
+            base=self.base.image,
+            definition=self.base.definition(making.packages),
+            project=making.repository,
+        )
+        await Containers.built(image)
+        tree = making.common.parent if making.common.name == ".git" else making.common
+        path = making.common / "tree" / making.name
+        hooks = making.common / "hooks"
+        hooks.mkdir(exist_ok=True)
+        spec = Spec(
+            name=f"lup-{making.repository}-worktree-{making.name}",
+            image=image,
+            command=[
+                "git",
+                f"--git-dir={making.common}",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.fsmonitor=false",
+                "worktree",
+                "add",
+                "-b",
+                making.name,
+                str(path),
+                f"refs/heads/{making.start}",
+            ],
+            workdir=tree,
+            binds=[
+                Bind(source=tree, read_only=False),
+                Bind(source=making.common / "config"),
+                Bind(source=hooks),
+            ],
+            env={
+                "HOME": "/var/empty",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+            },
+        )
+        made = await Containers.ran(Once(spec=spec))
+        if made.status != 0:
+            message = f"git couldn't make {making.name}'s worktree: {made.said()}"
+            raise RefusedError(message)
+        return Worktree(path=path, branch=making.name)
 
     @lup.service
     async def closed(self, named: Named, by: Machine) -> None:
