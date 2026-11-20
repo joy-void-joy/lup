@@ -196,8 +196,10 @@ def pinned(common: Path) -> dict[str, str]:
     `GIT_DIR` and `GIT_COMMON_DIR` both name it, so git reads no `commondir`
     file there, which a room could plant to send it to another `config`;
     grafts come from an empty file rather than the `info/grafts` a room
-    writes; no configuration is read but the repository's own, and nothing is
-    fetched for an object a partial clone left out.
+    writes, and so does what history is cut short rather than the `shallow` a
+    room writes, which changes what a commit's history holds (measured); no
+    configuration is read but the repository's own, and nothing is fetched for
+    an object a partial clone left out.
 
     >>> pinned(Path("/r.git"))["GIT_COMMON_DIR"]
     '/r.git'
@@ -206,6 +208,7 @@ def pinned(common: Path) -> dict[str, str]:
         "GIT_DIR": str(common),
         "GIT_COMMON_DIR": str(common),
         "GIT_GRAFT_FILE": os.devnull,
+        "GIT_SHALLOW_FILE": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_NO_LAZY_FETCH": "1",

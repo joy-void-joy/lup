@@ -158,6 +158,19 @@ class Naming(Model):
     branch: str
 
 
+class Reviewing(Model):
+    """A landing the operator says yes to, at the tip whose review they read."""
+
+    project: str = PROJECT
+    branch: str
+    tip: str
+
+
+def reviewing(at: Places, branch: str) -> Reviewing:
+    """Return the operator's yes to `branch`'s review at its tip as it stands."""
+    return Reviewing(branch=branch, tip=at.git("rev-parse", branch))
+
+
 class Registering(Model):
     """A project registered with lup: its name and where git keeps it."""
 
@@ -285,7 +298,7 @@ class LandingPromises(Part):
                 await gated(started, at)
                 assert isinstance(await landed(started, branch, agent), Accepted)
                 said = await started.run(
-                    "landing", "yes", Naming(branch=branch), Operator()
+                    "landing", "yes", reviewing(at, branch), Operator()
                 )
                 assert isinstance(said, Accepted)
             both = await approved(started)
@@ -316,7 +329,7 @@ class LandingPromises(Part):
                 at.committed(branch, "README.md", f"{branch}\n")
                 await gated(started, at)
                 assert isinstance(await landed(started, branch, agent), Accepted)
-                await started.run("landing", "yes", Naming(branch=branch), Operator())
+                await started.run("landing", "yes", reviewing(at, branch), Operator())
             runs = await approved(started)
             assert runs is not None
             assert at.file_at(runs, "README.md") == "apple"
@@ -334,10 +347,10 @@ class LandingPromises(Part):
                 at.committed(branch, f"{branch}.txt", f"{branch}\n")
                 await gated(started, at)
                 assert isinstance(await landed(started, branch, agent), Accepted)
-            await started.run("landing", "yes", Naming(branch="trying"), Operator())
+            await started.run("landing", "yes", reviewing(at, "trying"), Operator())
             shown = await started.view("landing", "trial", TrialOf(), Operator())
             reviewed = await started.view(
-                "landing", "review", Naming(branch="waiting"), agent
+                "landing", "review", Naming(branch="waiting"), Operator()
             )
         assert isinstance(shown, Accepted)
         assert isinstance(shown.output, Blocks)
@@ -355,6 +368,99 @@ class LandingPromises(Part):
         assert any(TOLD in each for each in told)
 
     @lup.promise
+    async def a_yes_is_to_the_tip_whose_review_was_read(self, by: Testing) -> None:
+        """A yes names the tip whose review the operator read: where the branch landed again since, at a tip they haven't read, it's refused and nothing of the tip it landed at since runs."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed("feature", "seen.txt", "seen\n")
+            await gated(started, at)
+            assert isinstance(await landed(started, "feature", agent), Accepted)
+            read = reviewing(at, "feature")
+            at.committed("feature", "unseen.txt", "unseen\n")
+            await gated(started, at)
+            assert isinstance(await landed(started, "feature", agent), Accepted)
+            stale = await started.run("landing", "yes", read, Operator())
+            runs = await approved(started)
+            assert runs is not None
+            unseen = at.file_at(runs, "unseen.txt")
+        assert isinstance(stale, Refused)
+        assert unseen is None
+
+    @lup.promise
+    async def a_branch_named_like_the_integration_branch_stands_in_for_nothing(
+        self, by: Testing
+    ) -> None:
+        """A branch on the remote whose name ends as the integration branch's does, `x/refs/heads/dev`, is never read as it: a branch built on it lands against the real one, so its review shows what the decoy holds beyond it."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("decoy")
+            at.committed("decoy", "hidden.txt", "hidden\n")
+            at.git("push", "--quiet", "origin", "decoy:refs/heads/a/refs/heads/dev")
+            at.branched("feature", "decoy")
+            at.committed("feature", "feature.txt", "feature\n")
+            await gated(started, at)
+            assert isinstance(await landed(started, "feature", agent), Accepted)
+            reviewed = await started.view(
+                "landing", "review", Naming(branch="feature"), Operator()
+            )
+        assert isinstance(reviewed, Accepted)
+        assert isinstance(reviewed.output, Blocks)
+        paths = [each.path for each in reviewed.output.blocks if isinstance(each, Diff)]
+        assert "hidden.txt" in paths
+
+    @lup.promise
+    async def a_store_reading_anothers_objects_pushes_nothing(
+        self, by: Testing
+    ) -> None:
+        """Accepting pushes nothing from a store that reads objects from outside it, whose history a push would send: the integration branch on the remote stays as it was."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed("feature", "feature.txt", "feature\n")
+            await gated(started, at)
+            assert isinstance(await landed(started, "feature", agent), Accepted)
+            await started.run("landing", "yes", reviewing(at, "feature"), Operator())
+            alternates = at.project / ".git" / "objects" / "info" / "alternates"
+            alternates.parent.mkdir(parents=True, exist_ok=True)
+            alternates.write_text(f"{at.remote / 'objects'}\n")
+            refused = await started.run(
+                "landing", "accept", Naming(branch="feature"), Operator()
+            )
+            after = at.remote_file("dev", "feature.txt")
+        assert isinstance(refused, Refused)
+        assert after is None
+
+    @lup.promise
+    async def a_branch_the_integration_branch_holds_is_accepted_with_nothing_pushed(
+        self, by: Testing
+    ) -> None:
+        """Accepting a branch the integration branch holds already, merged there another way, pushes nothing and ends its trial."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed("feature", "feature.txt", "feature\n")
+            await gated(started, at)
+            assert isinstance(await landed(started, "feature", agent), Accepted)
+            await started.run("landing", "yes", reviewing(at, "feature"), Operator())
+            at.git("push", "--quiet", "origin", "feature:dev")
+            before = at.git("ls-remote", "origin", "refs/heads/dev")
+            accepted = await started.run(
+                "landing", "accept", Naming(branch="feature"), Operator()
+            )
+            after = at.git("ls-remote", "origin", "refs/heads/dev")
+            shown = await started.view("landing", "trial", TrialOf(), Operator())
+        assert isinstance(accepted, Accepted)
+        assert before == after
+        assert isinstance(shown, Accepted)
+        assert isinstance(shown.output, Blocks)
+        assert offered(shown.output, "feature") == []
+
+    @lup.promise
     async def accepting_pushes_the_reviewed_tip_onto_the_integration_branch(
         self, by: Testing
     ) -> None:
@@ -370,7 +476,7 @@ class LandingPromises(Part):
                 "landing", "accept", Naming(branch="feature"), Operator()
             )
             before = at.remote_file("dev", "feature.txt")
-            await started.run("landing", "yes", Naming(branch="feature"), Operator())
+            await started.run("landing", "yes", reviewing(at, "feature"), Operator())
             on_trial = at.remote_file("dev", "feature.txt")
             accepted = await started.run(
                 "landing", "accept", Naming(branch="feature"), Operator()

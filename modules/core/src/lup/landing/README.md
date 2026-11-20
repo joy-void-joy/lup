@@ -8,7 +8,7 @@ An agent calls `land` with their branch and what its merge will say. It lands wh
 - **the branch holds the integration branch's tip on the remote:** the agent merged it in, in their worktree, where they resolve a conflict and see what it brought;
 - **the gate passed on its files:** a pass recorded for the tree its tip names, with the local layers (`lup gate check`, everything committed).
 
-So `land` runs neither a merge nor the gate: it reads the remote's tip and the pass, and is answered at once. It returns as soon as the landing waits on the operator's review, and their answer reaches the agent as a message: a yes, or their comment, after which the agent lands it again. A branch landed again puts its new tip before them; what's on trial stays at the tip they said yes to until they say yes to the new one.
+So `land` runs neither a merge nor the gate: it reads the remote's tip and the pass, and is answered at once. The pass is a room's word on how its gate went, since a room writes the git directory: it steers, and guards nothing, the operator's review being what does. It returns as soon as the landing waits on the operator's review, and their answer reaches the agent as a message: a yes, or their comment, after which the agent lands it again. A branch landed again puts its new tip before them; what's on trial stays at the tip they said yes to until they say yes to the new one.
 
 `want` asks the operator to accept a branch on trial, saying why, which shows on its line: a branch on trial isn't on the integration branch, so another agent's branch doesn't hold it until it's accepted.
 
@@ -16,24 +16,26 @@ So `land` runs neither a merge nor the gate: it reads the remote's tip and the p
 
 `Landings` is the machine's part (`machine=True, shared=True`): only the machine's parts read a repository's store hash-checked, record an approval and restart a project's containers. It keeps each project's landings, a JSON file each, and serves the operator:
 - **`review`**, a landing's view: how the gate went on its tip, what a step that tells said (what the rules listed without failing, say), then each file its tip changes, read from each object's own bytes;
-- **`yes`** (`done`): the branch goes on trial at the tip they reviewed;
+- **`yes`** (`done`): the branch goes on trial at the tip whose review they read, which the yes names: one landed again since is refused, a review of its own;
 - **`toggle`**: takes a branch on trial out of what runs, or puts it back, as when they want to see whether it's the one causing what they see;
 - **`drop`** (`decline`): takes it off trial, or declines a landing waiting, and leaves the branch as it is;
 - **`accept`**: merges its reviewed tip onto the integration branch and pushes it.
 
-**What runs is computed, never merged into:** whenever what's on trial changes, `live` is the integration branch's tip on the remote with each branch on trial and picked merged in, by name, at its reviewed tip, from what the machine read of them hash-checked, in a store of its own (`merging.py`). A branch that conflicts with those before it is left out, and shown so; the others run. The commit is lup's own, never pushed.
+**What runs is computed, never merged into:** whenever what's on trial changes, `live` is the integration branch's tip on the remote with each branch on trial and picked merged in, by name, at its reviewed tip, from what the machine read of them hash-checked, in a store of its own (`merging.py`). A branch that conflicts with those before it is left out, and shown so, as is one with more than one merge base, and one whose review was read against an integration branch tip that its tip doesn't hold any more; the others run. The remote's tip is read for the ref it names, never one ending as it does (`ls-remote` matches `x/refs/heads/dev` too). The commit is lup's own, never pushed.
 
 **Approved without asking where it's made of what the operator accepted and reviewed:** where the integration branch's tip is the one they last accepted, or in the history of what they approved last, `live` is approved as a landing's yes approves it (`Approvals.landed`), and the project opens at it, its containers restarted without cutting a call. A tip that moved otherwise, a push of their own, isn't: nothing restarts, and lup asks them as it does for any change of the running branch. For lup itself, this is what its project's containers run, the dashboard among them; the machine's own parts change only through the loader's question at the operator's terminal (`lup/hosting/README.md`, *The loader*).
 
 ## Accepting
 
-`accept` reads the integration branch's tip on the remote, merges the reviewed tip onto it on the machine, and refuses where it conflicts, naming the files: the agent merges it in and lands again. It commits the merge with the landing's message, by the operator as their git names them, pushes it with a lease on the tip it read, and moves the repository's tracking ref as `git push` would. Then it deletes the branch on the remote where it's there at the reviewed tip, and only then, so a branch is never deleted for looking merged in a store a room writes. The branch's worktree and local branch are left for its session's end: nothing on the machine removes a room's files.
+`accept` reads the integration branch's tip on the remote, merges the reviewed tip onto it on the machine, and refuses where it conflicts, naming the files, where the branch landed again since the yes, or where the integration branch doesn't hold what the review was read against: the agent merges it in and lands again. Where the integration branch holds the reviewed tip already, merged another way, nothing is pushed. It commits the merge with the landing's message, by the operator as their git names them, pushes it with a lease on the tip it read, and moves the repository's tracking ref as `git push` would. The accept is kept as soon as the push is made; then it deletes the branch on the remote where it's there at the reviewed tip, and only then, so a branch is never deleted for looking merged in a store a room writes, and says what of that failed, the accept standing. A push goes only from a store holding its own objects alone, no alternates and no link under `objects/`, since it sends every commit the remote lacks: the reviewed tip's history, not only its files, which the review shows. The branch's worktree and local branch are left for its session's end: nothing on the machine removes a room's files.
 
-The integration branch moves only by an accept: `land` never pushes it, and the credentials' broker refuses a room's push to it (#3).
+The integration branch moves only by an accept: `land` never pushes it, and a room's push to it is to be refused by the credentials' broker, which isn't built here yet (#3). The integration branch, the remote and the release branch a project lands on are set by its first landing, and a later one naming others is refused, so code in the project's container can't move where the operator's accept pushes; a branch named as the integration branch or the release branch never lands.
 
 ## git on the machine
 
-Every git command runs through `Git` (`lup/hosting/git.py`), pinned to the repository's common git directory, nothing a room planted read, and what it prints read there alone.
+Every git command runs through `Git` (`lup/hosting/git.py`), pinned to the repository's common git directory, nothing a room planted read, and what it prints read there alone: no submodule fetched or pushed, no index but its own, no shallow file. The operator's global git configuration isn't read, so a remote reached over HTTPS through a credential helper it names doesn't push; one over SSH does.
+
+`trial` and `review` are the operator's views alone: a project's landings are read by nobody else's call.
 
 ## What's left
 

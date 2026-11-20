@@ -6,8 +6,19 @@ value, so what git's output looks like is said in one place, beside the command
 printing it, rather than wherever a caller reads it. A command failing raises
 `GitError`, saying which and why, but where its status is an answer, as
 `merge-base --is-ancestor`'s is.
+
+A room writes the git directory but its `config` and `hooks/`, so nothing else
+of it is read where it could run code or send the operator's credentials
+elsewhere: no submodule is fetched or pushed, whose `modules/<name>/config` a
+room writes (a `core.sshCommand` there ran as the operator, measured); no index
+is read but one of the command's own, the repository's left as a room wrote it
+unread; and a push is made only from a store holding its own objects alone,
+since one reading another repository's (`objects/info/alternates`, a link
+under `objects/`) would send that repository's history to the remote
+(`docs/field-notes.md`, *Host-side git in a repository the room writes*).
 """
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,7 +50,7 @@ def nul_separated(output: bytes) -> list[str]:
     """
     # lup: ignore("string-split", why="git's `-z` output, each field ended by a NUL, which git writes for being read this way")
     fields = output.split(b"\0")
-    return [each.decode() for each in fields if each]
+    return [os.fsdecode(each) for each in fields if each]
 
 
 class Git(Model):
@@ -48,15 +59,14 @@ class Git(Model):
     program: Program
     common: Path
     index: Path | None = None
-    """An index of its own, where a command reads or writes one: never a
-    worktree's."""
+    """An index of its own, where a command reads or writes one; none for a
+    command reading none, which reads an empty file rather than the one a room
+    left in the git directory."""
 
     async def ran(self, *arguments: str, given: bytes | None = None) -> Finished:
         """Run git pinned to the repository, and return how it ended, whatever its status."""
-        env = {
-            **pinned(self.common),
-            **({} if self.index is None else {"GIT_INDEX_FILE": str(self.index)}),
-        }
+        index = os.devnull if self.index is None else str(self.index)
+        env = {**pinned(self.common), "GIT_INDEX_FILE": index}
         return await self.program.ran(*git_options(), *arguments, given=given, env=env)
 
     async def done(self, *arguments: str, given: bytes | None = None) -> Finished:
@@ -93,13 +103,16 @@ class Git(Model):
         return await self.text("config", "--local", "--get", f"remote.{remote}.url")
 
     async def remote_tip(self, url: str, ref: str) -> str | None:
-        """Return the commit `ref` is at on the remote at `url`, as the remote says; none where it hasn't the ref."""
+        """Return the commit `ref` is at on the remote at `url`, as the remote says; none where it hasn't that ref.
+
+        `git ls-remote` takes `ref` as a pattern matching any ref ending in it,
+        so a branch named `a/refs/heads/dev` would match `refs/heads/dev` too:
+        only the line naming `ref` itself is read.
+        """
         listed = await self.text("ls-remote", url, ref)
-        if not listed:
-            return None
-        # lup: ignore("string-split", why="`git ls-remote` prints an id and a ref apart by a tab, and has no other format")
-        [tip, *_] = listed.split("\t")
-        return tip
+        # lup: ignore("string-split", why="`git ls-remote` prints an id and a ref apart by a tab on each line, and has no other format")
+        named = [each.split("\t") for each in listed.splitlines()]
+        return next((tip for tip, found in named if found == ref), None)
 
     async def fetched(self, url: str, ref: str) -> None:
         """Fetch `ref`'s objects from the remote at `url` into the repository's store, writing no ref and starting no maintenance."""
@@ -108,7 +121,12 @@ class Git(Model):
             "gc.auto=0",
             "-c",
             "maintenance.auto=false",
+            "-c",
+            "submodule.recurse=false",
+            "-c",
+            "fetch.recurseSubmodules=false",
             "fetch",
+            "--no-recurse-submodules",
             "--no-write-fetch-head",
             "--no-tags",
             "--quiet",
@@ -129,7 +147,7 @@ class Git(Model):
                 raise GitError(message)
 
     async def bases(self, tip: str, before: list[str]) -> list[str]:
-        """Return the commits `tip` and those `before` have in common, best first; none where they share no history."""
+        """Return the commits `tip` and those `before` have in common, none of which another holds, in no order; none where they share no history."""
         ran = await self.ran("merge-base", "--all", tip, *before)
         match ran.status:
             case 0:
@@ -179,7 +197,7 @@ class Git(Model):
     async def tree_of(self, entries: list[Entry]) -> str:
         """Write a tree of `entries`, the files of one, through this git's own index, and return its id."""
         listed = b"".join(
-            f"{each.mode} {each.object}\t{each.path}".encode() + b"\0"
+            f"{each.mode} {each.object}\t".encode() + os.fsencode(each.path) + b"\0"
             for each in entries
         )
         await self.done("update-index", "-z", "--index-info", given=listed)
@@ -192,9 +210,39 @@ class Git(Model):
         )
 
     async def pushed(self, url: str, commit: str, ref: str, expected: str) -> None:
-        """Push `commit` to `ref` on the remote at `url`, where the remote holds it at `expected`, else refuse; `commit` empty deletes it."""
+        """Push `commit` to `ref` on the remote at `url`, where the remote holds it at `expected`, else refuse; `commit` empty deletes it.
+
+        Refused before anything's sent where the store reads objects from
+        outside it, which the push would send (`self_contained`).
+        """
+        if not self.self_contained():
+            message = (
+                f"{self.common} reads objects from outside it (`objects/info/"
+                "alternates`, or a link under `objects/`), which a push would "
+                "send to the remote: nothing is pushed from it"
+            )
+            raise GitError(message)
         await self.done(
-            "push", f"--force-with-lease={ref}:{expected}", url, f"{commit}:{ref}"
+            "-c",
+            "push.recurseSubmodules=no",
+            "push",
+            "--recurse-submodules=no",
+            f"--force-with-lease={ref}:{expected}",
+            url,
+            f"{commit}:{ref}",
+        )
+
+    def self_contained(self) -> bool:
+        """Say whether the store holds its own objects alone: no alternates, and no link anywhere under `objects/`."""
+        objects = self.common / "objects"
+        alternates = [
+            objects / "info" / "alternates",
+            objects / "info" / "http-alternates",
+        ]
+        return (
+            not objects.is_symlink()
+            and not any(each.exists() for each in alternates)
+            and not any(each.is_symlink() for each in objects.rglob("*"))
         )
 
     async def moved(self, ref: str, commit: str) -> None:
