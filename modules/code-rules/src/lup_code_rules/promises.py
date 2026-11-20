@@ -11,10 +11,11 @@ pyright's program for real.
 
 import tempfile
 from contextlib import contextmanager
+from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 import lup
 from lup import Agent, Model, Modules, Operator, Part, Project
@@ -27,7 +28,6 @@ from lup.testing import (
     Testing,
 )
 from lup_code_rules import (
-    Directive,
     Examples,
     FileReport,
     Finding,
@@ -99,6 +99,9 @@ class Git(Model, Responding):
     """git, stood in for: answering what the code rules ask of the worktree, and cloning pyright's source as a directory holding what the build reads of it."""
 
     worktree: Worktree
+    common: Path | None = None
+    """The git directory every worktree shares, where the engine is built;
+    the worktree's own `.git` where it's none."""
 
     def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
         """Answer the worktree's root, its git directory, whether it's bare, its Python files, or a clone made."""
@@ -108,7 +111,7 @@ class Git(Model, Responding):
             case ["-C", _, "rev-parse", "--show-toplevel"]:
                 return Answering(output=f"{root}\n")
             case ["-C", _, "rev-parse", "--path-format=absolute", "--git-common-dir"]:
-                return Answering(output=f"{root}/.git\n")
+                return Answering(output=f"{self.common or root / '.git'}\n")
             case ["-C", _, "config", "--bool", "core.bare"]:
                 return Answering(output="false\n")
             case ["-C", _, "ls-files", "-z", *_]:
@@ -202,24 +205,69 @@ class Pnpm(Model, Responding):
                 return None
 
 
-class Drawn(Model):
-    """A finding a promise draws: of which rule, on which line, and whether an `ignore` keeps it."""
+type Found = Literal["shape", "spelled", "guessed", "reportGeneralTypeIssues"]
+"""A rule a finding a promise draws is of: one of lup's of each category, or
+pyright's."""
 
-    rule: Literal["shape", "spelled", "guessed", "reportGeneralTypeIssues"]
-    line: int
+
+class Drawn(Model):
+    """A finding a promise draws: of which rule, on which of a file's lines of code, and whether an `ignore` keeps it."""
+
+    rule: Found
+    code: Annotated[int, Field(ge=0, le=4)]
+    """Which line of code it's on, counted from 0."""
     kept: bool
 
-    def finding(self, path: str) -> Finding:
-        """Return it as the engine reports it, in the file at `path`."""
-        at = Position(line=self.line, column=1)
-        owner = "pyright" if self.rule.startswith("report") else "lup"
-        return Finding(
+
+def finding(path: str, rule: str, line: int) -> Finding:
+    """Return a finding of `rule` on `line` of the file at `path`, as the engine reports it."""
+    at = Position(line=line, column=1)
+    return Finding(
+        path=path,
+        span=Span(start=at, end=at),
+        owner="pyright" if rule.startswith("report") else "lup",
+        rule=rule,
+        message="what the check saw",
+        detail="what the check saw",
+    )
+
+
+class Laid(Model):
+    """A file of lines of code, the `ignore`s kept on each stacked alone above it, and the engine's findings on each, as a promise lays it out."""
+
+    drawn: list[Drawn]
+
+    def text(self) -> str:
+        """Return the file: above each line of code, an `ignore` alone for each rule kept on it."""
+
+        def lines() -> Generator[str]:
+            for code, rules in enumerate(self.kept()):
+                for rule in rules:
+                    yield f'# lup: ignore("{rule}", why="kept")\n'
+                yield f"held_{code} = 1\n"
+
+        return "".join(lines())
+
+    def kept(self) -> list[list[str]]:
+        """Return the rules kept on each line of code, each once."""
+        codes = max((each.code for each in self.drawn), default=0) + 1
+        return [
+            list(dict.fromkeys(e.rule for e in self.drawn if e.kept and e.code == code))
+            for code in range(codes)
+        ]
+
+    def report(self, path: str) -> FileReport:
+        """Return what the engine reports of the file: each finding drawn, on the line its code is on."""
+        kept = self.kept()
+        lines = [
+            sum(len(rules) + 1 for rules in kept[: code + 1])
+            for code in range(len(kept))
+        ]
+        return FileReport(
             path=path,
-            span=Span(start=at, end=at),
-            owner=owner,
-            rule=self.rule,
-            message="what the check saw",
-            detail="what the check saw",
+            findings=[
+                finding(path, each.rule, lines[each.code]) for each in self.drawn
+            ],
         )
 
 
@@ -255,12 +303,27 @@ def worktree(*files: str) -> Generator[Worktree]:
         yield Worktree(root=root)
 
 
+@cache
+def built() -> Path:
+    """Return a git directory the engine is built in once, for every run of the promises that don't promise its build: building it in each run's own worktree would cost each run the copy."""
+    kept = tempfile.TemporaryDirectory(prefix="lup-code-rules-")
+    built_in.append(kept)
+    return Path(kept.name)
+
+
+built_in: list[tempfile.TemporaryDirectory[str]] = []
+"""The git directory `built` made, kept for as long as the promises run."""
+
+
 def standing(
-    at: Worktree, reports: dict[str, FileReport] | None = None
+    at: Worktree,
+    reports: dict[str, FileReport] | None = None,
+    *,
+    fresh: bool = False,
 ) -> dict[str, Git | Engine | Ruff | Pnpm]:
-    """Return git, the engine, pnpm and ruff stood in for over the worktree `at`, the engine answering `reports`."""
+    """Return git, the engine, pnpm and ruff stood in for over the worktree `at`, the engine answering `reports`, and built in `built()`'s git directory unless `fresh`, in the worktree's own."""
     return {
-        "git": Git(worktree=at),
+        "git": Git(worktree=at, common=None if fresh else built()),
         "node": Engine(reports=reports or {}),
         "pnpm": Pnpm(),
         "ruff": Ruff(),
@@ -284,22 +347,17 @@ class CodeRulesPromises(Part):
         drawn = by.any(list[Drawn])
         party = by.any(Agent) if by.any(bool) else Operator()
         path = "main.py"
-        keeping = [(each.rule, each.line) for each in drawn if each.kept]
-        ignores: list[Directive] = [
-            Ignore(line=line, column=1, covers=line, rule=rule, why="kept")
-            for rule, line in dict.fromkeys(keeping)
-        ]
-        report = FileReport(
-            path=path,
-            findings=[each.finding(path) for each in drawn],
-            directives=ignores,
-        )
+        laid = Laid(drawn=drawn)
+        kept = laid.kept()
         failing = any(
-            (each.rule, each.line) not in keeping and each.rule != "guessed"
+            each.rule not in kept[each.code] and each.rule != "guessed"
             for each in drawn
         )
         with worktree(path) as at:
-            started = await by.started(project(), programs=standing(at, {path: report}))
+            (at.root / path).write_text(laid.text())
+            started = await by.started(
+                project(), programs=standing(at, {path: laid.report(path)})
+            )
             checked = await started.run(
                 "code-rules", "check", Checking(paths=[at.root]), party
             )
@@ -308,17 +366,14 @@ class CodeRulesPromises(Part):
     @lup.promise
     async def an_ignore_keeping_nothing_fails_the_check(self, by: Testing) -> None:
         """An `ignore` keeping no finding of its rule on the line it covers fails the check, so it can't sit there hiding the next one."""
-        line = by.any(int)
+        alone = by.any(bool)
         party = by.any(Agent) if by.any(bool) else Operator()
         path = "main.py"
-        report = FileReport(
-            path=path,
-            directives=[
-                Ignore(line=line, column=1, covers=line, rule="shape", why="none")
-            ],
-        )
+        ignore = '# lup: ignore("shape", why="none")'
+        text = f"{ignore}\nheld = 1\n" if alone else f"held = 1  {ignore}\n"
         with worktree(path) as at:
-            started = await by.started(project(), programs=standing(at, {path: report}))
+            (at.root / path).write_text(text)
+            started = await by.started(project(), programs=standing(at))
             checked = await started.run(
                 "code-rules", "check", Checking(paths=[at.root]), party
             )
@@ -352,7 +407,7 @@ class CodeRulesPromises(Part):
         checks = 1 + by.any(bool) + by.any(bool)
         party = by.any(Agent) if by.any(bool) else Operator()
         with worktree("main.py") as at:
-            started = await by.started(project(), programs=standing(at))
+            started = await by.started(project(), programs=standing(at, fresh=True))
             for _ in range(checks):
                 await started.run(
                     "code-rules", "check", Checking(paths=[at.root]), party
@@ -368,10 +423,10 @@ class CodeRulesPromises(Part):
         typed = by.any(bool)
         party = by.any(Agent) if by.any(bool) else Operator()
         path = "tests/test_main.py"
-        found = [Drawn(rule="shape", line=1, kept=False)]
-        if typed:
-            found.append(Drawn(rule="reportGeneralTypeIssues", line=1, kept=False))
-        report = FileReport(path=path, findings=[each.finding(path) for each in found])
+        rules = ["shape", "reportGeneralTypeIssues"] if typed else ["shape"]
+        report = FileReport(
+            path=path, findings=[finding(path, each, 1) for each in rules]
+        )
         with worktree(path) as at:
             started = await by.started(project(), programs=standing(at, {path: report}))
             checked = await started.run(
