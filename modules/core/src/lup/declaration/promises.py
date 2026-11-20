@@ -153,8 +153,9 @@ class DeclarationPromises(lup.Part):
 
     @lup.promise
     async def resolving_gives_what_the_declaration_says(self, by: Testing) -> None:
-        """Resolving a declaration gives its modules, each once, the core among them, with every module one of them requires and none it doesn't name; or it raises `ProjectError`, never anything else."""
+        """Resolving a declaration gives its modules, each once, the core among them, with every module one of them requires and none it doesn't name beyond lup's defaults; or it raises `ProjectError`, never anything else."""
         declared = by.any(Declared)
+        defaults = [each.name for each in (await by.started(Project())).modules]
         try:
             started = await by.started(declared.project())
         except ProjectError:
@@ -167,7 +168,7 @@ class DeclarationPromises(lup.Part):
             for module in started.modules
             for required in module.requires
         )
-        assert all(name in declared.named() for name in names)
+        assert all(name in [*declared.named(), *defaults] for name in names)
 
     @lup.promise
     async def a_layer_changes_only_what_it_sets(self, by: Testing) -> None:

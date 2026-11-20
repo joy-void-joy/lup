@@ -25,3 +25,4 @@ lup declares itself as any project does, in `lup_declaration.py` at the reposito
 - **The store** (`lup/store/`): the records every module keeps its state as, the kinds a module declares them in (`Recorded`), and the database keeping them. `README.md` there.
 - **The inbox** (`lup/inbox/`): parties, the concerns they hold, what's said between them, and where each stands, kept in the store. `README.md` there.
 - **The runtimes** (`lup/runtimes/`): Claude Code and Codex behind one interface, and reading each one's records of its conversations as lup's model of one, which the dashboard's buffer and transcripts read. `README.md` there.
+- **The gate** (`lup/gate/`), a module of its own among lup's default modules: the steps every module declares, run on a worktree's files where `lup gate check` is typed, and a pass recorded by the files it passed on. `README.md` there.

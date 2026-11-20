@@ -21,7 +21,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
-from lup.declaration.grammar import Named
+from lup.declaration.grammar import Named, Selection
 from lup.doors.door import DoorError, Method, RefusedError
 from lup.types import Model, MutableModel
 lazy from lup.declaration.module import Module
@@ -72,6 +72,38 @@ class Runtime(Model):
 
     path: Path
     """The directory: it's there, and the part's alone to write."""
+
+
+class Declared(Model):
+    """What the project's modules declare, every layer applied: a field typed `Declared`, given where the part runs, for a part reading every module's entries of a kind, as the gate reads each module's steps.
+
+    A part is otherwise given its own module alone; this is the project's every
+    module, in the declaration's order, so what one declares reaches a part of
+    another without the declaration naming it twice.
+
+    >>> from lup.declaration.grammar import Named
+    >>> class Notes(Named[str]):
+    ...     '''Notes.'''
+    >>> class Noting(Module):
+    ...     '''Noting.'''
+    ...
+    ...     name = "noting"
+    ...     notes: Notes = Notes.of("a")
+    >>> class Jotting(Module):
+    ...     '''Jotting.'''
+    ...
+    ...     name = "jotting"
+    ...     notes: Notes = Notes.of("b", "c")
+    >>> Declared(modules=[Noting(), Jotting()]).held(Notes)
+    ['a', 'b', 'c']
+    """
+
+    modules: list[Module] = []
+    """The project's modules, every layer applied, in order."""
+
+    def held[E](self, kind: type[Selection[E]]) -> list[E]:
+        """Return every entry of `kind` the project's modules hold, each module's in its order, in the order of the modules (`Module.held`)."""
+        return [entry for module in self.modules for entry in module.held(kind)]
 
 
 class Finished(Model):
@@ -214,7 +246,7 @@ class Checked(Model):
 
 
 class Given(Model, arbitrary_types_allowed=True):
-    """What lup gives a part where it runs, beside its module: the secrets it holds, where it keeps its data, and what runs its programs."""
+    """What lup gives a part where it runs, beside its module: the secrets it holds, where it keeps its data, what runs its programs, and the project's modules."""
 
     secrets: dict[str, str] = {}
     """Each secret's value, by its name."""
@@ -226,6 +258,9 @@ class Given(Model, arbitrary_types_allowed=True):
     `Runtime` gets one; none where nothing gives it one."""
     runs: Runs | None = None
     """What runs the programs it declares; none where nothing runs any."""
+    modules: list[Module] = []
+    """The project's modules, every layer applied, in order, which each field
+    typed `Declared` holds."""
 
 
 class Holds(Model):
@@ -306,7 +341,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             for field, info in cls.model_fields.items()
             if field != "module"
             and info.is_required()
-            and info.annotation not in (Secret, Data, Runtime)
+            and info.annotation not in (Secret, Data, Runtime, Declared)
         ]
         if bare:
             message = (
@@ -332,7 +367,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def made(cls, module: Module, given: Given) -> Part:
-        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data` or `Runtime`, made where it isn't there, and what runs each program it declares.
+        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data` or `Runtime`, made where it isn't there, what runs each program it declares, and the project's modules for each field typed `Declared`.
 
         Raise `ProjectError` where a secret it holds isn't given, or it keeps
         data, or what lasts while it runs, and no directory is given.
@@ -366,9 +401,12 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 "which nothing stored: the operator stores each under its name"
             )
             raise ProjectError(message, about=[cls.__name__])
-        fields: dict[str, Module | Secret | Data | Runtime | Program] = {
+        fields: dict[str, Module | Secret | Data | Runtime | Program | Declared] = {
             name: Secret(value=secrets[name]) for name in cls.holds().secrets
         }
+        for name, info in cls.model_fields.items():
+            if info.annotation is Declared:
+                fields[name] = Declared(modules=given.modules)
         for name in kept:
             if data is not None:
                 directory = data / name
