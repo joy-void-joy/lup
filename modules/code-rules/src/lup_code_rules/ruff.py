@@ -69,13 +69,15 @@ async def ruff_findings(
     """Return ruff's findings in `paths`, from the worktree at `root`: each file as it stands on disk, or, for the one path given with `content`, as that content.
 
     ruff reads its settings where it finds them from `root`, or from `config`
-    where it's given. Raise `LupCodeRulesError` where ruff fails rather than
-    reporting.
+    where it's given, run from the directory `config` is in, which its
+    relative settings (`src`) are read from. Raise `LupCodeRulesError` where
+    ruff fails rather than reporting.
     """
     if not paths:
         return []
+    named = [str(root / each) for each in paths]
     standing = (
-        ["--stdin-filename", paths[0], "-"] if content is not None else ["--", *paths]
+        ["--stdin-filename", named[0], "-"] if content is not None else ["--", *named]
     )
     ran = await ruff.ran(
         "check",
@@ -87,7 +89,7 @@ async def ruff_findings(
         *(["--config", str(config)] if config is not None else []),
         *standing,
         given=content,
-        cwd=root,
+        cwd=root if config is None else config.parent,
     )
     if ran.status != 0:
         message = f"ruff failed, ending with status {ran.status}: {ran.said()}"

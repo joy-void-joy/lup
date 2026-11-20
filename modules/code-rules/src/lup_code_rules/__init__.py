@@ -1,6 +1,12 @@
 """lup's code rules: patterns that are rarely the right choice, told to an agent as they write them, and `# lup:` comments, read with pyright's own tree (`README.md` here)."""
 
 from lup_code_rules.directives import Defer, Directive, Ignore, Malformed, Note
+from lup_code_rules.reading import (
+    Deferrals,
+    Reworded,
+    changed_deferrals,
+    read_directives,
+)
 from lup_code_rules.reports import (
     Examples,
     FileReport,
@@ -18,6 +24,7 @@ lazy from lup_code_rules.module import CodeRules, Exempt, Rules
 __all__ = [
     "CodeRules",
     "Defer",
+    "Deferrals",
     "Directive",
     "Examples",
     "Exempt",
@@ -28,7 +35,10 @@ __all__ = [
     "Malformed",
     "Note",
     "Position",
+    "Reworded",
     "RuleInfo",
     "Rules",
     "Span",
+    "changed_deferrals",
+    "read_directives",
 ]

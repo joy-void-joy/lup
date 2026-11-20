@@ -23,6 +23,7 @@ from lup_code_rules.engine import Engine, EngineLayout, Source
 from lup_code_rules.errors import LupCodeRulesError
 from lup_code_rules.examples import Examples
 from lup_code_rules.promises import CodeRulesPromises
+from lup_code_rules.reading import read_directives
 from lup_code_rules.reporting import Report
 from lup_code_rules.reports import RuleInfo
 from lup_code_rules.ruff import ruff_findings
@@ -269,7 +270,14 @@ class Checker(Part):
         )
         checked = [
             settling.settled(
-                report, [each for each in ruffs if each.path == report.path]
+                report.model_copy(
+                    update={
+                        "directives": read_directives(
+                            (layout.root / report.path).read_text()
+                        )
+                    }
+                ),
+                [each for each in ruffs if each.path == report.path],
             )
             for report in reports
         ]
