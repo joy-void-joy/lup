@@ -12,9 +12,12 @@ from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.programs.promises import ProgramsPromises
+from lup.rooms.packages import Packages, standard
 from lup.running.plan import CORE
 from lup.running.promises import RunningPromises
+from lup.runtimes.known import known
 from lup.runtimes.promises import RecordsPromises
+from lup.runtimes.runtime import Runtimes
 from lup.setup.part import Setup
 from lup.setup.promises import SetupPromises
 from lup.shell.blocks import Viewing
@@ -86,6 +89,12 @@ class Core(Module):
     profile: DirectoryName = DEFAULT
     """The profile the repository's sessions run on, by its name, where a session
     is started naming none."""
+    runtimes: Runtimes = Runtimes.of(*known())
+    """The runtimes the repository's sessions may run on, each held by the
+    machine (`lup.runtimes`)."""
+    packages: Packages = Packages.of(*standard())
+    """The standard machine every session's room holds, which a module's own
+    packages add to (`lup.rooms`)."""
     home: Path | None = None
     """The home repository, a worktree of it, whose approved commit's machine
     parts run on this machine: lup's own checkout, for whoever works on lup.

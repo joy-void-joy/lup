@@ -31,6 +31,7 @@ class OnDoor(Door):
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't a hook's: its event's class in, nothing out."""
         annotation = taken.given().annotation
+        answers = self.event.answered and taken.returned in [str, str | None]
         if annotation is not self.event:
             message = (
                 f"`{taken.qualified}` runs at `{self.event.__name__}`, and takes "
@@ -38,10 +39,11 @@ class OnDoor(Door):
                 "event's class"
             )
             raise DoorError(message)
-        if taken.returned is not None:
+        if taken.returned is not None and not answers:
             message = (
                 f"`{taken.qualified}` returns {spelled(taken.returned)}: a method "
-                "run at an event returns nothing"
+                "run at an event returns nothing, or, at one that's answered, words "
+                "(`str | None`)"
             )
             raise DoorError(message)
 
@@ -60,9 +62,9 @@ class OnDoor(Door):
         del taken
         return []
 
-    def __call__[S, E: Event](
-        self, method: Callable[[S, E], Awaitable[None]], /
-    ) -> Served[S, [E], Awaitable[None]]:
+    def __call__[S, E: Event, R: str | None](
+        self, method: Callable[[S, E], Awaitable[R]], /
+    ) -> Served[S, [E], Awaitable[R]]:
         """Return `method` run at this door's event."""
         return Served(method, self)
 
@@ -70,8 +72,9 @@ class OnDoor(Door):
 def on(event: type[Event]) -> OnDoor:
     """Return the door of a hook, to put on a method lup runs at `event`, handing it the event.
 
-    The method takes the event's class and returns nothing. At `Starting` it
-    may go on as long as its class runs, ending once lup cancels it at the
-    class's stop.
+    The method takes the event's class and returns nothing, or, at an event
+    that's `answered`, words told beside what it's about; there it may refuse
+    it too, raising `RefusedError`. At `Starting` it may go on as long as its
+    class runs, ending once lup cancels it at the class's stop.
     """
     return OnDoor(event=event)
