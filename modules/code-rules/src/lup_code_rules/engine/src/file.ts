@@ -668,19 +668,35 @@ export class File {
         });
     }
 
-    // The root error of the file's package, by the name the conventions give it:
-    // `LupDevError` for `lup_dev`.
-    get packageRootError(): string {
-        const [top] = this.moduleName.split('.');
-        return `${top
-            .split('_')
-            .map((part) => part.charAt(0).toUpperCase() + part.substring(1))
-            .join('')}Error`;
+    // The root error of the file's package, named for it: `LupCodeRulesError` for
+    // `lup_code_rules`. None for a file in no package (`packageName`).
+    get packageRootError(): string | undefined {
+        const top = this.packageName;
+        if (top === undefined) {
+            return undefined;
+        }
+        const words = top.split('_').map((part) => part.charAt(0).toUpperCase() + part.substring(1));
+        return `${words.join('')}Error`;
     }
 
-    // The file's top-level package: `lup_dev` for `lup_dev.policy.judge`.
-    get packageName(): string {
-        const [top] = this.moduleName.split('.');
+    // The file's top-level package, as Python imports it: along pyright's import name
+    // for the file, the outermost directory holding `__init__.py`, walking up from the
+    // file's own until one doesn't. `lup_code_rules` for `lup_code_rules.errors`; `lup`
+    // for `modules.core.src.lup.errors`, the name pyright gives from the project's root
+    // a file its environment doesn't import. None for a file in no package: a script
+    // at the root, a `conftest.py`.
+    get packageName(): string | undefined {
+        const parts = this.moduleName.split('.');
+        const files = this.program.fileSystem;
+        let directory = this.info.fileUri.getDirectory();
+        let top: string | undefined;
+        for (let index = parts.length - (this.isPackageRoot ? 1 : 2); index >= 0; index -= 1) {
+            if (directory.fileName !== parts[index] || !files.existsSync(directory.combinePaths('__init__.py'))) {
+                break;
+            }
+            top = parts[index];
+            directory = directory.getDirectory();
+        }
         return top;
     }
 
