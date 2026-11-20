@@ -28,7 +28,6 @@ const tracking = ['issue', 'when'];
 
 export function readDirectives(parse: ParseFileResults): Directive[] {
     const tokens = parse.tokenizerOutput.tokens;
-    const line = (offset: number) => convertOffsetToPosition(offset, parse.tokenizerOutput.lines).line + 1;
     const found: Directive[] = [];
     for (let index = 0; index < tokens.count; index++) {
         for (const comment of tokens.getItemAt(index).comments ?? []) {
@@ -36,11 +35,20 @@ export function readDirectives(parse: ParseFileResults): Directive[] {
             if (body === undefined) {
                 continue;
             }
-            const at = line(comment.start);
-            found.push(read(parse, body, at, () => covered(parse, index, at)));
+            // A comment starts after its `#`, which is the column before, counted
+            // from 1 as the column a 0-based character makes.
+            const position = convertOffsetToPosition(comment.start, parse.tokenizerOutput.lines);
+            const at: Place = { line: position.line + 1, column: position.character };
+            found.push(read(parse, body, at, () => covered(parse, index, at.line)));
         }
     }
     return found;
+}
+
+// Where a comment is: its line, and the column its `#` is at, each counted from 1.
+interface Place {
+    line: number;
+    column: number;
 }
 
 // Where a comment's directive starts, after `lup:`, or none for another comment.
@@ -87,13 +95,13 @@ function covered(parse: ParseFileResults, attachedTo: number, commentLine: numbe
     return commentLine + 1;
 }
 
-function read(parse: ParseFileResults, body: TextRange, line: number, covers: () => number): Directive {
+function read(parse: ParseFileResults, body: TextRange, at: Place, covers: () => number): Directive {
     const text = parse.text.substr(body.start, body.length).trim();
     const tokens = new Tokenizer().tokenize(parse.text, body.start, body.length).tokens;
     const first = tokens.count > 0 ? tokens.getItemAt(0) : undefined;
     const second = tokens.count > 1 ? tokens.getItemAt(1) : undefined;
     if (first?.type !== TokenType.Identifier || second?.type !== TokenType.OpenParenthesis) {
-        return { kind: 'note', line, text };
+        return { kind: 'note', ...at, text };
     }
     const named = (first as IdentifierToken).value;
     const parsed = new Parser().parseTextExpression(
@@ -113,19 +121,19 @@ function read(parse: ParseFileResults, body: TextRange, line: number, covers: ()
     const unparsed = `\`${named}\` doesn't parse as a call: it's ${named === 'ignore' ? ignoreForm : deferForm}`;
     switch (named) {
         case 'ignore':
-            return call ? readIgnore(call, line, text, covers) : malformed(line, text, unparsed);
+            return call ? readIgnore(call, at, text, covers) : malformed(at, text, unparsed);
         case 'defer':
-            return call ? readDefer(call, line, text) : malformed(line, text, unparsed);
+            return call ? readDefer(call, at, text) : malformed(at, text, unparsed);
         case 'note':
-            return { kind: 'note', line, text: (call && noteText(call)) || text };
+            return { kind: 'note', ...at, text: (call && noteText(call)) || text };
         default:
             if (call?.d.args.some((arg) => arg.d.name && tracking.includes(arg.d.name.d.value))) {
                 const problem =
                     `\`${named}\` is no directive, yet passes \`issue\` or \`when\`, which track a \`defer\` ` +
                     "or an `ignore`: lup's calls are `ignore`, `defer` and `note`";
-                return malformed(line, text, problem);
+                return malformed(at, text, problem);
             }
-            return { kind: 'note', line, text };
+            return { kind: 'note', ...at, text };
     }
 }
 
@@ -139,67 +147,67 @@ function noteText(call: CallNode): string | undefined {
     return value || undefined;
 }
 
-function readIgnore(call: CallNode, line: number, text: string, covers: () => number): Directive {
+function readIgnore(call: CallNode, at: Place, text: string, covers: () => number): Directive {
     const positional = call.d.args.filter((arg) => !arg.d.name);
     const rule = positional.length === 1 ? stringValue(positional[0].d.valueExpr) : undefined;
     if (positional.length !== 1 || positional[0].d.argCategory !== ArgCategory.Simple || !rule) {
-        return malformed(line, text, `\`ignore\` names one rule, as a string: it's ${ignoreForm}`);
+        return malformed(at, text, `\`ignore\` names one rule, as a string: it's ${ignoreForm}`);
     }
     const keywords = call.d.args.filter((arg) => arg.d.name);
     const given = new Map(keywords.map((arg) => [arg.d.name!.d.value, arg.d.valueExpr]));
     if (given.size !== keywords.length) {
-        return malformed(line, text, `\`ignore\` names a keyword twice: it's ${ignoreForm}`);
+        return malformed(at, text, `\`ignore\` names a keyword twice: it's ${ignoreForm}`);
     }
     const unknown = [...given.keys()].filter((name) => !['why', 'issue'].includes(name));
     if (unknown.length > 0) {
-        return malformed(line, text, `\`ignore\` takes \`why\` and \`issue\`, not \`${unknown[0]}\``);
+        return malformed(at, text, `\`ignore\` takes \`why\` and \`issue\`, not \`${unknown[0]}\``);
     }
     const why = given.has('why') ? stringValue(given.get('why')!) : undefined;
     if (!why || why.trim() === '') {
-        return malformed(line, text, `\`ignore\` needs its reason, \`why="…"\`: it's ${ignoreForm}`);
+        return malformed(at, text, `\`ignore\` needs its reason, \`why="…"\`: it's ${ignoreForm}`);
     }
     const issueNode = given.get('issue');
     const issue = issueNode ? issueValue(issueNode) : undefined;
     if (issueNode && issue === undefined) {
-        return malformed(line, text, issueForm);
+        return malformed(at, text, issueForm);
     }
-    return { kind: 'ignore', line, covers: covers(), rule, why, issue: issue ?? null };
+    return { kind: 'ignore', ...at, covers: covers(), rule, why, issue: issue ?? null };
 }
 
-function readDefer(call: CallNode, line: number, text: string): Directive {
+function readDefer(call: CallNode, at: Place, text: string): Directive {
     if (call.d.args.some((arg) => !arg.d.name || arg.d.argCategory !== ArgCategory.Simple)) {
-        return malformed(line, text, `\`defer\` takes keywords only: it's ${deferForm}`);
+        return malformed(at, text, `\`defer\` takes keywords only: it's ${deferForm}`);
     }
     const given = new Map(call.d.args.map((arg) => [arg.d.name!.d.value, arg.d.valueExpr]));
     if (given.size !== call.d.args.length) {
-        return malformed(line, text, `\`defer\` names a keyword twice: it's ${deferForm}`);
+        return malformed(at, text, `\`defer\` names a keyword twice: it's ${deferForm}`);
     }
     const unknown = [...given.keys()].filter((name) => !['why', ...tracking].includes(name));
     if (unknown.length > 0) {
-        return malformed(line, text, `\`defer\` takes \`why\`, \`issue\` and \`when\`, not \`${unknown[0]}\``);
+        return malformed(at, text, `\`defer\` takes \`why\`, \`issue\` and \`when\`, not \`${unknown[0]}\``);
     }
     const why = given.has('why') ? stringValue(given.get('why')!) : undefined;
     if (!why || why.trim() === '') {
-        return malformed(line, text, `\`defer\` needs what's left undone, \`why="…"\`: it's ${deferForm}`);
+        return malformed(at, text, `\`defer\` needs what's left undone, \`why="…"\`: it's ${deferForm}`);
     }
     const issueNode = given.get('issue');
     const issue = issueNode ? issueValue(issueNode) : undefined;
     if (issueNode && issue === undefined) {
-        return malformed(line, text, issueForm);
+        return malformed(at, text, issueForm);
     }
     const whenNode = given.get('when');
     if (whenNode && whenNode.nodeType !== ParseNodeType.Name) {
-        return malformed(line, text, '`when` is the bare name of a declared condition');
+        return malformed(at, text, '`when` is the bare name of a declared condition');
     }
     const when = whenNode?.nodeType === ParseNodeType.Name ? whenNode.d.value : undefined;
     if (issue === undefined && when === undefined) {
-        return malformed(line, text, 'a defer needs an issue, a condition (`when=`), or both');
+        return malformed(at, text, 'a defer needs an issue, a condition (`when=`), or both');
     }
-    return { kind: 'defer', line, why, issue: issue ?? null, when: when ?? null };
+    return { kind: 'defer', ...at, why, issue: issue ?? null, when: when ?? null };
 }
 
-function malformed(line: number, text: string, problem: string): Directive {
-    return { kind: 'malformed', line, text, problem };
+function malformed(at: Place, text: string, problem: string): Directive {
+    return { kind: 'malformed', ...at, text, problem };
 }
 
 // A string literal's value, f-strings and bytes left out.

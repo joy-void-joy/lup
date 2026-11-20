@@ -4,7 +4,7 @@ version = "0.0.0"
 requires-python = ">=3.15"
 # Each module of lup's own is a member of the workspace, installed here so the
 # gate checks them together, with what checking their promises needs.
-dependencies = ["lup-core[environment,dashboard]"]
+dependencies = ["lup-core[environment,dashboard]", "lup-code-rules"]
 
 [dependency-groups]
 dev = [
@@ -31,6 +31,7 @@ members = ["modules/*"]
 
 [tool.uv.sources]
 lup-core = { workspace = true }
+lup-code-rules = { workspace = true }
 lup-dev = { git = "https://github.com/joy-void-joy/lup-legacy-2", subdirectory = "packages/lup-dev", rev = "7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
 
 [tool.ruff]
@@ -96,9 +97,10 @@ ignore = [
     "COM812", "COM819",  # the formatter decides trailing commas: ruff's formatter
     "E501",              # flags long lines, which are layout: ruff's formatter
     # Size
-    "C901", "PLR0912", "PLR0913", "PLR0915", "PLR1702",  # thresholds on size, not mistakes: review
+    "C901", "PLR0912", "PLR0913", "PLR0915", "PLR0917", "PLR1702",  # thresholds on size, not mistakes: review
     # Imports
     "PLC0415",  # flags an import inside a function, which is how an adapter imports its runtime's SDK when it first runs: review
+    "TC001", "TC002", "TC003",  # move an import used only in annotations under `TYPE_CHECKING`, which only saves import time, and misfire where models and doors read annotations at run time: review
     "INP001",   # flags a file outside a package, which here is a test pytest finds by path: review
     # No convention decides it
     "CPY001",  # no copyright header has been chosen: the operator's call

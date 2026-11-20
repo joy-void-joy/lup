@@ -8,6 +8,7 @@ in `pyproject.toml`'s pytest settings).
 
 from lup import Gate, Module, Modules, Project, Step, Steps
 from lup.hosting.module import Hosting
+from lup_code_rules import CodeRules
 
 
 class Page(Module):
@@ -48,5 +49,5 @@ project = Project(
         ),
         why="lup's promises are many, and run on several workers",
     )
-    .add(Hosting(), Page())
+    .add(Hosting(), Page(), CodeRules())
 )

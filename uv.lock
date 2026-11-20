@@ -8,6 +8,7 @@ exclude-newer-span = "P3D"
 
 [manifest]
 members = [
+    "lup-code-rules",
     "lup-core",
     "lup-next",
 ]
@@ -429,6 +430,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lup-code-rules"
+version = "0.0.0"
+source = { editable = "modules/code-rules" }
+dependencies = [
+    { name = "lup-core" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lup-core", editable = "modules/core" },
+    { name = "ruff", specifier = ">=0.17.5" },
+]
+
+[[package]]
 name = "lup-core"
 version = "0.0.0"
 source = { editable = "modules/core" }
@@ -504,6 +520,7 @@ name = "lup-next"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "lup-code-rules" },
     { name = "lup-core", extra = ["dashboard", "environment"] },
 ]
 
@@ -520,7 +537,10 @@ second-lup = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "lup-core", extras = ["environment", "dashboard"], editable = "modules/core" }]
+requires-dist = [
+    { name = "lup-code-rules", editable = "modules/code-rules" },
+    { name = "lup-core", extras = ["environment", "dashboard"], editable = "modules/core" },
+]
 
 [package.metadata.requires-dev]
 dev = [

@@ -54,6 +54,8 @@ export interface Surface {
 export interface Ignore {
     kind: 'ignore';
     line: number;
+    // The column its `#` is at, counted from 1.
+    column: number;
     covers: number;
     rule: string;
     why: string;
@@ -63,6 +65,8 @@ export interface Ignore {
 export interface Defer {
     kind: 'defer';
     line: number;
+    // The column its `#` is at, counted from 1.
+    column: number;
     why: string;
     issue: number | string | null;
     when: string | null;
@@ -71,12 +75,16 @@ export interface Defer {
 export interface Note {
     kind: 'note';
     line: number;
+    // The column its `#` is at, counted from 1.
+    column: number;
     text: string;
 }
 
 export interface Malformed {
     kind: 'malformed';
     line: number;
+    // The column its `#` is at, counted from 1.
+    column: number;
     text: string;
     problem: string;
 }
