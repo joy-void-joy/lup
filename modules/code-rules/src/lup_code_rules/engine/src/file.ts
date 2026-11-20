@@ -889,6 +889,23 @@ export class File {
         return describeType(this.evaluator, node, []).every((member) => member.kind === 'none');
     }
 
+    // Whether an expression is spread whole into a new mapping, none of its keys read:
+    // `{**os.environ, "GIT_DIR": d}`, `dict(**os.environ, GIT_DIR=d)`.
+    isSpreadWhole(node: ParseNode): boolean {
+        const parent = node.parent;
+        if (parent?.nodeType === ParseNodeType.DictionaryExpandEntry) {
+            return parent.d.expr === node;
+        }
+        const call = parent?.parent;
+        return (
+            parent?.nodeType === ParseNodeType.Argument &&
+            parent.d.argCategory === ArgCategory.UnpackedDictionary &&
+            call?.nodeType === ParseNodeType.Call &&
+            call.d.args.includes(parent) &&
+            this.namesOf(call.d.leftExpr).includes('builtins.dict')
+        );
+    }
+
     // Whether pyright finds the expression to be a mapping; a `TypedDict` read by its
     // keys is already the typed shape, so it isn't one here.
     isMapping(node: ExpressionNode): boolean {
