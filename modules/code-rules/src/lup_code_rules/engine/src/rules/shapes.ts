@@ -10,8 +10,9 @@ export const shapes = {
             "A tuple's positions hide what each value means, and a second spelling of a sequence beside " +
             '`list[X]` is one more choice for each session to make.',
         steer:
-            'Name each field with a model, or write a sequence as `list[X]`; where a library takes a tuple, ' +
-            'keep it with an `ignore` that says so.',
+            'Name each field with a model, a tuple we return among them, however few callers read it; write a ' +
+            "sequence as `list[X]`, and `list(…)` a tuple a library returns where it's kept; keep a tuple with an " +
+            "`ignore` only where a library's own signature takes or returns it.",
         check(file) {
             for (const written of file.typesNaming(['builtins.tuple'])) {
                 file.report(
@@ -54,6 +55,24 @@ export const shapes = {
                         def total(sizes: list[int]) -> int:
                             """Add up the sizes."""
                             return sum(sizes)
+                    `,
+                },
+                {
+                    code: python`
+                        from pathlib import PurePath
+
+
+                        def segments(path: str) -> tuple[str, ...]:
+                            """Return the segments of a path."""
+                            return PurePath(path).parts
+                    `,
+                    rewritten: python`
+                        from pathlib import PurePath
+
+
+                        def segments(path: str) -> list[str]:
+                            """Return the segments of a path."""
+                            return list(PurePath(path).parts)
                     `,
                 },
             ],
