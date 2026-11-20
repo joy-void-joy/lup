@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 import lup
 from lup.doors.door import RefusedError
@@ -154,11 +154,9 @@ class Held(Part, machine=True, shared=True):
     """The machine's part holding every session lup starts: starting each, telling it what's for it, waking it, interrupting it, ending it, and starting it again."""
 
     module: Sessions
-    holder: lup.Program = Field(
-        default_factory=lambda: lup.Program(
-            name=sys.executable,
-            why="runs each session's holder, the machine's own code, with the machine's own Python",
-        )
+    holder: lup.Program = lup.Program(
+        name=sys.executable,
+        why="runs each session's holder, the machine's own code, with the machine's own Python",
     )
     """The machine's own Python, which runs each session's holder
     (`lup.environment.sessions.holder`), so a holder is always the code of the
