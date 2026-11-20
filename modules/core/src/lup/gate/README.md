@@ -34,9 +34,9 @@ It runs where it's typed (`@lup.command(here=True)`, `lup/command_line/README.md
 
 Every step runs, even after one fails, and the report says how each ended and how long it took, then what a failing step printed. A step's program that can't be run fails the step, saying why. Where any fails, the check is refused, so the command ends failed.
 
-## A pass
+## A run, and a pass
 
-A pass is recorded by the files it passed on: the tree git would commit the worktree as, every change and every file it doesn't ignore added, read through an index of the gate's own so the worktree's stays as it is; and what crosses into a check from outside those files, the repository's own layer of the declaration and the machine's, which change what runs. It's kept in the repository's git directory, the one every worktree and room shares (`GateLayout`), so a check on the same files runs nothing, wherever they're checked out, a landing among them; `--again` runs every step anyway. With `--fix`, the fixes run first and the pass is looked for on the files as they left them.
+Every run is recorded by the files it ran on, passed or not, with each step's time and what a step that failed or tells said, the last run on those files in place of the one before, so where a branch is reviewed what its gate told is read with it (`lup/landing/README.md`). A pass is a run that passed, recorded by the files it passed on: the tree git would commit the worktree as, every change and every file it doesn't ignore added, read through an index of the gate's own so the worktree's stays as it is; and what crosses into a check from outside those files, the repository's own layer of the declaration and the machine's, which change what runs. Runs are kept in the repository's git directory, the one every worktree and room shares (`GateLayout`), so a check on the same files runs nothing, wherever they're checked out, a landing among them; `--again` runs every step anyway. With `--fix`, the fixes run first and the pass is looked for on the files as they left them.
 
 Only the whole tree keys a pass, never the files a step says it reads: the second lup's page step, keyed on its own list of sources, passed a model it never saw change.
 

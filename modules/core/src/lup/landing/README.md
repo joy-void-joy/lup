@@ -15,6 +15,7 @@ So `land` runs neither a merge nor the gate: it reads the remote's tip and the p
 ## On trial
 
 `Landings` is the machine's part (`machine=True, shared=True`): only the machine's parts read a repository's store hash-checked, record an approval and restart a project's containers. It keeps each project's landings, a JSON file each, and serves the operator:
+- **`review`**, a landing's view: how the gate went on its tip, what a step that tells said (what the rules listed without failing, say), then each file its tip changes, read from each object's own bytes;
 - **`yes`** (`done`): the branch goes on trial at the tip they reviewed;
 - **`toggle`**: takes a branch on trial out of what runs, or puts it back, as when they want to see whether it's the one causing what they see;
 - **`drop`** (`decline`): takes it off trial, or declines a landing waiting, and leaves the branch as it is;
@@ -38,8 +39,8 @@ Every git command runs through `Git` (`lup/hosting/git.py`), pinned to the repos
 
 - The landing's item waiting on the operator in the agent's conversation, once the inbox takes a module's item (#8): until then, what waits is read in `lup landing trial`.
 - The `# lup: defer` comments a landing adds and removes, through #9's reader.
-- A gate's result shown on the dashboard.
+- A gate's result shown on the agent's line in the dashboard, beside the review where it's shown now.
 
 ## Promises
 
-`promises.py`, git run for real in a temporary directory, since merging is what only git can say: a remote's bare repository and the project's clone of it, where the promise commits as an agent would and runs the gate as an agent does. A branch lands only holding the integration branch and gated; a yes runs the reviewed tip, approved, and a branch toggled out runs no more, nor a commit added after the yes; a branch that conflicts is left out of what runs; what waits and what's on trial show, each with its review; accepting pushes the reviewed tip onto the remote's integration branch, which nothing before it moved.
+`promises.py`, git run for real in a temporary directory, since merging is what only git can say: a remote's bare repository and the project's clone of it, where the promise commits as an agent would and runs the gate as an agent does. A branch lands only holding the integration branch and gated; a yes runs the reviewed tip, approved, and a branch toggled out runs no more, nor a commit added after the yes; a branch that conflicts is left out of what runs; what waits and what's on trial show, each with its review, what the gate told among it; accepting pushes the reviewed tip onto the remote's integration branch, which nothing before it moved.
