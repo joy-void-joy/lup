@@ -925,6 +925,16 @@ export class File {
         );
     }
 
+    // The text a `str` or `bytes` literal holds, its escapes read: `"\0"` holds NUL. None
+    // for anything else, an f-string among them.
+    literalText(node: ExpressionNode | undefined): string | undefined {
+        if (node?.nodeType !== ParseNodeType.StringList) {
+            return undefined;
+        }
+        const parts = node.d.strings.flatMap((part) => (part.nodeType === ParseNodeType.String ? [part.d.value] : []));
+        return parts.length === node.d.strings.length ? parts.join('') : undefined;
+    }
+
     // The type expressions naming one of `classes`: `tuple[int, str]`, `Tuple`, a bare
     // `tuple`, or an alias of one defined outside the project. An alias the project
     // defines isn't one here: it's found where it's defined, by what it's written as.
