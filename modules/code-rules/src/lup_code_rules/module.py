@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from string.templatelib import Template
 
 import lup
 from lup import (
@@ -23,6 +24,7 @@ from lup_code_rules.checking import Checked, Exemptions, Settling, Table
 from lup_code_rules.engine import Engine, EngineLayout, Source
 from lup_code_rules.errors import LupCodeRulesError
 from lup_code_rules.examples import Examples
+from lup_code_rules.guidance import told
 from lup_code_rules.promises import CodeRulesPromises
 from lup_code_rules.reading import read_directives
 from lup_code_rules.reporting import Report
@@ -330,6 +332,17 @@ def shown(rule: RuleInfo) -> str:
     )
 
 
+class Guide(Part):
+    """What a session is told of the code rules and `# lup:` comments, at its start."""
+
+    module: CodeRules
+
+    @lup.guidance
+    async def code_rules(self) -> Template:
+        """Say what the code rules catch, the few worth knowing before writing, how to check a file, and the `# lup:` comments."""
+        return told(self.module.name)
+
+
 RULES = Step(
     name="rules",
     command=["lup", "code-rules", "check", "."],
@@ -362,4 +375,4 @@ class CodeRules(Module):
     release adds runs unless a project drops it."""
     exempt: Exempt = Exempt.of("**/tests/**", "**/test_*.py", "**/conftest.py")
     steps: Steps = Steps.of(RULES)
-    parts: Parts = Parts.of(Checker, CodeRulesPromises)
+    parts: Parts = Parts.of(Checker, Guide, CodeRulesPromises)
