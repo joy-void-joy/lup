@@ -31,7 +31,7 @@ from lup.environment.doors import Doors, Entry, Running, Serves
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
-from lup.environment.shell.server import Dashboard, Session, Socket
+from lup.environment.shell.server import Dashboard, Over, Session, Socket
 from lup.environment.told import rendered
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
@@ -549,7 +549,11 @@ class Harness(Testing, arbitrary_types_allowed=True):
             telling=Teller(running=reached.running),
             dashboards=Dashboards(
                 dashboard=Dashboard(
-                    running=reached.running,
+                    answerer=Over(
+                        running=reached.running,
+                        looks=reached.looks,
+                        plan=plan_of(resolve(project), []),
+                    ),
                     looks=reached.looks,
                     root=document_of(reached.modules),
                     repository=repository,

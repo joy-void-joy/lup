@@ -17,11 +17,14 @@ from typing import override
 from pydantic import TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
+from lup.declaration.layout import MachineLayout
 from lup.doors.door import Accepted
 from lup.doors.parties import Machine
 from lup.environment.declaration import load, resolve
 from lup.environment.running.container import answered, asked, declined, listening
 from lup.environment.running.planning import plan_of
+from lup.environment.settings import LupSettings
+from lup.environment.shell.hosted import Served, started
 from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
 from lup.hosting.containers import ContainerError
 from lup.hosting.projects import Resuming
@@ -30,12 +33,19 @@ from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
 from lup.types import MutableModel
 lazy from lup.doors.parts import Runs
 lazy from lup.environment.doors import Running
+lazy from lup.shell.looks import Looks
 
 ASKED = TypeAdapter[Asking](Asking)
 
 
-async def carried(running: Running, directory: Path, text: bytes) -> bytes:
-    """Answer one message come in on a socket in `directory`: a call, routed and answered here or forwarded to the container whose part answers it, or a question of what the caller may call; nothing sent makes this raise."""
+async def carried(
+    running: Running, directory: Path, text: bytes, looks: Looks
+) -> bytes:
+    """Answer one message come in on a socket in `directory`: a call, routed and answered here or forwarded to the container whose part answers it, or a question of what the caller may call; nothing sent makes this raise.
+
+    A view the machine's own parts answer is drawn with `looks`, the kinds the
+    home repository's modules declare, as a container draws its project's.
+    """
     try:
         message = read(text, ASKED)
     except (FormatError, ValidationError) as wrong:
@@ -55,7 +65,7 @@ async def carried(running: Running, directory: Path, text: bytes) -> bytes:
     route = Route.model_validate(routing.output)
     vouched = route.call.model_dump_json().encode()
     if route.to is None:
-        return await answered(running, vouched)
+        return await answered(running, vouched, looks=looks)
     try:
         return await asked(route.to, vouched)
     except (OSError, ValueError) as lost:
@@ -66,6 +76,9 @@ class Binder(MutableModel, Listens, arbitrary_types_allowed=True):
     """What listens on each directory's calling socket on the operator's machine, carrying what comes in as `Carrying` routes it."""
 
     running: Running
+    looks: Looks
+    """The kinds the home repository's modules declare, which the views of
+    the machine's own parts are drawn with."""
     limit: int
     """The longest message read, in bytes."""
     servers: dict[Path, asyncio.Server] = {}
@@ -78,7 +91,7 @@ class Binder(MutableModel, Listens, arbitrary_types_allowed=True):
             return
 
         async def answer(text: bytes) -> bytes:
-            return await carried(self.running, directory, text)
+            return await carried(self.running, directory, text, self.looks)
 
         server = await listening(directory / "calling.sock", answer, limit=self.limit)
         self.servers = {**self.servers, directory: server}
@@ -111,8 +124,9 @@ async def hosted_parts(host: Host, runs: Runs | None) -> Running:
 async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> None:
     """Host the machine's own parts, and carry every call coming in on a socket of theirs until stopped: the operator's, and each container's as `Carrying` makes its directory, a message past `limit` bytes refused.
 
-    Each project the machine's parts ran before they last stopped is opened
-    again, every container they left stopped first, since nothing routes
+    The dashboard is served beside the operator's socket, before it listens
+    (`lup.environment.shell.hosted`). Each project the machine's parts ran
+    before they last stopped is opened again, every container they left stopped first, since nothing routes
     calls to it any more. Stopped (`SIGTERM`, as `lup stop` sends it), it
     stops listening and runs its parts' `Stopping`, which stop the projects'
     containers. Raise `ProjectError` where the home repository's
@@ -130,9 +144,10 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
             "`Carrying` carries every call: the home repository's must"
         )
         raise ProjectError(message)
-    binder = Binder(running=running, limit=limit)
+    resolved = resolve(load(host.root / host.declaration))
+    binder = Binder(running=running, looks=resolved.looks, limit=limit)
     carrying.listens = binder
-    hosting = plan_of(resolve(load(host.root / host.declaration)), [], host.root)
+    hosting = plan_of(resolved, [], host.root)
     unrun = [each.part for each in running.unrun]
     machine = [
         each
@@ -140,7 +155,14 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         if (each.holds.machine or each.holds.shared) and each.named() not in unrun
     ]
     carrying.hosted = Plan(parts=machine, tools=hosting.tools)
+    dashboard: Served | None = None
     try:
+        dashboard = await started(
+            host,
+            running,
+            carrying.operator() / "calling.sock",
+            MachineLayout(configuration=LupSettings().xdg_config_home),
+        )
         await binder.listened(carrying.operator())
         resumed = await running.serve(
             "resumed", Resuming().model_dump(mode="json"), Machine()
@@ -151,5 +173,7 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopping.set)
         await stopping.wait()
     finally:
+        if dashboard is not None:
+            await dashboard.stopped()
         binder.closed()
         await running.stopped()
