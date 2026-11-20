@@ -25,8 +25,8 @@ from lup.doors.parts import Data, Part, Program
 from lup.hosting.carrying import Carrying, Naming
 from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec
 from lup.rooms.layout import InRoom, Kept, digest
-from lup.running.plan import Name
 from lup.rooms.packages import Package
+from lup.running.plan import Name
 from lup.runtimes.known import known, named
 from lup.runtimes.runtime import Begin, Bridge, Fetched, Got, Placed, Runtime
 from lup.types import Model
@@ -101,6 +101,28 @@ class Base(Model):
             "rm -rf /var/cache/pacman/pkg/*",
         ]
         return f"FROM {self.image}\nRUN " + " \\\n    && ".join(steps) + "\n"
+
+
+def made(base: Path, *names: str) -> Path:
+    """Make each directory of `names` below `base` in turn, returning the last: a link a room left in the way removed first, since rooms write below `base`, so nothing made follows a room's link out of it.
+
+    `base` itself is the machine's, which no room mounts.
+    """
+    base.mkdir(parents=True, exist_ok=True)
+    here = base
+    for name in names:
+        here /= name
+        if here.is_symlink():
+            here.unlink()
+        here.mkdir(exist_ok=True)
+    return here
+
+
+def replaced(path: Path, text: str) -> None:
+    """Write `text` to `path`, in a directory a room writes: a link a room left there removed first, so the write never follows it out."""
+    if path.is_symlink():
+        path.unlink()
+    path.write_text(text)
 
 
 class Fresh(Model):
@@ -202,7 +224,7 @@ class Rooms(Part, machine=True, shared=True):
         for name, text in prepared.files.items():
             (files / name).write_text(text)
         for name, text in prepared.homed.items():
-            (directory / name).write_text(text)
+            replaced(directory / name, text)
         history = self.kept.history(room.common, runtime.name)
         for name in runtime.rooming.kept():
             self.linked(directory / name, history / name)
@@ -356,14 +378,24 @@ class Rooms(Part, machine=True, shared=True):
         return fetched
 
     def linked(self, place: Path, history: Path) -> None:
-        """Make `place`, in a runtime's own directory, a link to `history`, in the history its project's rooms share: made where it isn't, a directory where its name has no suffix, a file otherwise."""
+        """Make `place`, in a runtime's own directory, a link to `history`, in the history its project's rooms share: made where it isn't, a directory where its name has no suffix, a file otherwise.
+
+        Both are in directories rooms write, so a link a room left in either's
+        place is removed first, and nothing made follows it out.
+        """
+        history.parent.mkdir(parents=True, exist_ok=True)
+        if history.is_symlink():
+            history.unlink()
         if not history.exists():
             if history.suffix:
-                history.parent.mkdir(parents=True, exist_ok=True)
                 history.touch()
             else:
-                history.mkdir(parents=True, exist_ok=True)
-        if place.is_symlink() or place.exists():
+                history.mkdir()
+        if place.is_symlink() and place.readlink() == history:
+            return
+        if place.is_symlink():
+            place.unlink()
+        if place.exists():
             return
         place.symlink_to(history)
 
@@ -382,11 +414,9 @@ class Rooms(Part, machine=True, shared=True):
         tree = room.common.parent if room.common.name == ".git" else room.common
         hooks = room.common / "hooks"
         hooks.mkdir(exist_ok=True)
-        rooms = self.rooms.path / digest(room.common)
-        environment = rooms / "environments" / room.session
-        cache = rooms / "cache"
-        for each in [environment, cache]:
-            each.mkdir(parents=True, exist_ok=True)
+        rooms = made(self.rooms.path, digest(room.common))
+        environment = made(rooms, "environments", room.session)
+        cache = made(rooms, "cache")
         lup_environment = Path(sys.prefix)
         binds = [
             Bind(source=tree, read_only=False),
