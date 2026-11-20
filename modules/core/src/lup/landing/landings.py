@@ -20,7 +20,7 @@ from lup.declaration.layout import local_layer
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part, Program
-from lup.gate.checking import keyed, passed
+from lup.gate.checking import Run, keyed, last, passed
 from lup.gate.layout import GateLayout
 from lup.hosting.approvals import Approvals, Approving, Asking
 from lup.hosting.git import Git
@@ -35,6 +35,7 @@ from lup.shell.blocks import (
     FileText,
     Fold,
     Line,
+    Markdown,
     Offer,
     Span,
     Ticking,
@@ -466,11 +467,18 @@ class Landings(Part, machine=True, shared=True):
 
     @lup.view
     async def review(self, naming: Naming) -> Blocks:
-        """Show a landing's change: each file its tip changes since the integration branch's tip it holds, read from each object's own bytes."""
+        """Show a landing's change: how the gate went on its tip, what a step that tells said, then each file its tip changes since the integration branch's tip it holds, read from each object's own bytes."""
         trial = self.kept(naming.project)
         landed = trial.landing(naming.branch)
         opening = await Projects.registered(Asking(project=naming.project))
         objects = Objects(git=self.git, common=opening.common)
+        git = self.repository(opening)
+        main = opening.common if await git.bare() else opening.common.parent
+        local = local_layer(main, opening.declaration)
+        run = last(
+            GateLayout(common=opening.common),
+            keyed(await objects.tree(landed.tip), local),
+        )
         before = {str(each.path): each for each in await objects.held(landed.onto)}
         after = {str(each.path): each for each in await objects.held(landed.tip)}
         changed = sorted(
@@ -489,6 +497,7 @@ class Landings(Part, machine=True, shared=True):
                 return FileBytes(size=len(content))
 
         return Blocks.of(
+            *gate_lines(run),
             *[
                 Diff(
                     id=path,
@@ -497,8 +506,42 @@ class Landings(Part, machine=True, shared=True):
                     after=await side(after.get(path)),
                 )
                 for path in changed
-            ]
+            ],
         )
+
+
+def gate_lines(run: Run | None) -> list[Line | Markdown]:
+    """Return how the gate went on a landing's tip, a line each step, what a step that failed or tells said under it, indented as code; or that it never ran there."""
+    if run is None:
+        return [Line.of("gate", "The gate hasn't run on these files.", "muted")]
+    outcome = "passed" if run.passed else "failed"
+    return [
+        Line.of("gate", f"The gate {outcome} on these files.", "strong"),
+        *(
+            block
+            for each in run.steps
+            for block in [
+                Line.of(
+                    f"gate-{each.name}",
+                    f"{'passed' if each.passed else 'failed'}  {each.name}  "
+                    f"{each.seconds:.1f} s",
+                ),
+                *(
+                    [
+                        Markdown(
+                            id=f"gate-{each.name}-said",
+                            text="".join(
+                                f"    {line}\n" for line in each.said.splitlines()
+                            ),
+                            tone="muted",
+                        )
+                    ]
+                    if each.said
+                    else []
+                ),
+            ]
+        ),
+    ]
 
 
 def landing_fold(project: str, landed: Landed, *, left_out: bool) -> Fold:

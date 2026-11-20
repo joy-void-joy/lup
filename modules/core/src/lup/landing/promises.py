@@ -15,7 +15,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import lup
-from lup import Agent, Blocks, Codebase, Diff, Fold, Machine, Model, Operator, Part
+from lup import (
+    Agent,
+    Blocks,
+    Codebase,
+    Diff,
+    Fold,
+    Machine,
+    Markdown,
+    Model,
+    Operator,
+    Part,
+)
 from lup.testing import (
     Accepted,
     Acting,
@@ -39,14 +50,17 @@ from lup.hosting.module import Hosting
 
 project = Project(
     modules=Modules.default()
-    .edit(Gate(steps=Steps.of(Step(name="checked", command=["checked"]))))
+    .edit(Gate(steps=Steps.of(Step(name="checked", command=["checked"], tells=True))))
     .add(Hosting())
 )
 """
 """The home repository's declaration, as lup's own declares it, lup's default
-modules and the machine's parts, its gate one step, `checked`, whose program
-the promises stand in for passing: the gate as an agent runs it, on the files
+modules and the machine's parts, its gate one step, `checked`, which tells what
+it prints, as a step listing what's due does, and whose program the promises
+stand in for passing, saying `TOLD`: the gate as an agent runs it, on the files
 the promise committed."""
+TOLD = "historical-voice: main.py:3"
+"""What the gate's step tells where it passes."""
 
 
 class RealGit(Model, Acting):
@@ -183,7 +197,7 @@ async def machine(by: Testing, at: Places) -> Started:
         programs={
             "git": RealGit(),
             "uv": Scripted(answers=[Answering(output="/srv/python\n")]),
-            "checked": Scripted(answers=[Answering()]),
+            "checked": Scripted(answers=[Answering(output=TOLD)]),
         },
         machine=True,
     )
@@ -311,7 +325,7 @@ class LandingPromises(Part):
     async def what_waits_and_whats_on_trial_shows_with_what_it_changed(
         self, by: Testing
     ) -> None:
-        """What's on trial shows each landing waiting on the operator or on trial, offering a yes on what waits and an accept on what's on trial, each opening on its review: a file for each file its branch changed."""
+        """What's on trial shows each landing waiting on the operator or on trial, offering a yes on what waits and an accept on what's on trial, each opening on its review: what the gate told on its tip, then a file for each file its branch changed."""
         agent = Agent.of("landing")
         with places() as at:
             started = await machine(by, at)
@@ -335,6 +349,10 @@ class LandingPromises(Part):
         assert "accept" in offered(shown.output, "trying")
         paths = [each.path for each in reviewed.output.blocks if isinstance(each, Diff)]
         assert paths == ["waiting.txt"]
+        told = [
+            each.text for each in reviewed.output.blocks if isinstance(each, Markdown)
+        ]
+        assert any(TOLD in each for each in told)
 
     @lup.promise
     async def accepting_pushes_the_reviewed_tip_onto_the_integration_branch(
