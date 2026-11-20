@@ -12,13 +12,20 @@ from lup import (
     Codebase,
     Commented,
     Fold,
+    Line,
     Machine,
     Model,
+    Module,
     Modules,
+    Offer,
     Operator,
     Part,
+    Parts,
     Project,
+    Recorded,
+    Viewing,
 )
+from lup.inbox.records import Item, Laid, Question
 from lup.inbox.said import (
     Answering,
     AskSaid,
@@ -37,14 +44,17 @@ from lup.inbox.said import (
     PartyOf,
     Pile,
     Placed,
+    Posted,
+    Posting,
     Reached,
     SendSaid,
+    Settling,
     Told,
     Untelling,
     Untold,
     WithdrawSaid,
 )
-from lup.testing import Accepted, Started, Step, Testing
+from lup.testing import Accepted, Refused, Started, Step, Testing
 
 HERE = Codebase(repository="harness")
 """The harness's project's own code, which calls the inbox's services for its agents."""
@@ -53,6 +63,61 @@ HERE = Codebase(repository="harness")
 def project() -> Project:
     """Return a project of lup's default modules, the inbox among them."""
     return Project(modules=Modules.default())
+
+
+class Change(Model):
+    """A change to review, by its name."""
+
+    change: str
+
+
+class ChangeWaits(Item):
+    """A change waiting on the operator's review: the reviewing module's own kind of item, laid out as a fold opening on its view, offering its command."""
+
+    kind: str = "reviewing:waits"
+    change: str
+
+    def waits(self) -> bool:
+        """Say that a change waits until the module settles it."""
+        return True
+
+    def laid(self) -> Laid:
+        """Lay it out as a fold opening on the change's review, offering to accept it."""
+        given = Change(change=self.change)
+        return Laid(
+            fold="body",
+            summary=f"the change {self.change}",
+            opens=Viewing.of(Reviews.review, given, module=Reviewing.name),
+            offers=[Offer.of(Reviews.accept, given, module=Reviewing.name)],
+        )
+
+
+class Reviews(Part):
+    """The reviewing module's part: a change's review, and accepting it."""
+
+    @lup.view
+    async def review(self, change: Change) -> Blocks:
+        """Show a change's review."""
+        return Blocks.of(Line.of("change", change.change))
+
+    @lup.command(verb="done", says="accept it")
+    async def accept(self, change: Change, by: Operator) -> str:
+        """Accept a change."""
+        del by
+        return f"accepted {change.change}"
+
+
+class Reviewing(Module):
+    """Reviewing: an example module the inbox's promises check a module's own kind of item with."""
+
+    name = "reviewing"
+    parts: Parts = Parts.of(Reviews)
+    kinds: Recorded = Recorded.of(ChangeWaits)
+
+
+def reviewing() -> Project:
+    """Return a project of lup's default modules and the reviewing module."""
+    return Project(modules=Modules.default().add(Reviewing()))
 
 
 async def inboxed(started: Started) -> Inboxed:
@@ -425,3 +490,40 @@ class InboxPromises(Part):
         assert isinstance(commented, Accepted), commented
         found = placed(await inboxed(started), "group these")
         assert found.holder == "@frictions/keys"
+
+    @lup.promise
+    async def a_modules_own_item_waits_until_the_module_settles_it(
+        self, by: Testing
+    ) -> None:
+        """An item of a module's own kind, posted for an agent, waits on the operator, laid out as its kind says, until the module settles it, and what came of it is told to the agent; the inbox's own kinds can't be posted."""
+        started = await by.started(reviewing())
+        agent = by.any(Agent)
+        waits = Posting.of(
+            ChangeWaits,
+            Change(change="tidy"),
+            by=agent,
+            repository="harness",
+            text="it waits",
+        )
+        posted = await started.serve("post", waits, Machine())
+        assert isinstance(posted, Accepted), posted
+        assert isinstance(posted.output, Posted)
+        number = posted.output.number
+        assert number in (await inboxed(started)).waiting
+        shown = await viewed(started, "waiting", PartiesOf(repository="harness"))
+        [fold] = [each for each in folds(shown) if each.id == f"item-{number}-laid"]
+        assert fold.content == Viewing(
+            module="reviewing", view="review", given={"change": "tidy"}
+        )
+        assert [(each.module, each.command) for each in fold.offers[1:]] == [
+            ("reviewing", "accept")
+        ]
+        settled = Settling(repository="harness", item=number, text="accepted")
+        assert isinstance(await started.serve("settle", settled, HERE), Accepted)
+        assert number not in (await inboxed(started)).waiting
+        assert any(
+            each.text == "accepted" for each in (await told(started, agent)).items
+        )
+        question = Posting.of(Question, by=agent, repository="harness", text="may I?")
+        refused = await started.serve("post", question, Machine())
+        assert isinstance(refused, Refused)

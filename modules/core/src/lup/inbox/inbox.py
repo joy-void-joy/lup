@@ -13,6 +13,8 @@ from itertools import accumulate, groupby
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from lup.inbox.records import (
     NO_AGENT,
     AgentRecord,
@@ -32,6 +34,7 @@ from lup.inbox.records import (
     Item,
     Message,
     OperatorRecord,
+    Outcome,
     PartyRecord,
     PileRecord,
     Question,
@@ -804,6 +807,48 @@ class Inbox(Model, arbitrary_types_allowed=True):
             if told.key > since and told.by == operator.key:
                 self.edge(Answers, told, end, by)
         return end
+
+    def posted[I: Item](
+        self, by: AgentRecord, kind: type[I], text: str, fields: dict[str, JsonValue]
+    ) -> I:
+        """Keep an item of `kind`, a module's own, as `by`'s to the operator in `text`, its own fields `fields`, in the concern `by` works in where they work in one, and return it as kept.
+
+        Raise `InboxError` where `fields` aren't its kind's.
+        """
+        try:
+            item = kind.model_validate(
+                {
+                    **fields,
+                    "repository": self.repository,
+                    "by": by.key,
+                    "at": self.now(),
+                    "to": [self.operator().key],
+                    "text": text,
+                }
+            )
+        except ValidationError as wrong:
+            message = f"what's posted isn't a `{kind.declared()}`: {wrong}"
+            raise InboxError(message, about=[kind.__name__]) from wrong
+        kept = self.database.kept(item)
+        concern = self.working_in(by)
+        if concern is not None:
+            self.edge(In, concern, kept, by)
+        return kept
+
+    def settled(self, item: Item, text: str) -> Outcome:
+        """Keep what came of `item` for the operator's act, in `text`: told to whoever wrote it, answering it."""
+        operator = self.operator()
+        outcome = self.database.kept(
+            Outcome(
+                repository=self.repository,
+                by=operator.key,
+                at=self.now(),
+                to=[] if item.by is None else [item.by],
+                text=text,
+            )
+        )
+        self.edge(Answers, item, outcome, operator)
+        return outcome
 
     def withdrawn(self, by: AgentRecord, item: Item, why: str) -> None:
         """Take back `by`'s `item`, saying why: it waits on nobody after."""
