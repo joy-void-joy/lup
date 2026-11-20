@@ -8,24 +8,27 @@ view and the project's kinds (`Opened`), and answers each view the page watches
 a browser keeps few connections to a host; a frame the server can't read is
 refused alone, never closing the socket (`README.md` in `lup/shell/`, *The server*).
 
-Until the program on the host runs services (#3), it's started as the core's
-command, `dashboard`; #3 then runs the same application as the dashboard's
-service, from a commit the operator approved, since it holds their approvals.
+The machine serves it beside its socket, from the commit the operator approved
+(`lup.environment.shell.hosted`), its page built there by `Pages`: until the
+page is built, or where it can't be, the server says why in its place.
 """
 
 import asyncio
+import contextlib
 import hmac
+import html
 import json
 import logging
 import secrets
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+lazy import socket
+lazy from collections.abc import Generator
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
 
@@ -106,6 +109,27 @@ def described() -> str:
     """Describe what the page reads from the core, as JSON Schema of what's sent, which the page's types are generated from, so the two can't disagree."""
     schema = Read.model_json_schema(mode="serialization", schema_generator=AsSent)
     return json.dumps(schema, indent=2)
+
+
+class Serving(MutableModel):
+    """The page the dashboard serves: where it's built, or why there's none to serve yet."""
+
+    page: Path | None = Field(default_factory=lambda: ShellLayout().page)
+    """The built page's directory, its `index.html` and assets; none until
+    it's built. Left out, the page built beside the package, as the page's
+    build writes it in a worktree."""
+    why: str = ""
+    """Why there's no page, where there's none."""
+    building: bool = False
+    """Whether it's being built, so the page saying why reloads itself."""
+
+    def unbuilt(self) -> str:
+        """Return what's served in the page's place: why there's none, reloading itself while it's built."""
+        reloads = '<meta http-equiv="refresh" content="5">' if self.building else ""
+        return (
+            '<!doctype html><meta charset="utf-8"><title>lup</title>'
+            f"{reloads}<p>lup's dashboard has no page yet: {html.escape(self.why)}</p>"
+        )
 
 
 class Keeping(MutableModel, arbitrary_types_allowed=True):
@@ -196,7 +220,8 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     token: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     """What the page has to say before anything is answered: rooms reach every
     port on the operator's machine, so being on localhost keeps nothing out."""
-    layout: ShellLayout = ShellLayout()
+    serving: Serving = Field(default_factory=Serving)
+    """The page it serves, or why there's none yet."""
     repository: str | None = None
     """The repository the dashboard serves, whose No agent pile takes a comment
     on what reaches no party; none where nothing takes one."""
@@ -270,12 +295,26 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     def application(self) -> FastAPI:
         """Return the server's application: the page, its assets, and the socket."""
         application = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
-        page = self.layout.page
 
-        @application.get("/")
-        async def index() -> FileResponse:
-            """Serve the page."""
+        @application.get("/", response_model=None)
+        async def index() -> Response:
+            """Serve the page, or say why there's none yet."""
+            page = self.serving.page
+            if page is None or not (page / "index.html").is_file():
+                return HTMLResponse(self.serving.unbuilt(), status_code=503)
             return FileResponse(page / "index.html")
+
+        @application.get("/assets/{name:path}")
+        async def asset(name: str) -> FileResponse:
+            """Serve one of the page's assets, none outside its directory of them."""
+            page = self.serving.page
+            if page is None:
+                raise HTTPException(status_code=404)
+            assets = (page / "assets").resolve()
+            found = (assets / name).resolve()
+            if not found.is_relative_to(assets) or not found.is_file():
+                raise HTTPException(status_code=404)
+            return FileResponse(found)
 
         @application.websocket("/api/socket")
         async def socket(websocket: WebSocket) -> None:
@@ -283,10 +322,6 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             await websocket.accept()
             await Session(dashboard=self, socket=Carried(websocket=websocket)).run()
 
-        if (page / "assets").is_dir():
-            application.mount(
-                "/assets", StaticFiles(directory=page / "assets"), name="assets"
-            )
         return application
 
     async def answer(self, watch: int, viewing: Viewing) -> Answered | Unanswered:
@@ -587,10 +622,23 @@ def named(party: JsonValue) -> str:
     return " ".join(str(value) for key, value in party.items() if key != "party")
 
 
-async def serve(dashboard: Dashboard, port: int) -> None:
-    """Serve `dashboard` on localhost's `port` until stopped, saying where to open it."""
-    log.warning("lup's dashboard: http://127.0.0.1:%d/#%s", port, dashboard.token)
-    config = uvicorn.Config(
-        dashboard.application(), host="127.0.0.1", port=port, log_level="warning"
-    )
-    await uvicorn.Server(config).serve()
+class Quiet(uvicorn.Server):
+    """uvicorn's server leaving signals to whoever serves it, as the machine stops it with the rest of its parts."""
+
+    @override
+    @contextlib.contextmanager
+    def capture_signals(self) -> Generator[None]:
+        yield
+
+
+async def serve(
+    dashboard: Dashboard, listening: socket.socket, stopping: asyncio.Event
+) -> None:
+    """Serve `dashboard` on `listening`, a socket bound already, until `stopping` is set."""
+    server = Quiet(uvicorn.Config(dashboard.application(), log_level="warning"))
+    serving = asyncio.ensure_future(server.serve([listening]))
+    waiting = asyncio.ensure_future(stopping.wait())
+    await asyncio.wait([serving, waiting], return_when=asyncio.FIRST_COMPLETED)
+    server.should_exit = True
+    waiting.cancel()
+    await serving
