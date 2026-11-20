@@ -10,11 +10,12 @@ same promises (`README.md` here, *The harness*).
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
-from lup.command_line.answering import Answerer, Offered, Typed
+from lup.command_line.answering import Answerer, Here, Offered, Typed
 from lup.declaration.module import Module
 from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Party
@@ -199,6 +200,8 @@ class ProgramRun(Model):
     """What it was given on its input."""
     env: dict[str, str] = {}
     """The variables it was run with beside the machine's own."""
+    cwd: Path | None = None
+    """The directory it was run from; none where it ran where its part runs."""
 
 
 class Heard(MutableModel):
@@ -368,7 +371,12 @@ class Started(Model, arbitrary_types_allowed=True):
         return await self.doors.answered(call)
 
     async def typed(
-        self, words: list[str], by: Caller, command: list[str] | None = None
+        self,
+        words: list[str],
+        by: Caller,
+        command: list[str] | None = None,
+        *,
+        here: Started | None = None,
     ) -> Typed:
         """Type `words` on the command line, `lup`, as `by` does in their terminal or their room, and say what it did: what it printed and how it ended, what the help it showed listed, and the call it made.
 
@@ -376,12 +384,24 @@ class Started(Model, arbitrary_types_allowed=True):
         its top level, and makes its call through these doors, every law
         checked over it. Where `command` names modules, it's a project's own
         command instead, given those modules: it offers theirs alone, the
-        first's at its top level. Raise `BlockError` where a view it reads
-        names a kind nobody declares, as `view` does.
+        first's at its top level. Where `here` is given, this lup stands for
+        lup's program on the operator's machine and `here` for the worktree
+        it's typed in: a command this lup's plan marks to run where it's typed
+        is made through `here`'s doors instead (`Here`). Raise `BlockError`
+        where a view it reads names a kind nobody declares, as `view` does.
         """
         harnessed = Harnessed(started=self, by=by, offering=command)
         top = CORE if command is None else next(iter(command), None)
-        return await line.typed(words, harnessed, "lup", top=top)
+        if here is None:
+            return await line.typed(words, harnessed, "lup", top=top)
+        worktree = here
+
+        def made(party: Caller) -> Answerer:
+            return Harnessed(started=worktree, by=party, offering=command)
+
+        return await line.typed(
+            words, Here(through=harnessed, here=made), "lup", top=top
+        )
 
 
 class Harnessed(Model, Answerer, arbitrary_types_allowed=True):

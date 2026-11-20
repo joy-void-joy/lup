@@ -365,6 +365,7 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
         arguments: list[str],
         given: bytes | None,
         env: dict[str, str],
+        cwd: Path | None,
     ) -> Finished:
         """Hear the run, and answer it as its program's script says.
 
@@ -372,7 +373,13 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
         program that isn't there.
         """
         self.heard.runs.append(
-            ProgramRun(program=program.name, arguments=arguments, given=given, env=env)
+            ProgramRun(
+                program=program.name,
+                arguments=arguments,
+                given=given,
+                env=env,
+                cwd=cwd,
+            )
         )
         match self.scripts.get(program.name, Scripted()):
             case Scripted(answers=answers):

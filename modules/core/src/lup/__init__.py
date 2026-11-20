@@ -7,19 +7,21 @@ run on), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.command`, `lup.on`,
 `lup.promise`), with the parties a method's `by` names, lup's events,
 and the parts a module is made of (`Part`, listed in its `Parts`, holding its
-`Secret`s, its `Data` and what lasts while it runs, its `Runtime`); the shell's
+`Secret`s, its `Data` and what lasts while it runs, its `Runtime`, and what
+every module declares, `Declared`); the shell's
 view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
 `Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
-in its `Recorded`); and the guidance door (`lup.guidance`), a module's section of
-what a session is told at its start. The core's environment side
+in its `Recorded`); the guidance door (`lup.guidance`), a module's section of
+what a session is told at its start; and the steps a module declares the gate
+runs (`Step`, listed in its `Steps`), with the gate itself, `Gate`. The core's environment side
 (`lup.environment`) isn't among it, and nothing here imports it.
 
 Running a program is `lup.programs` (`lup.programs.run`), kept under its own
 name: alone, its names would read as lup's own (`lup.run`).
 
-`Core` and `lup.programs` are imported when first used: `Core` lists its
-submodules' promises, which import `lup` itself.
+`Core`, `Gate` and `lup.programs` are imported when first used: `Core` and
+`Gate` list their promises, which import `lup` itself.
 """
 
 from lup.declaration.errors import ProjectError
@@ -42,6 +44,7 @@ from lup.doors.on import on
 from lup.doors.parties import Agent, Codebase, Machine, Operator, Party
 from lup.doors.parts import (
     Data,
+    Declared,
     Finished,
     Part,
     Parts,
@@ -53,6 +56,7 @@ from lup.doors.parts import (
 from lup.doors.service import UncarriedError, service
 from lup.doors.tool import tool
 from lup.errors import LupError
+from lup.gate.steps import Step, Steps
 from lup.shell.blocks import (
     BlockError,
     Blocks,
@@ -80,6 +84,7 @@ from lup.told.guidance import GuidanceError
 from lup.types import JsonObject, Model, MutableModel, Settings
 lazy from lup import programs
 lazy from lup.core import Core
+lazy from lup.gate.module import Gate
 
 __all__ = [
     "Agent",
@@ -92,6 +97,7 @@ __all__ = [
     "Commenting",
     "Core",
     "Data",
+    "Declared",
     "Diff",
     "DoorError",
     "Edge",
@@ -102,6 +108,7 @@ __all__ = [
     "Fold",
     "FoldKind",
     "Folds",
+    "Gate",
     "Gauge",
     "GuidanceError",
     "JsonObject",
@@ -140,6 +147,8 @@ __all__ = [
     "Settings",
     "Span",
     "Starting",
+    "Step",
+    "Steps",
     "Stopping",
     "Ticking",
     "Tone",

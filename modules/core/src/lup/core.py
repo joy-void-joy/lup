@@ -16,6 +16,7 @@ from lup.rooms.packages import Packages, standard
 from lup.running.plan import CORE
 from lup.running.promises import RunningPromises
 from lup.runtimes.known import known
+from lup.runtimes.promises import RecordsPromises
 from lup.runtimes.runtime import Runtimes
 from lup.setup.part import Setup
 from lup.setup.promises import SetupPromises
@@ -46,6 +47,7 @@ class Core(Module):
         DoorsPromises,
         PartsPromises,
         RunningPromises,
+        RecordsPromises,
         TestingPromises,
         ShellPromises,
         StorePromises,

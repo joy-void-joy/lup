@@ -219,7 +219,8 @@ class Carrying(Part, machine=True, shared=True):
         machine's is only ever the machine's own. Raise
         `RefusedError` where the directory is no container's, no session's
         room nor the operator's, where a conversation is named from anywhere
-        but a room, or where the project's part answering the call isn't
+        but a room, where the call is to a command answered where `lup` is
+        typed (`here`), or where the project's part answering the call isn't
         running.
         """
         del by
@@ -231,6 +232,17 @@ class Carrying(Part, machine=True, shared=True):
         plan = None if repository is None else self.plans.get(repository)
         way = way_of(call)
         serving = None if plan is None else plan.serving(way.door, way.name, way.module)
+        here = serving is not None and any(
+            each.here
+            for each in serving.doorways
+            if each.door == way.door and each.name == way.name
+        )
+        if here:
+            message = (
+                f"{way.said()} is answered where `lup` is typed, over that "
+                "worktree's declaration, never carried to where the project runs"
+            )
+            raise RefusedError(message)
         if serving is None or serving.holds.machine or serving.holds.shared:
             return Route(to=None, call=call)
         placement = next(
