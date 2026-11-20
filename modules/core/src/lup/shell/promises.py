@@ -7,6 +7,11 @@ folds, are the page's, in TypeScript (`README.md` here, *Promises*).
 """
 
 import asyncio
+import csv
+import json
+import tempfile
+from pathlib import Path
+from typing import Literal, get_args
 
 from pydantic import Field
 
@@ -38,6 +43,7 @@ from lup.inbox.said import PartyOf, Pile
 from lup.testing import (
     Accepted,
     Answered,
+    Answering,
     Comment,
     Delivered,
     Drafted,
@@ -46,6 +52,8 @@ from lup.testing import (
     Page,
     Quote,
     Refused,
+    Repository,
+    Responding,
     Reviewed,
     Send,
     Started,
@@ -710,3 +718,205 @@ def quoted(block: str) -> Quote:
     """Return a quote of the block `block` of the pile's view."""
     pile = Viewing(module="notes", view="pile", given={"pile": "p"})
     return Quote(viewing=pile, block=block, lines=["note 1"])
+
+
+HOSTED = """
+from lup import Modules, Project
+from lup.hosting.module import Hosting
+
+project = Project(modules=Modules.default().add(Hosting()))
+"""
+"""The home repository's declaration, as lup's own declares it: the core and
+the machine's hosting, whose `Containers` builds the page."""
+
+type Stage = Literal["install", "generated", "build"]
+"""A word of each of a page's build steps, as podman is asked to run it: pnpm
+installing, the types generated, and vite writing the page."""
+
+
+class Failing(Model):
+    """The step of a page's build that fails."""
+
+    stage: Stage
+
+
+class Source(Model):
+    """A page's source as a promise draws it: its `package.json`, and some files, one in a directory."""
+
+    files: list[str] = []
+    nested: str = ""
+
+    def written(self, root: Path) -> Path:
+        """Write the source under `root`, and return where it is."""
+        (root / "src").mkdir(parents=True)
+        (root / "package.json").write_text('{"name": "page"}')
+        for number, text in enumerate(self.files):
+            (root / f"file-{number}.ts").write_text(text)
+        (root / "src" / "main.ts").write_text(self.nested)
+        return root
+
+
+class Mount(Model, extra="ignore"):
+    """A directory of the machine's a container mounts, as podman is asked."""
+
+    source: Path
+    destination: Path
+
+
+def mounts(command: list[str]) -> list[Mount]:
+    """Return what a run of podman mounts, each `--mount` read as podman reads it: one CSV record of `key=value` fields, the first after the option's own name."""
+    return [
+        Mount.model_validate(
+            {
+                pair[-2]: pair[-1]
+                for field in next(csv.reader([argument]))
+                for pair in [next(csv.reader([field], delimiter="="))]
+                if len(pair) >= 2
+            }
+        )
+        for argument in command
+        if argument.startswith("--mount=type=bind")
+    ]
+
+
+def mounted(command: list[str], destination: Path) -> Path:
+    """Return the directory of the machine's a run of podman mounts at `destination`."""
+    return next(
+        each.source for each in mounts(command) if each.destination == destination
+    )
+
+
+def runs(started: Started) -> list[list[str]]:
+    """Return each run of a container podman was asked for."""
+    return [each for each in started.ran("podman") if each and each[0] == "run"]
+
+
+class Building(lup.MutableModel, Responding):
+    """podman as a promise stands it in for a page's build: the image there or not, each step run, the page written where the last step writes it, and one step failing where `failing` names it."""
+
+    there: bool = False
+    failing: Stage | None = None
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer each run as podman would, a step by what it runs."""
+        del given
+        match arguments:
+            case ["version", *_]:
+                return Answering(output="6.1.0\n")
+            case ["image", "exists", *_]:
+                return Answering(status=0 if self.there else 1)
+            case ["pull", *_] | ["build", *_]:
+                return Answering()
+            case ["run", *_]:
+                return self.stepped(arguments)
+            case _:
+                return None
+
+    def stepped(self, arguments: list[str]) -> Answering:
+        """Answer one step run in a container: failed where it's the one `failing` names, the page written by the last."""
+        stage = next(each for each in get_args(Stage.__value__) if each in arguments)
+        if stage == self.failing:
+            return Answering(status=1, output="ERR_PNPM step failed\n")
+        if stage == "build":
+            out = mounted(arguments, Path("/var/lup/out"))
+            (out / "index.html").write_text("<!doctype html>")
+            (out / "assets").mkdir()
+        return Answering(output=f"{stage} done\n")
+
+
+async def page_of(started: Started, source: Path) -> Accepted | Refused:
+    """Ask the machine's `Pages` for the page built from `source`."""
+    return await started.serve(
+        "page",
+        {"source": str(source), "described": "{}"},
+        lup.Machine(),
+    )
+
+
+def built_at(answered: Accepted) -> Path:
+    """Return where the page `Pages` answered is."""
+    return Path(json.loads(answered.answer())["path"])
+
+
+class PagesPromises(Part):
+    """What the operator can count on of the dashboard's page, as the machine builds it."""
+
+    @lup.promise
+    async def a_page_is_built_once_for_what_it_is_built_from(self, by: Testing) -> None:
+        """A page is built once for what it's built from: asked again for the same source, the page already built is answered and nothing runs; a file of the source changed, it's built again, elsewhere."""
+        drawn = by.any(Source)
+        started = await by.started(
+            Repository(declaration=HOSTED),
+            programs={"podman": Building(there=by.any(bool))},
+            machine=True,
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            source = drawn.written(Path(scratch) / "page")
+            first = await page_of(started, source)
+            assert isinstance(first, Accepted)
+            built = built_at(first)
+            assert (built / "index.html").is_file()
+            ran = len(runs(started))
+            again = await page_of(started, source)
+            assert isinstance(again, Accepted)
+            assert built_at(again) == built
+            assert len(runs(started)) == ran
+            (source / "src" / "main.ts").write_text(f"{drawn.nested}, changed")
+            changed = await page_of(started, source)
+            assert isinstance(changed, Accepted)
+            assert built_at(changed) != built
+            assert (built_at(changed) / "index.html").is_file()
+            assert (built / "index.html").is_file()
+
+    @lup.promise
+    async def a_failed_step_leaves_no_page_and_says_where_its_log_is(
+        self, by: Testing
+    ) -> None:
+        """Where a step of the build fails, no page is left, nor what the build worked in, and the refusal names the step and the log holding everything it said."""
+        failing = by.any(Failing).stage
+        started = await by.started(
+            Repository(declaration=HOSTED),
+            programs={"podman": Building(failing=failing)},
+            machine=True,
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            source = by.any(Source).written(Path(scratch) / "page")
+            refused = await page_of(started, source)
+        assert isinstance(refused, Refused)
+        reason = refused.rejection.reason
+        assert failing in reason
+        log = mounted(runs(started)[-1], Path("/var/lup/page")).with_suffix(".log")
+        assert str(log) in reason
+        assert "ERR_PNPM step failed" in log.read_text()
+        assert [each.name for each in log.parent.iterdir()] == [log.name]
+
+    @lup.promise
+    async def a_build_mounts_only_what_it_works_in(self, by: Testing) -> None:
+        """A build's containers mount only directories of its own, its copy of the source among them, never the source itself nor anything else of the machine's."""
+        started = await by.started(
+            Repository(declaration=HOSTED),
+            programs={"podman": Building()},
+            machine=True,
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            source = by.any(Source).written(Path(scratch) / "page")
+            built = await page_of(started, source)
+        assert isinstance(built, Accepted)
+        own = built_at(built).parent.parent
+        mounted_from = [each.source for run in runs(started) for each in mounts(run)]
+        assert mounted_from
+        assert all(each.is_relative_to(own) for each in mounted_from)
+        assert all(not each.is_relative_to(source) for each in mounted_from)
+
+    @lup.promise
+    async def a_source_without_a_package_builds_nothing(self, by: Testing) -> None:
+        """A source holding no `package.json` is refused, and podman never runs a build."""
+        started = await by.started(
+            Repository(declaration=HOSTED),
+            programs={"podman": Building()},
+            machine=True,
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            refused = await page_of(started, Path(scratch))
+        assert isinstance(refused, Refused)
+        assert runs(started) == []
