@@ -64,13 +64,26 @@ class EngineLayout(Model):
         return self.build(digest) / "bundle" / "engine.js"
 
 
+def installed_pyright(pinned: str) -> str:
+    """Return the release of pyright the environment installs, or `pinned` where it installs none.
+
+    The engine is built against it, so it answers as the pyright an editor
+    runs there does; a project that installs no pyright gets the release the
+    engine was written against.
+    """
+    try:
+        return importlib.metadata.version("pyright")
+    except importlib.metadata.PackageNotFoundError:
+        return pinned
+
+
 class Sources(Model):
     """The engine's sources this package carries, and the pyright release they're built against."""
 
     directory: Path = Path(__file__).parent / "engine"
-    release: str = Field(default_factory=lambda: importlib.metadata.version("pyright"))
-    """pyright's release: the one the environment's `pyright` package is, so
-    the engine answers as the pyright an editor runs there does."""
+    release: str = Field(default_factory=lambda: installed_pyright("1.1.414"))
+    """pyright's release: the environment's `pyright` package's, else the one
+    the engine was written against."""
     repository: str = "https://github.com/microsoft/pyright"
     """Where pyright's source is cloned from, at the release's tag."""
 
@@ -190,6 +203,7 @@ class Engine(Model):
             "type-checking the engine",
         )
         bundle = self.layout.bundle(digest)
+        bundle.parent.mkdir(parents=True, exist_ok=True)
         partial = bundle.with_name("partial.js")
         succeeded(
             await self.node.ran(

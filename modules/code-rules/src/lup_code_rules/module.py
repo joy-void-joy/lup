@@ -21,6 +21,8 @@ from lup.declaration.layout import RepositoryLayout
 from lup_code_rules.checking import Checked, Exemptions, Settling, Table
 from lup_code_rules.engine import Engine, EngineLayout, Source
 from lup_code_rules.errors import LupCodeRulesError
+from lup_code_rules.examples import Examples
+from lup_code_rules.promises import CodeRulesPromises
 from lup_code_rules.reporting import Report
 from lup_code_rules.reports import RuleInfo
 from lup_code_rules.ruff import ruff_findings
@@ -106,7 +108,7 @@ class Checker(Part):
 
         Given `.`, it fixes every Python file of the worktree it's typed in.
         """
-        layout = await self.located()
+        layout = await self.located(checking.paths)
         paths = await self.files(layout.root, checking.paths)
         fixed = await self.ruff.ran(
             "check", "--fix", "--force-exclude", "--", *paths, cwd=layout.root
@@ -143,11 +145,42 @@ class Checker(Part):
             raise RefusedError(message)
         return shown(rule)
 
-    async def located(self) -> RepositoryLayout:
-        """Return the worktree it's typed in; refused where it's typed in none."""
-        layout = await RepositoryLayout.located(self.git, Path.cwd())
+    @lup.command(here=True)
+    async def examples(self, listing: Listing, by: Agent | Operator) -> str:
+        """Check every rule's examples, the rules' specification: each flagged one gets its rule's finding and no other of lup's, its rewrite passes every rule, pyright and ruff, and each near miss gets none of its rule's; refused, naming each that doesn't.
+
+        It runs in lup's own repository, whose gate checks its table, never a
+        project's.
+        """
+        del listing
+        layout = await self.located([])
+        engine = await self.engine(layout)
+        try:
+            table = Table.of(await engine.rules())
+            rules = [table.rules[each] for each in table.engines()]
+            checking = Examples(
+                engine=engine,
+                ruff=self.ruff,
+                venv=Path(sys.prefix),
+                config=layout.pyproject,
+            )
+            unmet = await checking.unmet(rules)
+        except LupCodeRulesError as failed:
+            raise RefusedError(str(failed)) from failed
+        if unmet:
+            raise RefusedError("\n".join(each.said() for each in unmet))
+        count = sum(
+            len(rule.examples.flags) * 2 + len(rule.examples.passes) for rule in rules
+        )
+        return f"Every example of the {len(rules)} rules does what it's written to: {count} in all."
+
+    async def located(self, paths: list[Path]) -> RepositoryLayout:
+        """Return the worktree holding the first of `paths`, or the one it's typed in where there are none; refused where that's in no worktree."""
+        within = next((each for each in paths), Path.cwd()).resolve()
+        directory = within if within.is_dir() else within.parent
+        layout = await RepositoryLayout.located(self.git, directory)
         if layout is None:
-            message = f"{Path.cwd()} is in no git worktree, so there's nothing to check"
+            message = f"{directory} is in no git worktree, so there's nothing to check"
             raise RefusedError(message)
         return layout
 
@@ -174,7 +207,7 @@ class Checker(Part):
 
     async def table(self) -> Table:
         """Return lup's rules as the engine's table holds them, building it where it isn't."""
-        layout = await self.located()
+        layout = await self.located([])
         engine = await self.engine(layout)
         try:
             return Table.of(await engine.rules())
@@ -216,7 +249,7 @@ class Checker(Part):
 
     async def reported(self, paths: list[Path]) -> Report:
         """Check the Python files `paths` name or hold, and return what was found."""
-        layout = await self.located()
+        layout = await self.located(paths)
         engine = await self.engine(layout)
         files = await self.files(layout.root, paths)
         try:
@@ -321,4 +354,4 @@ class CodeRules(Module):
     release adds runs unless a project drops it."""
     exempt: Exempt = Exempt.of("**/tests/**", "**/test_*.py", "**/conftest.py")
     steps: Steps = Steps.of(RULES)
-    parts: Parts = Parts.of(Checker)
+    parts: Parts = Parts.of(Checker, CodeRulesPromises)

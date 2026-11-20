@@ -60,11 +60,17 @@ class Reported(Model):
 
 
 async def ruff_findings(
-    ruff: Program, root: Path, paths: list[str], content: str | None = None
+    ruff: Program,
+    root: Path,
+    paths: list[str],
+    content: str | None = None,
+    config: Path | None = None,
 ) -> list[Finding]:
     """Return ruff's findings in `paths`, from the worktree at `root`: each file as it stands on disk, or, for the one path given with `content`, as that content.
 
-    Raise `LupCodeRulesError` where ruff fails rather than reporting.
+    ruff reads its settings where it finds them from `root`, or from `config`
+    where it's given. Raise `LupCodeRulesError` where ruff fails rather than
+    reporting.
     """
     if not paths:
         return []
@@ -78,6 +84,7 @@ async def ruff_findings(
         "--force-exclude",
         "--no-fix",
         "--exit-zero",
+        *(["--config", str(config)] if config is not None else []),
         *standing,
         given=content,
         cwd=root,

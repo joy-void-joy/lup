@@ -188,7 +188,7 @@ faulthandler_timeout = "30"
 faulthandler_exit_on_timeout = true
 
 [tool.importlinter]
-root_packages = ["lup"]
+root_packages = ["lup", "lup_code_rules"]
 
 # A library side never imports an environment side (`AGENTS.md`, *lup's code*).
 # The core's library side is every package of `lup` but `lup.environment`, each
@@ -240,6 +240,25 @@ forbidden_modules = [
     "lup.command_line.*",
     "lup.setup.*",
     "lup.gate.*",
+]
+allow_indirect_imports = true
+
+# The code rules' promises reach them through the harness and their front door
+# alone, as the core's do.
+[[tool.importlinter.contracts]]
+name = "the code rules' promises import the harness and their front door alone"
+type = "forbidden"
+source_modules = ["lup_code_rules.promises"]
+forbidden_modules = [
+    "lup.environment",
+    "lup_code_rules.checking",
+    "lup_code_rules.directives",
+    "lup_code_rules.engine",
+    "lup_code_rules.errors",
+    "lup_code_rules.module",
+    "lup_code_rules.reporting",
+    "lup_code_rules.reports",
+    "lup_code_rules.ruff",
 ]
 allow_indirect_imports = true
 
