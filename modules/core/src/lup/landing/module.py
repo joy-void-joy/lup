@@ -26,6 +26,9 @@ class Landing(Module):
     remote: str = "origin"
     """The remote the integration branch is read from and pushed to, by its
     name in the repository's configuration."""
+    released: str = "main"
+    """The branch a release lands on, which only the operator merges into: no
+    branch of that name lands."""
     folds: Folds = Folds.of(
         FoldKind(
             name="landing",

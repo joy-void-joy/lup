@@ -56,6 +56,7 @@ class Landers(Part):
                 message=said.message,
                 integration=self.module.integration,
                 remote=self.module.remote,
+                released=self.module.released,
             )
         )
         return (

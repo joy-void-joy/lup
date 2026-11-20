@@ -246,9 +246,20 @@ def keyed(tree: str, local: Path) -> str:
 
 
 def last(recorded: GateLayout, key: str) -> Run | None:
-    """Return the last run `recorded` keeps under `key`, passed or not; none where the gate hasn't run on those files."""
+    """Return the last run `recorded` keeps under `key`, passed or not; none where the gate hasn't run on those files, or where its file is a link, or leads out of the git directory, which the gate never writes.
+
+    A room writes the git directory, so what's read here is a room's word on
+    how its gate went, which steers and guards nothing; read on the operator's
+    machine, it's never a file elsewhere a link points at.
+    """
     found = recorded.runs / f"{key}.json"
-    return Run.model_validate_json(found.read_bytes()) if found.is_file() else None
+    if (
+        not found.is_file()
+        or found.is_symlink()
+        or not found.resolve().is_relative_to(recorded.common.resolve())
+    ):
+        return None
+    return Run.model_validate_json(found.read_bytes())
 
 
 def passed(recorded: GateLayout, key: str) -> Run | None:

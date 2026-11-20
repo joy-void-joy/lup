@@ -6,8 +6,11 @@ don't make. So each file of each side is read through `Objects`, hashed against
 its id, into a bare store apart, in a scratch directory, and git merges there,
 by trees: no attribute, driver or configuration of the repository's has a say.
 Only which commit is a merge's base is read from the repository, by git, its
-commit-graph, grafts and replace refs ignored; a store forging one could only
-make a merge come out otherwise, combining what the sides hold.
+commit-graph, grafts, shallow file and replace refs ignored, and a branch with
+more than one base is left unmerged rather than merged from one of them. A
+store forging a base could still make a merge come out otherwise, undoing what
+one side changed since: a plan against lup's own checks, which `DESIGN.md`
+leaves out of the walls' scope.
 
 What's kept in the repository is the merged tree, written from the entries the
 store made, and a commit of it, read back before it's returned. Carried over
@@ -31,11 +34,12 @@ if TYPE_CHECKING:
 
 
 class Unmerged(Model):
-    """A branch that doesn't merge onto what's before it: the files it conflicts in, none where it shares no history with them."""
+    """A branch that doesn't merge onto what's before it: the files it conflicts in, or why, where it's no conflict in a file."""
 
     kind: Literal["unmerged"] = "unmerged"
     branch: str
     files: list[PurePosixPath] = []
+    why: str = ""
 
 
 class Composed(Model):
@@ -128,10 +132,16 @@ class Apart(MutableModel):
             tip = tips[name]
             found = await self.repository.bases(tip, before)
             if not found:
-                return Unmerged(branch=name)
+                return Unmerged(branch=name, why="it shares no history with them")
             if tip in found:
                 continue
-            [base, *_] = found
+            if len(found) > 1:
+                why = (
+                    "it and what's before it each hold the other's history, "
+                    "which a merge from one base can't settle"
+                )
+                return Unmerged(branch=name, why=why)
+            [base] = found
             made = await self.store.merged(
                 await self.tree(base), ours, await self.tree(tip)
             )
