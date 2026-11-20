@@ -543,7 +543,8 @@ export class File {
         return isPrivate(this.info.fileUri.stripAllExtensions().fileName);
     }
 
-    // The loops filling a collection their block created empty before them.
+    // The loops filling a collection their block created empty before them, and doing
+    // nothing else: one entry each time, under one `if` at most.
     collectionLoops(): FilledLoop[] {
         const blocks = [this.parse.parserOutput.parseTree.d.statements, ...this.nodes.suites.map((suite) => suite.d.statements)];
         return blocks.flatMap((statements) => filledLoops(statements, (node) => this.isEmptyCollection(node)));
