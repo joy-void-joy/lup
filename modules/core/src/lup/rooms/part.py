@@ -14,6 +14,7 @@ sockets, the machine's and its holder's (`README.md` here).
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import override
 
 from pydantic import Field
 
@@ -26,7 +27,7 @@ from lup.hosting.containers import Bind, Containers, Image, Named, Spec
 from lup.rooms.layout import InRoom, Kept, digest
 from lup.rooms.packages import Package
 from lup.runtimes.known import known, named
-from lup.runtimes.runtime import Begin, Bridge, Fetched, Placed, Runtime
+from lup.runtimes.runtime import Begin, Bridge, Fetched, Got, Placed, Runtime
 from lup.types import Model
 
 
@@ -88,6 +89,31 @@ class Fresh(Model):
     asked: datetime
 
 
+class Curled(Model, Got):
+    """What fetches a URL for a runtime's channel on the machine: `curl`, through the part's program, its redirects followed, failing on an HTTP error."""
+
+    curl: Program
+    within: timedelta = timedelta(minutes=10)
+    """The longest one fetch may take, a CLI of hundreds of megabytes among them."""
+
+    @override
+    async def got(self, url: str, into: Path) -> None:
+        fetched = await self.curl.ran(
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            str(int(self.within.total_seconds())),
+            "--output",
+            str(into),
+            url,
+        )
+        if fetched.status != 0:
+            message = f"curl couldn't fetch {url}: {fetched.said()}"
+            raise OSError(message)
+
+
 class Rooms(Part, machine=True, shared=True):
     """The machine's part making each session's room: its image, its CLIs, its files and homes, and the container it runs in."""
 
@@ -100,6 +126,11 @@ class Rooms(Part, machine=True, shared=True):
     """Each project's rooms' own: uv's cache and each session's environment,
     one directory a project, so an environment's files are links into the
     cache."""
+    curl: Program = Program(
+        name="curl",
+        why="fetches each runtime's newest CLI from its vendor",
+        install="your distribution's `curl` package",
+    )
     uv: Program = Program(
         name="uv",
         optional=True,
@@ -131,7 +162,7 @@ class Rooms(Part, machine=True, shared=True):
             project=room.repository,
         )
         await Containers.built(image)
-        clis = {each.name: self.cli(each.name) for each in known()}
+        clis = {each.name: await self.cli(each.name) for each in known()}
         own = self.sessions.path / room.session
         files, home, directory = own / "files", own / "home", own / "runtime"
         for each in [files, home, directory]:
@@ -216,7 +247,7 @@ class Rooms(Part, machine=True, shared=True):
         except ValueError as unknown:
             raise RefusedError(str(unknown)) from unknown
 
-    def cli(self, runtime: str) -> Fetched:
+    async def cli(self, runtime: str) -> Fetched:
         """Return runtime `runtime`'s newest CLI, fetched where its vendor has a newer one than the one fetched last, asking it at most every `asking`.
 
         Raise `RefusedError` where it can't be fetched and none was before.
@@ -226,14 +257,17 @@ class Rooms(Part, machine=True, shared=True):
         if fresh is not None and now - fresh.asked < self.asking:
             return fresh.fetched
         channel = named(runtime).channel
+        got = Curled(curl=self.curl)
         try:
-            version = channel.latest()
+            scratch = self.clis.path / runtime / "asked"
+            scratch.mkdir(parents=True, exist_ok=True)
+            version = await channel.latest(got, scratch)
             into = self.clis.path / runtime / version
             record = into / "fetched.json"
             fetched = (
                 Fetched.model_validate_json(record.read_text())
                 if record.is_file()
-                else channel.fetched(version, into / "cli")
+                else await channel.fetched(version, into / "cli", got)
             )
             record.write_text(fetched.model_dump_json())
         except (OSError, ValueError) as failed:

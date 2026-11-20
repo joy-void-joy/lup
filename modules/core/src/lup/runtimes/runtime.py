@@ -178,16 +178,30 @@ class Fetched(Model):
     """The program, relative to `directory`."""
 
 
+class Got(ABC):
+    """What fetches a URL for a channel, where its caller runs: the machine's own fetcher, or a stand-in a promise scripts."""
+
+    @abstractmethod
+    async def got(self, url: str, into: Path) -> None:
+        """Fetch what `url` answers into the file `into`, its redirects followed.
+
+        Raise `OSError` where it can't be fetched.
+        """
+
+
 class Channel(Model, ABC):
-    """Where a runtime's newest CLI is fetched from, each checked against the checksum its vendor publishes."""
+    """Where a runtime's newest CLI is fetched from, each checked against the checksum its vendor publishes: what to fetch, and how to read it, the fetching its caller's."""
 
     @abstractmethod
-    def latest(self) -> str:
-        """Return the newest version its vendor publishes."""
+    async def latest(self, got: Got, scratch: Path) -> str:
+        """Return the newest version its vendor publishes, fetched by `got` into files under `scratch`."""
 
     @abstractmethod
-    def fetched(self, version: str, into: Path) -> Fetched:
-        """Fetch `version` into the directory `into`, which is made, checking it against its vendor's checksum, and say where its program is."""
+    async def fetched(self, version: str, into: Path, got: Got) -> Fetched:
+        """Fetch `version` into the directory `into`, which is made, by `got`, checking it against its vendor's checksum, and say where its program is.
+
+        Raise `ValueError` where what's fetched isn't what the vendor says.
+        """
 
 
 class Rooming(Model, ABC):

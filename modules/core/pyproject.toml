@@ -50,9 +50,6 @@ dashboard = [
 # worktree it runs in (`lup/command_line/README.md`).
 [project.scripts]
 lup = "lup.environment.command_line:main"
-# The process holding one session over its runtime's input and output, which
-# the machine starts per session and tells what to do (`lup/sessions/README.md`).
-lup-hold = "lup.environment.sessions.holder:main"
 
 # pytest runs lup's plugin wherever the core is installed, checking the promises
 # of the modules a project's declaration resolves to (`lup/testing/README.md`).

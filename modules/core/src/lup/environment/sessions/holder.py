@@ -1,15 +1,15 @@
-"""`lup-hold`: the process holding one session over its runtime's input and output, and the commands the machine tells it what to do through.
+"""The holder: the process holding one session over its runtime's input and output, and the commands the machine tells it what to do through, each run as `python -I -m lup.environment.sessions.holder <command>` with the machine's own Python.
 
 The machine runs each through its part's `Program` field, so its promises
 script them (`lup.sessions.part`):
-- `lup-hold start`, given how to hold a session (`Holds`) on its input, starts
+- `start`, given how to hold a session (`Holds`) on its input, starts
   the holder in a session of its own, which outlives the machine, and answers
   once it listens, where its session stands (`Standing`);
-- `lup-hold serve` is the holder itself: it waits for the room's first program
+- `serve` is the holder itself: it waits for the room's first program
   to connect on the room's socket, then speaks the runtime's protocol over that
   one connection, closing the socket so nothing else connects, and does what
   it's told on its control socket, which only the machine reaches;
-- `lup-hold order <control>`, given an `Order` on its input, tells a holder to
+- `order <control>`, given an `Order` on its input, tells a holder to
   start a turn, interrupt one, end its session, or say where it stands, and
   prints where it stands after.
 
@@ -195,7 +195,7 @@ def order(
 
 
 def main() -> None:
-    """Run `lup-hold`."""
+    """Run the holder's command line."""
     app()
 
 

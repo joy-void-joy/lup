@@ -23,6 +23,7 @@ later launch*):
   Codex starts a daemon that keeps the thread from the next holder.
 """
 
+import asyncio
 import hashlib
 import json
 import shlex
@@ -35,13 +36,13 @@ from typing import Literal, override
 from pydantic import Field, JsonValue, ValidationError
 
 from lup.doors.parties import Agent
-from lup.runtimes.fetching import got
 from lup.runtimes.runtime import (
     Answer,
     Begin,
     Bridge,
     Channel,
     Fetched,
+    Got,
     Heard,
     Holder,
     Holding,
@@ -620,11 +621,11 @@ class CodexChannel(Channel):
     tag: str = "rust-v"
     """What a release's tag holds before its version."""
     manifest: str = "codex-package.json"
-    within: timedelta = timedelta(minutes=5)
 
-    def release(self, url: str) -> Release:
-        """Return the release `url` describes."""
-        return Release.model_validate_json(got(url, self.within))
+    async def release(self, url: str, got: Got, into: Path) -> Release:
+        """Return the release `url` describes, fetched by `got` into `into`."""
+        await got.got(url, into)
+        return Release.model_validate_json(await asyncio.to_thread(into.read_bytes))
 
     def version(self, release: Release) -> str:
         """Return the version a release's tag names.
@@ -637,30 +638,40 @@ class CodexChannel(Channel):
         return release.tag_name.removeprefix(self.tag)
 
     @override
-    def latest(self) -> str:
-        return self.version(self.release(f"{self.releases}/channels/{self.which}"))
+    async def latest(self, got: Got, scratch: Path) -> str:
+        url = f"{self.releases}/channels/{self.which}"
+        return self.version(await self.release(url, got, scratch / "latest.json"))
 
     @override
-    def fetched(self, version: str, into: Path) -> Fetched:
+    async def fetched(self, version: str, into: Path, got: Got) -> Fetched:
         url = f"{self.releases}/releases/{version}/release.json"
-        release = self.release(url)
+        await asyncio.to_thread(into.mkdir, parents=True, exist_ok=True)
+        release = await self.release(url, got, into / "release.json")
         name = f"codex-package-{self.target}.tar.gz"
         asset = next((each for each in release.assets if each.name == name), None)
         if self.version(release) != version or asset is None:
             message = f"{url} describes no {name} of Codex {version}"
             raise ValueError(message)
-        archive = got(asset.browser_download_url, self.within)
-        if f"sha256:{hashlib.sha256(archive).hexdigest()}" != asset.digest:
+        archive = into / name
+        await got.got(asset.browser_download_url, archive)
+        packed = await asyncio.to_thread(archive.read_bytes)
+        await asyncio.to_thread(archive.unlink)
+        if f"sha256:{hashlib.sha256(packed).hexdigest()}" != asset.digest:
             message = f"{name} of Codex {version} isn't what its release says: its checksum differs"
             raise ValueError(message)
-        into.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(fileobj=BytesIO(archive), mode="r:gz") as unpacked:
-            unpacked.extractall(into, filter="data")
-        package = Package.model_validate_json((into / self.manifest).read_text())
+        await asyncio.to_thread(unpacked, packed, into)
+        manifest = await asyncio.to_thread((into / self.manifest).read_text)
+        package = Package.model_validate_json(manifest)
         if package.version != version or package.target != self.target:
             message = f"{name} of Codex {version} holds {package.version} for {package.target}"
             raise ValueError(message)
         return Fetched(version=version, directory=into, program=package.entrypoint)
+
+
+def unpacked(packed: bytes, into: Path) -> None:
+    """Write out the gzipped tar archive `packed` into `into`, refusing a member that would land outside it or isn't a plain file, directory or link within it (`tarfile`'s `data` filter)."""
+    with tarfile.open(fileobj=BytesIO(packed), mode="r:gz") as archive:
+        archive.extractall(into, filter="data")
 
 
 class Codex(Runtime):

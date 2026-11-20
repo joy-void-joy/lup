@@ -10,7 +10,7 @@ At most 32 sessions run at once, 16 of one repository (`Sessions.most`, `most_pe
 
 ## Holding
 
-Something has to keep a runtime's process alive, write the operator's words into it as turns, and read what it says. Whatever does can speak to the agent as the operator, and the machine is replaced whenever the operator approves a new commit of lup. So each session has a holder: a process of its own on the operator's machine, started by the machine (`python -m lup.environment.sessions.holder start`), that outlives the machine. It's the machine's own code, from the commit the operator approved.
+Something has to keep a runtime's process alive, write the operator's words into it as turns, and read what it says. Whatever does can speak to the agent as the operator, and the machine is replaced whenever the operator approves a new commit of lup. So each session has a holder: a process of its own on the operator's machine, started by the machine (`python -m lup.environment.sessions.holder start`, with the machine's own Python, so a holder is always the code of the machine that starts it), that outlives the machine. It's the machine's own code, from the commit the operator approved.
 
 A holder listens on two sockets:
 - **One in the room's own directory** (`/run/lup/session.sock` in the room). The room's first program connects to it and runs the runtime on that one connection (`lup.environment.sessions.connected`). The holder then closes the socket. Another process of the operator's can reopen a pipe through `/proc/<pid>/fd/0` and write a turn, but not a socket. Since the room's first program connects before anything else in the room runs, nothing in the room can type a turn as the operator (`docs/field-notes.md`, *A session held with no terminal*).

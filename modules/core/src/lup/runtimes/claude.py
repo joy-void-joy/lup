@@ -20,6 +20,7 @@ What each setting rests on was measured in the second lup (`docs/field-notes.md`
   native worktree tools are lup's to replace.
 """
 
+import asyncio
 import hashlib
 import json
 import shlex
@@ -31,13 +32,13 @@ from typing import Literal, override
 from pydantic import Field, JsonValue, ValidationError
 
 from lup.doors.parties import Agent
-from lup.runtimes.fetching import got
 from lup.runtimes.runtime import (
     Answer,
     Begin,
     Bridge,
     Channel,
     Fetched,
+    Got,
     Heard,
     Holder,
     Holding,
@@ -506,37 +507,34 @@ class ClaudeChannel(Channel):
     which: Literal["latest", "stable"] = "latest"
     """The channel: `latest`, or `stable`, about a week older."""
     platform: str = "linux-x64"
-    within: timedelta = timedelta(minutes=5)
-    """The longest a fetch may take, a 257 MB binary among them."""
-
-    def got(self, url: str) -> bytes:
-        """Return what `url` answers, past `within` refused."""
-        return got(url, self.within)
 
     @override
-    def latest(self) -> str:
-        return self.got(f"{self.base}/{self.which}").decode().strip()
+    async def latest(self, got: Got, scratch: Path) -> str:
+        answered = scratch / "latest"
+        await got.got(f"{self.base}/{self.which}", answered)
+        return (await asyncio.to_thread(answered.read_text)).strip()
 
     @override
-    def fetched(self, version: str, into: Path) -> Fetched:
-        manifest = Manifest.model_validate_json(
-            self.got(f"{self.base}/{version}/manifest.json")
-        )
-        build = manifest.platforms.get(self.platform)
+    async def fetched(self, version: str, into: Path, got: Got) -> Fetched:
+        await asyncio.to_thread(into.mkdir, parents=True, exist_ok=True)
+        listed = into / "manifest.json"
+        await got.got(f"{self.base}/{version}/manifest.json", listed)
+        read = await asyncio.to_thread(listed.read_bytes)
+        build = Manifest.model_validate_json(read).platforms.get(self.platform)
         if build is None:
             message = f"Claude Code {version} has no build for {self.platform}"
             raise ValueError(message)
-        binary = self.got(f"{self.base}/{version}/{self.platform}/claude")
+        program = into / "claude"
+        await got.got(f"{self.base}/{version}/{self.platform}/claude", program)
+        binary = await asyncio.to_thread(program.read_bytes)
         if hashlib.sha256(binary).hexdigest() != build.checksum:
+            await asyncio.to_thread(program.unlink)
             message = (
                 f"Claude Code {version} for {self.platform} isn't what its manifest "
                 "says: its checksum differs"
             )
             raise ValueError(message)
-        into.mkdir(parents=True, exist_ok=True)
-        program = into / "claude"
-        program.write_bytes(binary)
-        program.chmod(0o755)
+        await asyncio.to_thread(program.chmod, 0o755)
         return Fetched(version=version, directory=into, program=PurePosixPath("claude"))
 
 
