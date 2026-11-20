@@ -237,6 +237,20 @@ class Responding(ABC):
         """Answer one run; none where the program as stood in for has no answer to it, which fails as a program that isn't there."""
 
 
+class Acting(ABC):
+    """A program a part declares, stood in for by code a promise writes that's told the whole of each run: its arguments, its input, the variables it's run with beside the machine's own and the directory it's run from, as one running the program for real needs, for what only the real program can say, as git merging."""
+
+    @abstractmethod
+    def ran(
+        self,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
+        cwd: Path | None,
+    ) -> Answering:
+        """Answer one run, whatever its status."""
+
+
 class Crossing(ABC):
     """A started lup's parts, as a message crossing to their container reaches them: what the program on the operator's machine sends."""
 
@@ -451,7 +465,7 @@ class Testing(Party, ABC):
         declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted | Responding] | None = None,
+        programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
     ) -> Started:

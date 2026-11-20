@@ -8,6 +8,7 @@ its words (`README.md` here, *Promises*).
 """
 
 import hashlib
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -154,6 +155,7 @@ def standing(
         "ruff": Ruff(worktree=at),
         "pytest": ending("pytest"),
         "lint-imports": ending("lint-imports"),
+        "python": ending("python"),
         "notes": ending("notes"),
     }
 
@@ -179,7 +181,7 @@ class GatePromises(Part):
         assert isinstance(checked, Refused if failing else Accepted)
         assert all(
             name in [each.program for each in stepped]
-            for name in ["ruff", "pytest", "lint-imports", "notes"]
+            for name in ["ruff", "pytest", "lint-imports", "python", "notes"]
         )
         assert all(each.cwd == at.root for each in stepped)
 
@@ -230,6 +232,30 @@ class GatePromises(Part):
         fixing = runs.index(["format"])
         assert ["format", "--check"] in runs[fixing:]
         assert runs[:fixing] == [["format", "--check"]]
+
+    @lup.promise
+    async def a_heavy_import_fails_the_declaration_step(self, by: Testing) -> None:
+        """The `declaration` step fails where loading the declaration imports a distribution lup doesn't need, naming it, and passes where it imports lup and the standard library alone.
+
+        It loads a declaration in a fresh interpreter, which nothing in the
+        harness's process can stand in for, so this runs it, and git, for real,
+        in a temporary directory, as the programs' promises do.
+        """
+        del by
+        light = "import json\n\nfrom lup import Project\n\nproject = Project()\n"
+        heavy = f"import hypothesis\n\n{light}"
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            lup.programs.run("git", "init", "--quiet", cwd=root)
+            declaration = root / "lup_project.py"
+            weighing = [sys.executable, "-m", "lup.environment.weighing"]
+            declaration.write_text(light)
+            passed = lup.programs.run(*weighing, cwd=root, checked=False)
+            declaration.write_text(heavy)
+            failed = lup.programs.run(*weighing, cwd=root, checked=False)
+        assert passed.status == 0
+        assert failed.status != 0
+        assert "hypothesis" in failed.text()
 
     @lup.promise
     async def outside_a_worktree_nothing_runs(self, by: Testing) -> None:
