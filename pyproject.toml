@@ -212,6 +212,9 @@ source_modules = [
     "lup.setup",
     "lup.gate",
     "lup.landing",
+    "lup.runtimes",
+    "lup.rooms",
+    "lup.sessions",
 ]
 forbidden_modules = ["lup.environment"]
 
@@ -240,6 +243,8 @@ forbidden_modules = [
     "lup.setup.*",
     "lup.gate.*",
     "lup.landing.*",
+    "lup.rooms.*",
+    "lup.sessions.*",
 ]
 allow_indirect_imports = true
 
