@@ -271,8 +271,12 @@ export const libraries = {
                 'getcwd',
                 'getcwdb',
             ];
+            // A call relative to an open directory follows no link on the way to it, which
+            // no call of `pathlib` makes.
             for (const used of file.uses(operations.map((name) => `os.${name}`))) {
-                file.report(used.node, `this uses \`${used.name}\``);
+                if (!file.isCalledInDirectory(used.node)) {
+                    file.report(used.node, `this uses \`${used.name}\``);
+                }
             }
         },
         examples: {
@@ -304,6 +308,15 @@ export const libraries = {
                     def process() -> int:
                         """Return this process's id."""
                         return os.getpid()
+                `,
+                python`
+                    import os
+
+
+                    def moved(name: str, source: int, target: int) -> None:
+                        """Move \`name\` from the open directory \`source\` to \`target\`, following no link on the way."""
+                        os.link(name, name, src_dir_fd=source, dst_dir_fd=target, follow_symlinks=False)
+                        os.unlink(name, dir_fd=source)
                 `,
             ],
         },

@@ -906,6 +906,20 @@ export class File {
         return describeType(this.evaluator, node, []).every((member) => member.kind === 'none');
     }
 
+    // Whether a reference is what a call calls relative to an open directory, given its
+    // descriptor: `os.unlink(name, dir_fd=directory)`, `src_dir_fd=`, `dst_dir_fd=`.
+    isCalledInDirectory(node: ParseNode): boolean {
+        const call = node.parent;
+        const descriptors = ['dir_fd', 'src_dir_fd', 'dst_dir_fd'];
+        return (
+            call?.nodeType === ParseNodeType.Call &&
+            call.d.leftExpr === node &&
+            call.d.args.some(
+                (arg) => arg.d.name !== undefined && descriptors.includes(arg.d.name.d.value) && !this.isNone(arg.d.valueExpr)
+            )
+        );
+    }
+
     // Whether an expression is spread whole into a new mapping, none of its keys read:
     // `{**os.environ, "GIT_DIR": d}`, `dict(**os.environ, GIT_DIR=d)`.
     isSpreadWhole(node: ParseNode): boolean {
