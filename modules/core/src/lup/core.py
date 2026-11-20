@@ -14,6 +14,7 @@ from lup.inbox.records import EDGES, NODES
 from lup.programs.promises import ProgramsPromises
 from lup.running.plan import CORE
 from lup.running.promises import RunningPromises
+from lup.runtimes.promises import RecordsPromises
 from lup.setup.part import Setup
 from lup.setup.promises import SetupPromises
 from lup.shell.blocks import Viewing
@@ -43,6 +44,7 @@ class Core(Module):
         DoorsPromises,
         PartsPromises,
         RunningPromises,
+        RecordsPromises,
         TestingPromises,
         ShellPromises,
         StorePromises,
