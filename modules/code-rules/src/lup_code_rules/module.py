@@ -18,6 +18,7 @@ from lup import (
     Steps,
 )
 from lup.declaration.layout import RepositoryLayout
+from lup.hosting.git import nul_separated
 from lup_code_rules.checking import Checked, Exemptions, Settling, Table
 from lup_code_rules.engine import Engine, EngineLayout, Source
 from lup_code_rules.errors import LupCodeRulesError
@@ -238,8 +239,7 @@ class Checker(Part):
         if listed.status != 0:
             message = f"git can't list {root}'s files: {listed.said()}"
             raise RefusedError(message)
-        # lup: ignore("string-split", why="git's `-z` output is names ended by NUL, which is its whole format")
-        names = listed.text().split("\0")
+        names = nul_separated(listed.output)
         return sorted(
             dict.fromkeys(
                 name
