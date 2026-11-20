@@ -45,7 +45,7 @@ from sqlalchemy import (
     Index as Indexed,
 )
 from sqlalchemy.pool import StaticPool
-lazy from sqlalchemy import ColumnElement
+lazy from sqlalchemy import ColumnElement, ScalarSelect
 lazy from sqlalchemy.pool import ConnectionPoolEntry
 
 from lup.runtimes.records import (
@@ -130,16 +130,17 @@ can't make, its rows the steps' by their ids."""
 def words_made(connection: Connection) -> None:
     """Make the full-text index and keep it in step with the steps, in SQLite's own statements, which SQLAlchemy has no construct for: each step's text indexed as it's kept, and forgotten as it's deleted."""
     connection.exec_driver_sql(
-        "CREATE VIRTUAL TABLE words USING fts5(text, content='steps', "
+        "CREATE VIRTUAL TABLE words USING fts5(tool, text, content='steps', "
         "content_rowid='id', tokenize='unicode61 remove_diacritics 2', prefix='2 3')"
     )
     connection.exec_driver_sql(
         "CREATE TRIGGER steps_indexed AFTER INSERT ON steps BEGIN "
-        "INSERT INTO words(rowid, text) VALUES (new.id, new.text); END"
+        "INSERT INTO words(rowid, tool, text) VALUES (new.id, new.tool, new.text); END"
     )
     connection.exec_driver_sql(
         "CREATE TRIGGER steps_forgotten AFTER DELETE ON steps BEGIN "
-        "INSERT INTO words(words, rowid, text) VALUES ('delete', old.id, old.text); END"
+        "INSERT INTO words(words, rowid, tool, text) "
+        "VALUES ('delete', old.id, old.tool, old.text); END"
     )
 
 
@@ -215,6 +216,82 @@ class Searched(Model):
 
     hits: list[Hit]
     more: int
+
+
+class Listing(Model):
+    """Which conversations to list: where they ran, when, and how many."""
+
+    under: list[Path] = []
+    """Only conversations that ran in a directory under one of these."""
+    since: datetime | None = None
+    until: datetime | None = None
+    subagents: bool = False
+    """Subagents' conversations too, each under its session; sessions alone
+    otherwise."""
+    limit: Annotated[int, Field(ge=1)] = 50
+    """The most listed, the latest; how many more there are is said."""
+
+
+class Conversation(Model):
+    """A conversation as the index knows it: its runtime and ids, its name, where and when it ran, and how many times the operator spoke in it."""
+
+    runtime: str
+    session: str
+    subagent: str | None
+    spawner: str | None
+    title: str | None
+    directory: str | None
+    whose: Whose
+    first: str | None
+    last: str | None
+    spoken: int
+    """How many times the operator's words are among its steps."""
+
+
+class Listed(Model):
+    """The conversations listed, the latest first, and how many more there are."""
+
+    conversations: list[Conversation]
+    more: int
+
+
+class Showing(Model):
+    """Which conversation to show, and how much of it."""
+
+    session: str
+    """The session, by the runtime's id for it or its start, or by its name."""
+    subagent: str | None = None
+    """One of its subagents' conversations, by the runtime's id for them or its
+    start; the session's own where none."""
+    at: int | None = None
+    """A step to show the steps around, as a hit names it."""
+    around: Annotated[int, Field(ge=0)] = 10
+    """How many steps before and after `at` to show."""
+    whole: bool = False
+    """Every step; else the operator's words, each after the agent's last words
+    before them, or around `at`."""
+
+
+class Stepping(Model):
+    """A step shown: what it is, who said it, and its text."""
+
+    step: int
+    at: str | None
+    kind: str
+    by: Speaker | None
+    tool: str | None
+    text: str
+    answered: str | None = None
+    """For the operator's words, the agent's last words before them."""
+
+
+class Shown(Model):
+    """A conversation's steps, as `Showing` asked, and how many of its steps come before and after them."""
+
+    conversation: Conversation
+    steps: list[Stepping]
+    before: int
+    after: int
 
 
 class Caught(Model):
@@ -419,6 +496,139 @@ class Index(MutableModel, arbitrary_types_allowed=True):
         """Return the highest step's id, from which new ones count."""
         return self.connection.execute(select(func.max(STEPS.c.id))).scalar() or 0
 
+    def listed(self, listing: Listing) -> Listed:
+        """Return the conversations indexed, the latest first, narrowed as `listing` says."""
+        spoken = (
+            select(func.count())
+            .where(
+                STEPS.c.record == RECORDS.c.id,
+                STEPS.c.kind == "said",
+                STEPS.c.by == "operator",
+            )
+            .scalar_subquery()
+        )
+        kept = [
+            RECORDS.c.indexed == 1,
+            *([] if listing.subagents else [RECORDS.c.subagent.is_(None)]),
+            *within(listing.under),
+            *([RECORDS.c.last >= listing.since.isoformat()] if listing.since else []),
+            *([RECORDS.c.first < listing.until.isoformat()] if listing.until else []),
+        ]
+        query = (
+            select(*conversation_columns(), spoken.label("spoken"))
+            .where(*kept)
+            .order_by(RECORDS.c.last.desc(), RECORDS.c.id.desc())
+            .limit(listing.limit)
+        )
+        counted = select(func.count()).select_from(RECORDS).where(*kept)
+        with self.lock:
+            rows = self.connection.execute(query).mappings().all()
+            total = self.connection.execute(counted).scalar() or 0
+        listed = [Conversation.model_validate(dict(each)) for each in rows]
+        return Listed(conversations=listed, more=max(0, total - len(listed)))
+
+    def named_by(self, session: str, subagent: str | None) -> list[Conversation]:
+        """Return the conversations `session` names, by the start of their session's id or by their name, and `subagent`, by the start of theirs; several where it names several."""
+        spoken = (
+            select(func.count())
+            .where(
+                STEPS.c.record == RECORDS.c.id,
+                STEPS.c.kind == "said",
+                STEPS.c.by == "operator",
+            )
+            .scalar_subquery()
+        )
+        whose = (
+            RECORDS.c.subagent.is_(None)
+            if subagent is None
+            else RECORDS.c.subagent.startswith(subagent, autoescape=True)
+        )
+        query = select(*conversation_columns(), spoken.label("spoken")).where(
+            RECORDS.c.indexed == 1,
+            or_(
+                RECORDS.c.session.startswith(session, autoescape=True),
+                RECORDS.c.title == session,
+            ),
+            whose,
+        )
+        with self.lock:
+            rows = self.connection.execute(query).mappings().all()
+        return [Conversation.model_validate(dict(each)) for each in rows]
+
+    def shown(self, conversation: Conversation, showing: Showing) -> Shown:
+        """Return `conversation`'s steps as `showing` asks: every one, those around a step, or the operator's words each with what they answered."""
+        answered = STEPS.alias("answered")
+        record = (
+            select(RECORDS.c.id)
+            .where(
+                RECORDS.c.indexed == 1,
+                RECORDS.c.session == conversation.session,
+                RECORDS.c.runtime == conversation.runtime,
+                RECORDS.c.subagent.is_(None)
+                if conversation.subagent is None
+                else RECORDS.c.subagent == conversation.subagent,
+            )
+            .scalar_subquery()
+        )
+        columns = [
+            STEPS.c.id.label("step"),
+            STEPS.c.at,
+            STEPS.c.kind,
+            STEPS.c.by,
+            STEPS.c.tool,
+            STEPS.c.text,
+            answered.c.text.label("answered"),
+        ]
+        steps = (
+            select(*columns)
+            .outerjoin(answered, answered.c.id == STEPS.c.answers)
+            .where(STEPS.c.record == record)
+        )
+        match showing:
+            case Showing(at=int() as at):
+                shown = steps.where(
+                    STEPS.c.id >= self.around(record, at, -showing.around),
+                    STEPS.c.id <= self.around(record, at, showing.around),
+                )
+            case Showing(whole=True):
+                shown = steps
+            case _:
+                shown = steps.where(STEPS.c.kind == "said", STEPS.c.by == "operator")
+        every = select(func.count()).where(STEPS.c.record == record)
+        with self.lock:
+            rows = self.connection.execute(shown.order_by(STEPS.c.id)).mappings().all()
+            total = self.connection.execute(every).scalar() or 0
+        listed = [Stepping.model_validate(dict(each)) for each in rows]
+        before = (
+            self.connection.execute(
+                select(func.count()).where(
+                    STEPS.c.record == record, STEPS.c.id < listed[0].step
+                )
+            ).scalar()
+            or 0
+            if listed and showing.at is not None
+            else 0
+        )
+        after = total - before - len(listed) if showing.at is not None else 0
+        return Shown(
+            conversation=conversation, steps=listed, before=before, after=after
+        )
+
+    def around(self, record: ScalarSelect[int], at: int, by: int) -> int:
+        """Return the id of the step `by` steps from `at` in the record, or the first or last where fewer are there."""
+        ids = (
+            select(STEPS.c.id)
+            .where(
+                STEPS.c.record == record,
+                STEPS.c.id >= at if by >= 0 else STEPS.c.id <= at,
+            )
+            .order_by(STEPS.c.id if by >= 0 else STEPS.c.id.desc())
+            .limit(abs(by) + 1)
+        )
+        with self.lock:
+            found = self.connection.execute(ids).scalars().all()
+        return found[-1] if found else at
+
     def searched(self, searching: Searching) -> Searched:
         """Return the steps holding every word of `searching`, narrowed as it says: a step a fork copied from another conversation found once, where it was first said."""
         query = matching(searching.words)
@@ -503,6 +713,38 @@ def tokens(text: str) -> list[str]:
     return list(runs())
 
 
+def conversation_columns() -> list[ColumnElement[str | None]]:
+    """Return the columns a conversation is read from, but how many times the operator spoke."""
+    return [
+        RECORDS.c.runtime,
+        RECORDS.c.session,
+        RECORDS.c.subagent,
+        RECORDS.c.spawner,
+        RECORDS.c.title,
+        RECORDS.c.directory,
+        RECORDS.c.whose,
+        RECORDS.c.first,
+        RECORDS.c.last,
+    ]
+
+
+def within(under: list[Path]) -> list[ColumnElement[bool]]:
+    """Return what keeps a conversation that ran in a directory under one of `under`: nothing where none is given."""
+    if not under:
+        return []
+    return [
+        or_(
+            *(
+                or_(
+                    RECORDS.c.directory == str(each),
+                    RECORDS.c.directory.startswith(f"{each}/", autoescape=True),
+                )
+                for each in under
+            )
+        )
+    ]
+
+
 def narrowed(searching: Searching) -> list[ColumnElement[bool]]:
     """Return what narrows a search to the steps it looks in: whose words, where the conversation ran, and when."""
     match searching.by:
@@ -512,21 +754,7 @@ def narrowed(searching: Searching) -> list[ColumnElement[bool]]:
             whose = [STEPS.c.kind.in_(["called", "returned"])]
         case "any":
             whose = []
-    under = (
-        [
-            or_(
-                *(
-                    or_(
-                        RECORDS.c.directory == str(each),
-                        RECORDS.c.directory.startswith(f"{each}/", autoescape=True),
-                    )
-                    for each in searching.under
-                )
-            )
-        ]
-        if searching.under
-        else []
-    )
+    under = within(searching.under)
     since = [STEPS.c.at >= searching.since.isoformat()] if searching.since else []
     until = [STEPS.c.at < searching.until.isoformat()] if searching.until else []
     return [*whose, *under, *since, *until]
@@ -538,12 +766,12 @@ def named(runtime: str, record: Record) -> str:
 
 
 def searched(step: Stepped) -> str | None:
-    """Return the text a step is searched by: words as said, a call as its tool and what it was given, a result whole; none for a step holding no text."""
+    """Return the text a step is searched by, beside a call's tool: words as said, what a call was given, a result whole; none for a step holding no text."""
     match step:
         case Said(text=text):
             return text
-        case Called(tool=tool, given=given):
-            return f"{tool} {json.dumps(given, ensure_ascii=False)}"
+        case Called(given=given):
+            return json.dumps(given, ensure_ascii=False)
         case Returned(output=output):
             return output
         case _:

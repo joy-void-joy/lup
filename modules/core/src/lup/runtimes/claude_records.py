@@ -249,6 +249,19 @@ def output(content: str | list[Content] | None) -> str:
 class ClaudeRecords(Records):
     """Claude Code's records: a session's and each of its subagents', in a folder per directory they ran in."""
 
+    own: Path = Path("~/.claude")
+
+    @override
+    def beside(self, record: Record) -> list[Path]:
+        if record.conversation is not None:
+            return [record.path.with_suffix(".meta.json")]
+        saved = record.path.with_suffix("") / "tool-results"
+        if not saved.is_dir() or saved.is_symlink():
+            return []
+        return sorted(
+            each for each in saved.iterdir() if each.is_file() and not each.is_symlink()
+        )
+
     @override
     def found(self, home: Path, under: list[Path] | None = None) -> list[Record]:
         projects = home / "projects"

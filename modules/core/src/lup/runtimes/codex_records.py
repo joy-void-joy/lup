@@ -196,6 +196,12 @@ def named(name: str, namespace: str | None) -> str:
 class CodexRecords(Records):
     """Codex's records: a rollout for each thread, a subagent's beside their session's."""
 
+    own: Path = Path("~/.codex")
+
+    @override
+    def beside(self, record: Record) -> list[Path]:
+        return []
+
     @override
     def found(self, home: Path, under: list[Path] | None = None) -> list[Record]:
         sessions = home / "sessions"

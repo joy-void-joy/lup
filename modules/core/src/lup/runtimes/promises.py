@@ -27,6 +27,7 @@ from lup.runtimes.records import (
     Refused,
     Returned,
     Said,
+    copied,
 )
 from lup.testing import Testing
 
@@ -546,3 +547,32 @@ class RecordsPromises(Part):
             read = ClaudeRecords().read(Record(path=path, session=SESSION))
         refused = [each.call for each in read.steps if isinstance(each, Refused)]
         assert refused == ["toolu_1"]
+
+    @lup.promise
+    async def a_copy_reads_as_the_home_it_was_copied_from(self, by: Testing) -> None:
+        """A home's records copied, and copied again once they grew, read as the home's do, a long output saved beside them among it; a file reached through a link isn't copied."""
+        grows = by.any(bool)
+        with tempfile.TemporaryDirectory() as made:
+            home = Path(made) / "home"
+            into = Path(made) / "copy"
+            folder = home / "projects" / "-work"
+            saved = folder / SESSION / "tool-results"
+            saved.mkdir(parents=True)
+            (saved / "call.txt").write_text("the whole output")
+            outside = Path(made) / "secret.txt"
+            outside.write_text("not the session's")
+            (saved / "linked.txt").symlink_to(outside)
+            record = folder / f"{SESSION}.jsonl"
+            record.write_bytes(lined(CLAUDE_LINES[0], CLAUDE_LINES[1]))
+            records = ClaudeRecords()
+            copied(records, home, into)
+            if grows:
+                record.write_bytes(lined(*CLAUDE_LINES))
+                copied(records, home, into)
+            original = records.read(Record(path=record, session=SESSION))
+            copy = into / record.relative_to(home)
+            kept = records.read(Record(path=copy, session=SESSION))
+            assert kept.steps == original.steps
+            copied_saved = into / saved.relative_to(home)
+            assert (copied_saved / "call.txt").read_text() == "the whole output"
+            assert not (copied_saved / "linked.txt").exists()

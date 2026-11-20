@@ -240,6 +240,9 @@ class Records(Model, ABC):
     longest: Annotated[int, Field(ge=1)] = 64 * 2**20
     """The longest line read, in bytes: one longer is skipped as it's read,
     never held, since a record is the room's to write."""
+    own: Path
+    """The operator's own directory for the runtime, where the sessions they
+    run outside lup keep their records: from their home with a leading `~`."""
 
     @abstractmethod
     def found(self, home: Path, under: list[Path] | None = None) -> list[Record]:
@@ -256,6 +259,10 @@ class Records(Model, ABC):
         Only whole lines are read, a line still being written left for the next
         read, and a line no step could fit in skipped without being held.
         """
+
+    @abstractmethod
+    def beside(self, record: Record) -> list[Path]:
+        """Return the files reading `record` reads beside it, such as a subagent's spawn or a call's output saved whole: what a copy of the record needs to be read as it is."""
 
 
 class Line(Model):
@@ -355,3 +362,53 @@ def head(path: Path, reach: int = 4 * 2**20) -> Iterator[bytes]:
             text := record.readline(left)
         ).endswith(b"\n"):
             yield text
+
+
+class Copied(Model):
+    """What copying a home's records did: how many files it copied whole, and how many it added to."""
+
+    whole: int = 0
+    grown: int = 0
+
+
+def copied(records: Records, home: Path, into: Path) -> Copied:
+    """Copy every record in `home`, and the files reading each reads beside it, into `into` in the same layout: a record that grew has what it added appended to its copy, and any other file whose copy differs is copied whole.
+
+    So the copy is read as the home is, and a runtime's cleanup of the home
+    leaves it whole. Nothing is followed through a link, and nothing outside
+    `home` is copied.
+    """
+
+    def files() -> Iterator[Path]:
+        """Yield each file to copy, each once."""
+        found = records.found(home)
+        yield from dict.fromkeys(
+            path
+            for record in found
+            for path in [record.path, *records.beside(record)]
+            if path.is_relative_to(home)
+        )
+
+    def one(path: Path) -> Literal["whole", "grown", "same"]:
+        """Copy one file of `home`'s into its place under `into`: say how."""
+        target = into / path.relative_to(home)
+        try:
+            source = opened(path)
+        except OSError:
+            return "same"
+        with source:
+            size = os.fstat(source.fileno()).st_size
+            had = target.stat().st_size if target.is_file() else None
+            if had == size:
+                return "same"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if had is not None and had < size and path.suffix == ".jsonl":
+                source.seek(had)
+                with target.open("ab") as written:
+                    written.write(source.read())
+                return "grown"
+            target.write_bytes(source.read())
+            return "whole"
+
+    done = [one(each) for each in files()]
+    return Copied(whole=done.count("whole"), grown=done.count("grown"))
