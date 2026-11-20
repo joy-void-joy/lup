@@ -186,17 +186,39 @@ class Piling(Model):
 
 
 class Naming(Model):
-    """An agent named, as their session says its name, under the agent who spawned them where one did."""
+    """An agent of a repository named, as their session says its name, under the agent who spawned them where one did."""
 
+    repository: str
     agent: Agent
     name: str
     spawner: Agent | None = None
 
 
 class Ending(Model):
-    """An agent whose session ended, or started again."""
+    """An agent of a repository: one whose session ended or started again, or who's told what's for them."""
 
+    repository: str
     agent: Agent
+
+
+class Ended(Model):
+    """An agent's last words of a turn, in a repository."""
+
+    repository: str
+    agent: Agent
+    text: str
+
+
+class Untelling(Model):
+    """A repository whose agents to list, by what's untold for them."""
+
+    repository: str
+
+
+class Untold(Model):
+    """Each agent with something for them not yet told them: whom a session wakes, or starts again."""
+
+    agents: list[Agent] = []
 
 
 # What stands, as data

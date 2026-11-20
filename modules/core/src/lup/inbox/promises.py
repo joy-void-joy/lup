@@ -12,6 +12,7 @@ from lup import (
     Codebase,
     Commented,
     Fold,
+    Machine,
     Model,
     Modules,
     Operator,
@@ -39,6 +40,8 @@ from lup.inbox.said import (
     Reached,
     SendSaid,
     Told,
+    Untelling,
+    Untold,
     WithdrawSaid,
 )
 from lup.testing import Accepted, Started, Step, Testing
@@ -70,10 +73,20 @@ async def said(started: Started, tool: str, given: lup.Model, agent: Agent) -> s
 
 async def told(started: Started, agent: Agent) -> Told:
     """Tell `agent` what's for them, as their session's next call does."""
-    answered = await started.serve("told", Ending(agent=agent), HERE)
+    answered = await started.serve(
+        "told", Ending(repository="harness", agent=agent), Machine()
+    )
     assert isinstance(answered, Accepted)
     assert isinstance(answered.output, Told)
     return answered.output
+
+
+async def untold(started: Started) -> list[Agent]:
+    """Return each agent of the harness's repository who has something not yet told them, as a session reads whom to wake."""
+    answered = await started.serve("untold", Untelling(repository="harness"), Machine())
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Untold)
+    return answered.output.agents
 
 
 async def viewed(started: Started, view: str, given: Model) -> Blocks:
@@ -177,11 +190,15 @@ class InboxPromises(Part):
             ConcernSaid(text="watch the gate", title="the gate"),
             agent,
         )
-        await started.serve("agent_ended", Ending(agent=agent), HERE)
+        await started.serve(
+            "agent_ended", Ending(repository="harness", agent=agent), Machine()
+        )
         left = placed(await inboxed(started), "the gate")
         assert left.holder == "@no-agent"
         assert left.left_by is not None
-        await started.serve("agent_started", Ending(agent=agent), HERE)
+        await started.serve(
+            "agent_started", Ending(repository="harness", agent=agent), Machine()
+        )
         back = placed(await inboxed(started), "the gate")
         assert back.holder == left.left_by
         assert back.left_by is None
@@ -251,8 +268,16 @@ class InboxPromises(Part):
         """The operator's comment on a message one agent sent another reaches both: whoever wrote it, and whoever it was for."""
         started = await by.started(project())
         writer, reader = Agent.of("writer-id"), Agent.of("reader-id")
-        await started.serve("agent_named", Naming(agent=writer, name="writer"), HERE)
-        await started.serve("agent_named", Naming(agent=reader, name="reader"), HERE)
+        await started.serve(
+            "agent_named",
+            Naming(repository="harness", agent=writer, name="writer"),
+            Machine(),
+        )
+        await started.serve(
+            "agent_named",
+            Naming(repository="harness", agent=reader, name="reader"),
+            Machine(),
+        )
         await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
         message = max((await inboxed(started)).new)
         commented = await started.run(
@@ -268,13 +293,35 @@ class InboxPromises(Part):
             )
 
     @lup.promise
+    async def an_agent_is_untold_until_what_is_theirs_is_told(
+        self, by: Testing
+    ) -> None:
+        """An agent something was sent to is among those a session wakes until it's told them, and not after."""
+        started = await by.started(project())
+        writer, reader = Agent.of("writer-id"), Agent.of("reader-id")
+        for agent, name in [(writer, "writer"), (reader, "reader")]:
+            await started.serve(
+                "agent_named",
+                Naming(repository="harness", agent=agent, name=name),
+                Machine(),
+            )
+        await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
+        assert await untold(started) == [reader]
+        await told(started, reader)
+        assert await untold(started) == []
+
+    @lup.promise
     async def the_operator_finds_each_concern_from_the_list_of_parties(
         self, by: Testing
     ) -> None:
         """Every concern an agent opens is found from the list of parties, under the party holding it, and opens on what was said in it; a comment on it reaches its holder."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await started.serve("agent_named", Naming(agent=agent, name="builder"), HERE)
+        await started.serve(
+            "agent_named",
+            Naming(repository="harness", agent=agent, name="builder"),
+            Machine(),
+        )
         await said(
             started,
             "concern",

@@ -9,7 +9,6 @@ whoever wrote an item, whoever holds a concern, the party a buffer is
 """
 
 from lup.doors.door import Method
-from lup.doors.parties import Agent, Party
 from lup.inbox.records import AgentRecord, Concern, Item, PartyRecord, PileRecord
 from lup.inbox.said import (
     Clearing,
@@ -22,6 +21,7 @@ from lup.inbox.said import (
 )
 from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Offer, Span, Viewing
 from lup.types import Model
+lazy from lup.doors.parties import Party
 lazy from lup.inbox.inbox import Inbox
 
 
@@ -40,7 +40,7 @@ def reached(inbox: Inbox, party: PartyRecord) -> Party | None:
     """Return the party a comment on `party`'s blocks reaches: the agent, or the pile, which keeps it; none for the operator, whose own they are."""
     match party:
         case AgentRecord():
-            return Agent(id=party.id, session=party.session)
+            return party.caller()
         case PileRecord():
             return Pile(repository=inbox.repository, path=party.name or "")
         case _:

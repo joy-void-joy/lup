@@ -248,6 +248,10 @@ class Inbox(Model, arbitrary_types_allowed=True):
         places = self.database.drawn_from(node.key, Under, current=True)
         return None if not places else self.database.found(places[-1].target)
 
+    def agents(self) -> list[AgentRecord]:
+        """Return every agent of the repository, in the order made."""
+        return self.database.nodes(self.repository, AgentRecord)
+
     def parties(self) -> list[PartyRecord]:
         """Return every party of the repository, in the order made."""
         return self.database.nodes(self.repository, PartyRecord)
