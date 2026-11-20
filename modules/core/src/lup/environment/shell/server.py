@@ -29,14 +29,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
 
-from lup.doors.door import Accepted, Refused
+from lup.command_line.answering import Answerer, Offered
+from lup.doors.door import RefusedError
 from lup.doors.parties import Operator
 from lup.environment.doors import Running
+from lup.environment.running.container import REPLIES, answered
 from lup.environment.shell.layout import ShellLayout
 from lup.environment.shell.review import Going, reviewed
-from lup.environment.shell.viewing import viewed
 from lup.inbox.records import NO_AGENT
 from lup.inbox.said import Pile, Reached
+from lup.running import wire as crossing
+from lup.running.plan import Plan
+from lup.running.wire import Call, CommandCalled, Reply, ViewCalled, read
 from lup.shell.blocks import Block, BlockError, Blocks, Fold, Offer, Viewing
 from lup.shell.draft import Comment, Commenting, Draft, Marked, Outcome, Quote
 from lup.shell.looks import Looks
@@ -71,6 +75,8 @@ if TYPE_CHECKING:
     )
 
 log = logging.getLogger(__name__)
+
+CALLS = TypeAdapter[Call](Call)
 
 
 class AsSent(GenerateJsonSchema):
@@ -140,6 +146,32 @@ class Placed(Model):
     reaches: dict[str, JsonValue] | None = None
 
 
+class Over(Model, Answerer, arbitrary_types_allowed=True):
+    """Calls answered over parts started in this process, as the operator makes them: the harness's dashboard, whose parts it started itself, and a dashboard served from a worktree."""
+
+    running: Running
+    looks: Looks
+    """The kinds the project declares, which its views' blocks are checked
+    against as its containers check them."""
+    plan: Plan
+
+    @override
+    async def offered(self) -> Offered:
+        """Return that the calls are the operator's, and the project's plan."""
+        return Offered(by=Operator(), plan=self.plan)
+
+    @override
+    async def answered(self, call: Call) -> Reply:
+        """Answer `call` as the operator's, over the parts started here, as their container answers one."""
+        made = call.model_copy(update={"by": Operator()})
+        text = await answered(self.running, CALLS.dump_json(made), looks=self.looks)
+        return read(text, REPLIES)
+
+    @override
+    async def stopped(self) -> None:
+        """Stop nothing: whoever started the parts stops them."""
+
+
 class Taken(Model):
     """What takes a comment at a send: the command it's given to, offered as its block offers one, and whom it reaches, as the review says it."""
 
@@ -150,8 +182,11 @@ class Taken(Model):
 class Dashboard(Model, arbitrary_types_allowed=True):
     """The dashboard of a running project: its page, and what its views answer the operator."""
 
-    running: Running
-    """The project's parts, made and running: what answers its views."""
+    answerer: Answerer
+    """What answers its views and runs its commands, as the operator's: in the
+    machine, its socket, through which a project's own views reach its
+    containers (`lup.environment.running.calling.Calling`); in the harness, the
+    parts it started (`Over`)."""
     looks: Looks
     """The kinds its modules declare, which their views may name."""
     root: Viewing | None
@@ -258,26 +293,24 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         """Answer `viewing`, watched under `watch`, as the operator reads it."""
         if viewing.module is None:
             return Unanswered(watch=watch, reason=f"`{viewing.view}` names no module")
+        call = ViewCalled(module=viewing.module, view=viewing.view, given=viewing.given)
         try:
-            answered = await viewed(
-                self.running,
-                self.looks,
-                viewing.module,
-                viewing.view,
-                viewing.given,
-                Operator(),
-            )
-        except BlockError as wrong:
-            return Unanswered(watch=watch, reason=str(wrong))
-        match answered:
-            case Accepted(output=Blocks() as blocks):
-                return Answered(watch=watch, blocks=blocks)
-            case Accepted():
-                return Unanswered(
-                    watch=watch, reason=f"`{viewing.view}` answered no blocks"
-                )
-            case _:
-                return Unanswered(watch=watch, reason=answered.rejection.reason)
+            reply = await self.answerer.answered(call)
+        except RefusedError as lost:
+            return Unanswered(watch=watch, reason=str(lost))
+        match reply:
+            case crossing.Answered(output=output):
+                try:
+                    blocks = Blocks.model_validate(output)
+                    self.looks.checked(blocks, viewing.module)
+                except (ValidationError, BlockError) as wrong:
+                    return Unanswered(
+                        watch=watch,
+                        reason=f"`{viewing.view}` answered no blocks: {wrong}",
+                    )
+                return Answered(watch=watch, blocks=blocks.versioned())
+            case crossing.Declined(rejection=rejection):
+                return Unanswered(watch=watch, reason=rejection.reason)
 
     async def sent(self) -> Delivered:
         """Send the draft, one send at a time whichever pages ask: each comment and mark on its own, a comment that says nothing dropped rather than sent.
@@ -403,10 +436,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             "on": offer.given,
         }
         module = offer.module or quote.viewing.module or ""
-        answered = await self.running.run(module, offer.command, given, Operator())
-        return Outcome(
-            reason=answered.rejection.reason if isinstance(answered, Refused) else None
-        )
+        return Outcome(reason=await self.ran(module, offer.command, given))
 
     async def acted(self, mark: Marked) -> str | None:
         """Run the command `mark` marks; why not, where it can't run, as on a block that changed since it was marked."""
@@ -417,10 +447,20 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             return "what it's on changed since it was marked"
         offer = mark.offer
         module = offer.module or mark.on.viewing.module or ""
-        answered = await self.running.run(
-            module, offer.command, offer.given, Operator()
-        )
-        return answered.rejection.reason if isinstance(answered, Refused) else None
+        return await self.ran(module, offer.command, offer.given)
+
+    async def ran(self, module: str, command: str, given: JsonValue) -> str | None:
+        """Run the command `command` of the module named `module` on `given`, as the operator; why not, where it's refused or can't be reached."""
+        call = CommandCalled(module=module, command=command, given=given)
+        try:
+            reply = await self.answerer.answered(call)
+        except RefusedError as lost:
+            return str(lost)
+        match reply:
+            case crossing.Answered():
+                return None
+            case crossing.Declined(rejection=rejection):
+                return rejection.reason
 
 
 class Socket(ABC):

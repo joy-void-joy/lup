@@ -12,8 +12,14 @@ from typing import Literal
 from lup.types import Model
 
 
-class Party(Model):
-    """Someone a module's method is called by: each a class of its own, which a method's `by` is typed as, and which any module may declare."""
+class Party(Model, extra="allow"):
+    """Someone a module's method is called by: each a class of its own, which a method's `by` is typed as, and which any module may declare.
+
+    Read back from JSON as a party, where whoever reads it doesn't know the
+    class that wrote it (a block's `reaches` crossing from a project's
+    container), it keeps every field it came with, so it says whom it is as it
+    was written.
+    """
 
 
 class Agent(Party):
