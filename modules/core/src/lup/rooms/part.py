@@ -177,6 +177,7 @@ class Rooms(Part, machine=True, shared=True):
     cache."""
     curl: Program = Program(
         name="curl",
+        optional=True,
         why="fetches each runtime's newest CLI from its vendor",
         install="your distribution's `curl` package",
     )
