@@ -119,8 +119,8 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
         ]
 
     def here(self, holds: Holds) -> bool:
-        """Say whether a part holding `holds` is started here: it holds nothing but secrets, each given."""
-        apart = holds.machine or holds.approved or holds.shared
+        """Say whether a part holding `holds` is started here: it holds nothing but secrets, each given, and isn't one run in a session's room alone."""
+        apart = holds.machine or holds.approved or holds.shared or holds.room
         return not apart and all(each in self.secrets for each in holds.secrets)
 
     def elsewhere(self, part: PartPlan) -> str:

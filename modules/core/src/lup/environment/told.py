@@ -10,13 +10,34 @@ text as an f-string writes them (`README.md` in `lup/told/`, *Rendering*).
 
 from string.templatelib import Interpolation, Template
 from typing import TYPE_CHECKING
+lazy from pathlib import Path
 
+from lup.environment.declaration import load, resolve
 from lup.told.door import GuidanceDoor
 from lup.told.guidance import Guidance, GuidanceError, Section
 
 if TYPE_CHECKING:
     from lup.doors.parties import Agent
     from lup.environment.doors import Entry, Running
+
+
+async def rendered_at(root: Path, declaration: Path, by: Agent) -> Guidance:
+    """Render what the session `by` is told at its start, of the declaration at `declaration`, relative to `root`: only the parts serving a section made, and stopped once it's rendered.
+
+    Raise `ProjectError` where the declaration doesn't load or resolve, and
+    `GuidanceError` where a section doesn't render.
+    """
+    resolved = resolve(load(root / declaration))
+    serving = list(
+        dict.fromkeys(
+            entry.serves.named() for entry in resolved.doors.through(GuidanceDoor)
+        )
+    )
+    running = await resolved.doors.started("", {}, only=serving)
+    try:
+        return await rendered(running, by)
+    finally:
+        await running.stopped()
 
 
 async def rendered(running: Running, by: Agent) -> Guidance:

@@ -282,6 +282,10 @@ class Holds(Model):
     shared: bool = False
     """Whether it's one for the whole machine, serving every project, as the
     store is: run once, from the home repository's approved code."""
+    room: bool = False
+    """Whether it runs in each session's own room, made from the worktree's
+    own code, so it sees the worktree as it stands: it holds nothing, the room
+    being the wall already."""
 
     def anything(self) -> bool:
         """Say whether it holds anything, and so runs apart, from approved code."""
@@ -300,6 +304,8 @@ class Part(MutableModel, arbitrary_types_allowed=True):
     It says in its header what it holds beyond its secrets:
     `class Notices(Part, machine=True)` runs on the operator's machine,
     `class Store(Part, approved=True)` holds what only approved code may.
+    `class Findings(Part, room=True)` holds nothing and runs in each session's
+    own room, from the worktree's own code.
     """
 
     machine: ClassVar[bool] = False
@@ -309,6 +315,8 @@ class Part(MutableModel, arbitrary_types_allowed=True):
     shared: ClassVar[bool] = False
     """Whether it's one for the whole machine, serving every project: its
     header's word."""
+    room: ClassVar[bool] = False
+    """Whether it runs in each session's own room: its header's word."""
 
     def __init_subclass__(
         cls,
@@ -316,6 +324,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
         machine: bool | None = None,
         approved: bool | None = None,
         shared: bool | None = None,
+        room: bool | None = None,
         **kwargs: Unpack[ConfigDict],
     ) -> None:
         """Keep what the class's header says it holds, a subclass keeping its base's where it says nothing."""
@@ -326,6 +335,8 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             cls.approved = approved
         if shared is not None:
             cls.shared = shared
+        if room is not None:
+            cls.room = room
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
@@ -369,6 +380,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             machine=cls.machine,
             approved=cls.approved,
             shared=cls.shared,
+            room=cls.room,
         )
 
     @classmethod

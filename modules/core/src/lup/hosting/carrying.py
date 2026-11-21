@@ -20,23 +20,31 @@ import hashlib
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
 import lup
 from lup.doors.door import RefusedError
+from lup.doors.events import Heeded
 from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import Part, Runtime
+from lup.errors import LupError
 from lup.running.plan import Name, Plan
 from lup.running.wire import (
+    Answered,
     Call,
     Caller,
     CommandCalled,
+    EventCalled,
     Offer,
+    Reply,
     ServiceCalled,
     ToolCalled,
     ViewCalled,
+    read,
 )
 from lup.types import Model
+
+REPLIED = TypeAdapter[Reply](Reply)
 
 
 class Placement(Model):
@@ -139,6 +147,26 @@ class Listens(ABC):
         """Listen on `directory`'s calling socket from now on."""
 
 
+class Forwards(ABC):
+    """What carries a message from the machine to the socket a container answers on: the environment's, set where the machine's parts run."""
+
+    @abstractmethod
+    async def forwarded(self, socket: Path, text: bytes) -> bytes:
+        """Send `text` on `socket` and return the answer.
+
+        Raise `OSError` where nothing answers there.
+        """
+
+
+class Hearing(Model):
+    """A session's event, for every part of its project hearing it: the project, the session, and the event, by its class's name, with its facts."""
+
+    repository: str
+    session: str
+    event: str
+    given: JsonValue
+
+
 class Carrying(Part, machine=True, shared=True):
     """The machine's part deciding where each call goes, and who it's by, from the socket it came in on."""
 
@@ -149,6 +177,10 @@ class Carrying(Part, machine=True, shared=True):
     """What listens on each directory's socket as it's made: the
     environment's, set where the machine's parts run; none where calls are
     routed without sockets, as in a promise."""
+    forwards: Forwards | None = Field(default=None, exclude=True, repr=False)
+    """What carries an event to a container's socket: the environment's, set
+    where the machine's parts run; none where nothing is carried, as in a
+    promise."""
     plans: dict[str, Plan] = {}
     """Each project's plan, by its repository."""
     hosted: Plan = Field(default_factory=Plan)
@@ -207,6 +239,51 @@ class Carrying(Part, machine=True, shared=True):
         """Forget a session's room that stopped: a call coming in on its directory is refused from now on."""
         del by
         self.rooms = [each for each in self.rooms if each.session != leaving.session]
+
+    @lup.service
+    async def heard(self, hearing: Hearing, by: Machine) -> Heeded:
+        """Carry a session's event to every part of its project hearing it, in its project's containers and in the session's own room, and return what they answered: their words in that order, and the first refusal.
+
+        A container that doesn't answer, as a room whose parts haven't
+        started yet, is passed over.
+        """
+        del by
+        plan = self.plans.get(hearing.repository)
+        if plan is None or self.forwards is None:
+            return Heeded()
+        hearers = [each for each in plan.parts if hearing.event in each.hears]
+        sockets = [
+            each.listening()
+            for each in self.placements
+            if each.repository == hearing.repository
+            and any(part.named() in each.parts for part in hearers)
+        ]
+        room = next(
+            (each for each in self.rooms if each.session == hearing.session), None
+        )
+        if room is not None and any(part.holds.room for part in hearers):
+            sockets = [*sockets, room.directory / "listening.sock"]
+        call = EventCalled(
+            event=hearing.event,
+            given=hearing.given,
+            by=Agent.of(hearing.session),
+        )
+        told: list[str] = []
+        for socket in sockets:
+            try:
+                answer = await self.forwards.forwarded(
+                    socket, call.model_dump_json().encode()
+                )
+                reply = read(answer, REPLIED)
+            except OSError, LupError, ValidationError:
+                continue
+            if not isinstance(reply, Answered):
+                continue
+            heeded = Heeded.model_validate(reply.output)
+            told = [*told, *heeded.told]
+            if heeded.refused is not None:
+                return Heeded(told=told, refused=heeded.refused)
+        return Heeded(told=told)
 
     @lup.service
     async def routed(self, arrival: Arrival, by: Machine) -> Route:
