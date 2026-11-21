@@ -106,10 +106,13 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     database: Database
     repository: str
+    at: datetime | None = None
+    """When every act is said to happen, where it's given: a conversion keeps
+    when each was said in the second lup; none for the time each happens."""
 
     def now(self) -> datetime:
         """Say when an act happens: the time a record of it carries, which says when and never decides an order."""
-        return datetime.now(UTC)
+        return datetime.now(UTC) if self.at is None else self.at
 
     def edge[E: Edge](
         self,
@@ -382,11 +385,13 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return "lup" if node.by is None else self.called(self.by(node))
 
     def called(self, node: Node) -> str:
-        """Name `node` as `@` cites it: by its name where it has one, else by its number, else by its key."""
+        """Name `node` as `@` cites it: by its name where it has one, else by its number; an agent not named yet by lup's id for them, else by its key."""
         if node.name is not None:
             return f"@{node.name}"
         if node.number is not None:
             return f"@{node.number}"
+        if isinstance(node, AgentRecord):
+            return f"agent {node.id}"
         return f"node {node.key}"
 
     def acted(self, agent: AgentRecord, concern: Concern, said: ConcernSaid) -> str:

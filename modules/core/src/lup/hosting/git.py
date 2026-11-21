@@ -48,7 +48,6 @@ def nul_separated(output: bytes) -> list[str]:
     >>> nul_separated(b"a\x00b c\x00"), nul_separated(b"")
     (['a', 'b c'], [])
     """
-    # lup: ignore("string-split", why="git's `-z` output, each field ended by a NUL, which git writes for being read this way")
     fields = output.split(b"\0")
     return [os.fsdecode(each) for each in fields if each]
 

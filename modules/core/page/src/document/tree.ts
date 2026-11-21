@@ -59,22 +59,32 @@ export interface Change {
     readonly insert: string;
 }
 
+/**
+ * Return `text`'s lines, broken where the editor breaks them, at `\r\n`, `\r` and `\n` alike, which it keeps as one
+ * line break each: split anywhere else, the tree would count a character the editor's text doesn't hold.
+ */
+export function broken(text: string): string[] {
+    return text.split(/\r\n?|\n/);
+}
+
+/** Return `text` as one line of the editor, each line break in it a space, so it keeps its length and its spans their places. */
+function oneLine(text: string): string {
+    return text.replace(/[\r\n]/g, " ");
+}
+
 /** Say a block's own lines: what it shows before what's under it. */
 export function headOf(block: Block): string[] {
     switch (block.block) {
         case "line":
-            return [block.spans.map((span) => span.text).join("")];
+            return [oneLine(block.spans.map((span) => span.text).join(""))];
         case "markdown":
-            return block.text.split("\n");
+            return broken(block.text);
         case "fold":
-            return [block.summary.map((span) => span.text).join("")];
+            return [oneLine(block.summary.map((span) => span.text).join(""))];
         case "code":
-            return [
-                [block.path, counted(block.text === "" ? 0 : block.text.split("\n").length, "line"), ...block.says].join(" · "),
-                ...linesOf(block.text),
-            ];
+            return [oneLine([block.path, counted(linesOf(block.text).length, "line"), ...block.says].join(" · ")), ...linesOf(block.text)];
         case "diff":
-            return [[block.path, ...block.says].join(" · "), ...rowsOf(block).map((row) => row.text)];
+            return [oneLine([block.path, ...block.says].join(" · ")), ...rowsOf(block).map((row) => row.text)];
     }
 }
 
@@ -87,7 +97,7 @@ function linesOf(text: string): string[] {
     if (text === "") {
         return [];
     }
-    const lines = text.split("\n");
+    const lines = broken(text);
     return lines.at(-1) === "" ? lines.slice(0, -1) : lines;
 }
 
@@ -168,7 +178,7 @@ function made(key: string, kind: Kind, block: Block | null, viewing: Viewing | n
 
 /** Return a comment, keyed `key`, saying `text`, to be written under the line `after` of a block's own lines. */
 export function comment(key: string, text: string, after: number): Node {
-    const node = made(key, "comment", null, null, text.split("\n"));
+    const node = made(key, "comment", null, null, broken(text));
     node.after = after;
     return sized(node);
 }
@@ -649,7 +659,7 @@ export class Document {
         if (node === undefined || node.kind !== "comment") {
             throw new Error(`the document holds no comment \`${key}\``);
         }
-        node.head = text.split("\n");
+        node.head = broken(text);
         this.#resize(node);
     }
 

@@ -10,6 +10,7 @@ parts or forwarded to the container whose part answers it, its `by` the one
 """
 
 import asyncio
+import logging
 import signal
 from pathlib import Path
 from typing import override
@@ -25,17 +26,27 @@ from lup.environment.running.container import answered, asked, declined, listeni
 from lup.environment.running.planning import plan_of
 from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import Served, started
-from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
+from lup.hosting.carrying import (
+    Arrival,
+    Carrying,
+    Forwards,
+    Listens,
+    Route,
+    Visiting,
+)
 from lup.hosting.containers import ContainerError
-from lup.hosting.projects import Resuming
+from lup.hosting.projects import Resumed, Resuming
 from lup.running.plan import Plan
 from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
-from lup.types import MutableModel
+from lup.types import Model, MutableModel
 lazy from lup.doors.parts import Runs
 lazy from lup.environment.doors import Running
 lazy from lup.shell.looks import Looks
 
 ASKED = TypeAdapter[Asking](Asking)
+
+log = logging.getLogger(__name__)
+"""What the machine says of what it couldn't do, in its log."""
 
 
 async def carried(
@@ -70,6 +81,17 @@ async def carried(
         return await asked(route.to, vouched)
     except (OSError, ValueError) as lost:
         return declined(f"the container answering it can't be reached: {lost}")
+
+
+class Forwarder(Model, Forwards):
+    """What carries a message from the machine to a container's socket, a message past `limit` bytes refused."""
+
+    limit: int
+
+    @override
+    async def forwarded(self, socket: Path, text: bytes) -> bytes:
+        """Send `text` on `socket`, a container's, and return its answer."""
+        return await asked(socket, text, limit=self.limit)
 
 
 class Binder(MutableModel, Listens, arbitrary_types_allowed=True):
@@ -147,6 +169,7 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
     resolved = resolve(load(host.root / host.declaration))
     binder = Binder(running=running, looks=resolved.looks, limit=limit)
     carrying.listens = binder
+    carrying.forwards = Forwarder(limit=limit)
     hosting = plan_of(resolved, [], host.root)
     unrun = [each.part for each in running.unrun]
     machine = [
@@ -169,6 +192,8 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         )
         if not isinstance(resumed, Accepted):
             raise ContainerError(resumed.rejection.reason)
+        for repository, why in Resumed.model_validate(resumed.output).refused.items():
+            log.warning("lup couldn't open %s again: %s", repository, why)
         stopping = asyncio.Event()
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopping.set)
         await stopping.wait()

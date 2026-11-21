@@ -8,13 +8,14 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { expect, test } from "vitest";
 
-import type { Blocks, Fold, Viewing } from "../generated/read";
+import type { Blocks, Fold, Markdown, Viewing } from "../generated/read";
 import { every, foldKind, nodeAt, offsetOf, section } from "../document/tree";
 import { blocks, fold } from "../testing/blocks";
 import { press } from "../testing/keys";
 import { Memory, looks } from "../testing/memory";
 import { law, scenario, type Machine } from "../testing/promise";
 import { bindVim, vimBindings } from "./keymap";
+import { hiddenOn } from "./markdown";
 import { beside, cursorFolds, type Beside } from "./margin";
 import { Shell, type ShellState } from "./shell";
 
@@ -33,7 +34,9 @@ const kinds = ["note", "body"];
  * insert mode, commenting, sending, and text, which in insert mode each of a command's characters types.
  */
 const keys = fc.constantFrom(
-    ..."j k gg G za zo zc zr zm zR zM zfn zfb i a A o O x e s S cw cc vls dd ]n [n".split(" ").map((typed) => [...typed]),
+    ..."j k l h w b $ 0 gg G za zo zc zr zm zR zM zfn zfb i a A o O x e s S cw cc vls dd >> << ]n [n A*em* A**b** A`c` A-_".split(" ").map((typed) => [...typed]),
+    ["<Tab>"],
+    ["<S-Tab>"],
     ["<Esc>"],
     ["<C-[>"],
     ["<CR>"],
@@ -79,6 +82,22 @@ interface Seen extends ShellState {
     readonly drafted: Readonly<Record<string, string>>;
     /** Each fold the outline shows, as the document's key for it, with the one holding it there and whether it's open. */
     readonly outlined: readonly { readonly key: string; readonly under: string | null; readonly open: boolean }[];
+    /** Whether vim's cursor rests on a mark the Markdown hides, where its line shows a character it could rest on instead. */
+    readonly onHidden: boolean;
+}
+
+/** Say whether `shell`'s cursor rests on a mark the Markdown hides, where its line shows a character it could rest on instead. */
+function restsOnHidden(shell: Shell): boolean {
+    const { state } = shell.view;
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    const hidden = hiddenOn(state, head);
+    const within = (at: number) => hidden.some((each) => at >= each.from && at < each.to);
+    let shows = false;
+    for (let at = line.from; at < line.to; at++) {
+        shows ||= !within(at);
+    }
+    return shows && within(head);
 }
 
 /** Return what `shell` shows, its margin, its folds and its comments among it, and what `memory`'s draft holds. */
@@ -114,7 +133,7 @@ function seen(shell: Shell, memory: Memory): Seen {
                   const holder = node.parent?.block?.block === "fold" ? node.parent.block.id : null;
                   return [{ key: node.block.id, under: holder, open: outline.isOpen(node) }];
               });
-    return { ...shell.state(), folds, margin, tree: shell.document.text(), outside, drafted, outlined };
+    return { ...shell.state(), folds, margin, tree: shell.document.text(), outside, drafted, outlined, onHidden: restsOnHidden(shell) };
 }
 
 const shell: Machine<Running, Seen, Event> = {
@@ -228,6 +247,8 @@ law(shell, "What's chosen changes only as the operator chooses, acts on it or le
 law(shell, "The editor's text is always the document's, whatever the operator types and however views answer", (step) => step.after.text === step.after.tree);
 
 law(shell, "The operator's keys change nothing but comments: what the views answered reads the same around them", (step) => "answer" in step.event || step.before.outside === step.after.outside);
+
+law(shell, "In Normal mode, vim's cursor never rests on a mark the Markdown hides, where its line shows a character to rest on", (step) => step.after.mode !== "normal" || !step.after.onHidden);
 
 law(shell, "Insert mode is only ever in a comment, one opened where the operator went into it outside one", (step) => step.after.mode !== "insert" || "answer" in step.event || step.after.writing !== null);
 
@@ -540,5 +561,107 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
         expect(opened.state().text.length).toBeGreaterThan(summary.length);
     } finally {
         opened.destroy();
+    }
+});
+
+/** Return a Markdown block saying `text`, keyed `id`. */
+function written(id: string, text: string): Markdown {
+    return { block: "markdown", id, version: null, offers: [], reaches: null, sighted: null, standing: null, text, tone: "plain" };
+}
+
+/** Return where the Markdown hides marks on the line `number` of `shell`'s text, from 1, as stretches from the line's start. */
+function hiddenOnLine(shell: Shell, number: number): { from: number; to: number }[] {
+    const line = shell.view.state.doc.line(number);
+    return hiddenOn(shell.view.state, line.from).map((each) => ({ from: each.from - line.from, to: each.to - line.from }));
+}
+
+scenario("A Markdown block shows its constructs, the marks that write them hidden, and its text is what the view answered", async (by) => {
+    const word = by.any(fc.constantFrom("a", "bc", "def"));
+    const text = `# ${word}\nsome *${word}* and **${word}**, \`${word}\`, [${word}](https://x.y)`;
+    const opened = new Shell(document.createElement("div"), root, looks, single(answer([written("m", text)])));
+    try {
+        expect(opened.state().text).toBe(text);
+        expect(hiddenOnLine(opened, 1)).toEqual([{ from: 0, to: 2 }]);
+        const second = opened.view.state.doc.line(2).text;
+        const hidden = hiddenOnLine(opened, 2).map((each) => second.slice(each.from, each.to));
+        expect(hidden).toEqual(["*", "*", "**", "**", "`", "`", "[", "]", "(", "https://x.y", ")"]);
+    } finally {
+        opened.destroy();
+    }
+});
+
+scenario("l pressed again and again along a line of Markdown goes past every hidden mark, one character shown at a time, to the line's last", async (by) => {
+    const pieces = by.any(fc.array(fc.constantFrom("a", "*b*", "**c**", "`d`", "[e](f)", "~~g~~", " "), { minLength: 1, maxLength: 6 }));
+    const text = `x${pieces.join("")}y`;
+    const opened = new Shell(document.createElement("div"), root, looks, single(answer([written("m", text)])));
+    try {
+        const hidden = hiddenOnLine(opened, 1);
+        const shown = [...text].flatMap((_, at) => (hidden.some((each) => at >= each.from && at < each.to) ? [] : [at]));
+        const visited = [opened.view.state.selection.main.head];
+        for (let pressed = 0; pressed < text.length; pressed++) {
+            await press(opened, ["l"]);
+            const head = opened.view.state.selection.main.head;
+            if (head !== visited.at(-1)) {
+                visited.push(head);
+            }
+        }
+        expect(visited).toEqual(shown);
+    } finally {
+        opened.destroy();
+    }
+});
+
+scenario("In a comment, the line the cursor is on shows its marks to be edited, and the comment's other lines hide theirs", async (by) => {
+    const word = by.any(fc.constantFrom("a", "bc"));
+    const opened = new Shell(document.createElement("div"), root, looks, single(answer([written("m", "text")])));
+    try {
+        await press(opened, ["o", ..."*", ...word, "*", "<CR>", "*", ...word, "*"]);
+        expect(opened.state().mode).toBe("insert");
+        expect(hiddenOnLine(opened, 3)).toEqual([]);
+        expect(hiddenOnLine(opened, 2)).toEqual([
+            { from: 0, to: 1 },
+            { from: word.length + 1, to: word.length + 2 },
+        ]);
+    } finally {
+        opened.destroy();
+    }
+});
+
+scenario("Enter in a comment opens a line at the indentation of the one it's on, with no bullet; Tab nests it under the item above, Shift+Tab takes it out; an indentation left empty goes as the comment ends", async () => {
+    const opened = new Shell(document.createElement("div"), root, looks, single(answer([written("m", "text")])));
+    try {
+        await press(opened, ["o", ..."- a", "<CR>"]);
+        expect(opened.view.state.doc.line(3).text).toBe("");
+        await press(opened, [..."- b", "<Tab>"]);
+        expect(opened.view.state.doc.line(3).text).toBe("  - b");
+        await press(opened, ["<CR>"]);
+        expect(opened.view.state.doc.line(4).text).toBe("  ");
+        await press(opened, ["<S-Tab>"]);
+        expect(opened.view.state.doc.line(4).text).toBe("");
+        await press(opened, ["<Tab>"]);
+        expect(opened.view.state.doc.line(4).text).toBe("  ");
+        await press(opened, ["<Esc>"]);
+        expect(opened.state().mode).toBe("normal");
+        expect(opened.state().text.split("\n").filter((line) => line.length > 0 && line.trim() === "")).toEqual([]);
+    } finally {
+        opened.destroy();
+    }
+});
+
+scenario("A table's rows stay a line each, as the view answered them, its columns lined up by what's drawn beside its cells", async (by) => {
+    const wide = by.any(fc.constantFrom("ccc", "dddd"));
+    const text = `| a | bb |\n|---|---|\n| ${wide} | e |`;
+    const parent = document.createElement("div");
+    document.body.append(parent);
+    const opened = new Shell(parent, root, looks, single(answer([written("m", text)])));
+    try {
+        expect(opened.state().text).toBe(text);
+        const pads = [...parent.querySelectorAll(".lup-md-pad")].map((each) => each.textContent);
+        expect(pads.length).toBeGreaterThan(0);
+        const rows = [...parent.querySelectorAll(".cm-line")].map((each) => each.textContent ?? "");
+        expect(new Set(rows.map((row) => row.length)).size).toBe(1);
+    } finally {
+        opened.destroy();
+        parent.remove();
     }
 });

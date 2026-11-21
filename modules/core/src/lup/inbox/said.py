@@ -5,6 +5,7 @@ project's part hands `Inboxes` as `Spoken`, with who they are; the
 operator's commands take what they do (`Answering`, `Clearing`…).
 """
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from annotated_types import Ge, Lt
@@ -184,6 +185,17 @@ class Piling(Model):
 
     repository: str
     path: str
+
+
+class Converting(Model):
+    """A repository's frictions and concerns to bring over from the second lup's ledger, once."""
+
+    ledger: Path
+    """The second lup's ledger: its SQLite file, read and never written."""
+    named: str
+    """The repository as the ledger names it: the path of its git directory."""
+    repository: str
+    """The repository as this lup names it, whose inbox they're brought into."""
 
 
 class Naming(Model):
