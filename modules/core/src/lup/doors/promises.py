@@ -461,6 +461,24 @@ class DoorsPromises(Part):
         assert "LoudPart.wrong" in failed.raised().about
 
     @lup.promise
+    async def a_door_outside_a_part_fails_the_load_naming_it(self, by: Testing) -> None:
+        """A method behind a door in a class that isn't a part, which nothing would serve, fails the declaration's load, naming it, rather than going unserved, or unchecked where it's a promise."""
+        declaration = f'''
+{loud("")}
+
+class Notes(lup.Model):
+    """A model, which is no part."""
+
+    @lup.tool
+    async def jot(self, said: Said) -> str:
+        """Jot what's said."""
+        return said.text
+'''
+        with raises(ProjectError) as failed:
+            await by.started(Repository(declaration=declaration))
+        assert "Notes.jot" in failed.raised().about
+
+    @lup.promise
     async def a_door_reads_a_class_defined_further_down_its_file(
         self, by: Testing
     ) -> None:

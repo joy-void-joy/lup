@@ -23,6 +23,7 @@ from pydantic import BaseModel, JsonValue, SerializeAsAny, TypeAdapter
 from lup.doors.parties import Party
 from lup.errors import LupError
 from lup.types import Model
+lazy from lup.doors.parts import Part
 
 type Answer = BaseModel | str | None
 """What a method a party calls through a door answers: a model, words, or
@@ -368,7 +369,8 @@ class Method(property):
         return partial(self.function, instance)
 
     def __set_name__(self, owner: type, name: str) -> None:
-        """Refuse a name a base of its class gives a field: the field would hide the method."""
+        """Refuse a class that isn't a part, which nothing serves, and a name a base of its class gives a field, which would hide the method."""
+        refuse_unserved(owner, name, self.door)
         refuse_taken(owner, name)
 
     def parties(self) -> list[type[Party]]:
@@ -428,6 +430,19 @@ class Served[S, **P, R: Awaitable[Returned] | bool](Method):
         if instance is None:
             return self
         return partial(self.written, instance)
+
+
+def refuse_unserved(owner: type, name: str, door: Door) -> None:
+    """Raise `DoorError` where `owner` isn't a part: nothing serves a method behind a door of another class, so it would go unserved, and a promise unchecked, without a word."""
+    if issubclass(owner, Part):
+        return
+    method = f"{owner.__qualname__}.{name}"
+    message = (
+        f"`{method}` is {door.called}, but `{owner.__qualname__}` isn't a part, so "
+        "nothing serves it: put it in a class deriving from `Part`, which its "
+        "module lists in `parts`"
+    )
+    raise DoorError(message, about=[method])
 
 
 def refuse_taken(owner: type, name: str) -> None:
