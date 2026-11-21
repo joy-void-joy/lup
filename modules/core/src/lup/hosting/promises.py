@@ -1101,6 +1101,12 @@ the plan of a part holding nothing and one holding a secret, and every run and
 stop succeeding."""
 
 
+class Repository(Model):
+    """A project a caller may say they ask about."""
+
+    name: Literal["harmon", "story", "lup"]
+
+
 class ProjectsPromises(Part):
     """What the operator can count on of what runs of a project: the commit they approved last, and nothing before."""
 
@@ -1204,12 +1210,6 @@ class ProjectsPromises(Part):
             "offered", {"directory": "/srv/elsewhere"}, Machine()
         )
         assert isinstance(stranger, Refused)
-
-
-class Repository(Model):
-    """A project a caller may say they ask about."""
-
-    name: Literal["harmon", "story", "lup"]
 
     @lup.promise
     async def a_restart_cuts_no_call(self, by: Testing) -> None:
