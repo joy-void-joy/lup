@@ -2,8 +2,9 @@
 
 A law reads its module's state through a door of the module that only reads:
 a tool marked `reads=True` answering the state its step names, taking nothing
-it must be given and no `by`, since a module's state is the same whoever asks
-(`lup/testing/README.md`, *Laws*).
+it must be given, read as the party its `by` names, where one is made with
+nothing given, the operator above all, so a module's whole state needn't be
+every agent's to read (`lup/testing/README.md`, *Laws*).
 """
 
 import asyncio
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import override
 
 from hypothesis import strategies as st
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
@@ -134,7 +135,9 @@ class Law(Model, arbitrary_types_allowed=True):
         """
         state = self.state.method
         reading = state.called(
-            self.running.part(self.state), state.validated({}), Reader()
+            self.running.part(self.state),
+            state.validated({}),
+            reader(state) or Reader(),
         )
         try:
             reading.send(None)
@@ -274,19 +277,36 @@ def reader_of(entry: Entry, doors: Doors) -> Entry | None:
         message = (
             f"the law `{entry.method.taken.qualified}` reads `{state.__name__}`, "
             f"which no door of `{module}` that only reads answers: a tool marked "
-            "`reads=True`, taking nothing it must be given and no `by`"
+            "`reads=True`, taking nothing it must be given, by no one or by a "
+            "party made with nothing given, as `Operator`"
         )
         raise ProjectError(message)
     return reading[0]
 
 
+def reader(method: Method) -> Party | None:
+    """Return the party the harness reads a law's state through `method` as: the first its `by` names that's made with nothing given, as `Operator` is; none where it takes no `by`, or names no such party."""
+    if method.taken.by is None:
+        return None
+    made = (made_alone(party) for party in method.parties())
+    return next((each for each in made if each is not None), None)
+
+
+def made_alone(party: type[Party]) -> Party | None:
+    """Return `party` made with nothing given; none where it needs something."""
+    try:
+        return party()
+    except ValidationError:
+        return None
+
+
 def reads(entry: Entry, state: type[BaseModel]) -> bool:
-    """Say whether `entry` reads `state` as a law needs: a tool marked `reads=True` answering it, needing nothing given."""
+    """Say whether `entry` reads `state` as a law needs: a tool marked `reads=True` answering it, needing nothing given, by no one or by a party made with nothing given."""
     door = entry.method.door
     taken = entry.method.taken
     if not (isinstance(door, ToolDoor) and door.reads and taken.returned is state):
         return False
-    if taken.by is not None:
+    if taken.by is not None and reader(entry.method) is None:
         return False
     try:
         entry.method.validated({})

@@ -40,7 +40,7 @@ A law is checked over every slice of every call of every run the harness makes: 
 
 ## Laws
 
-A law over `Step[State]` reads its module's state through a door of the module that only reads: a tool marked `reads=True` answering `State`, taking nothing it must be given and no `by`, and answering at once. The harness reads it before and after each step, so a law sees only what a party can see, and reading never changes what it reads. A module holding a law with no such door fails to start, naming the law.
+A law over `Step[State]` reads its module's state through a door of the module that only reads: a tool marked `reads=True` answering `State`, taking nothing it must be given, and answering at once. Where it says who may call it, the harness reads it as the first party its `by` names that's made with nothing given: `by: Operator` keeps a module's whole state off every agent's list of tools. The harness reads it before and after each step, so a law sees only what a party can see, and reading never changes what it reads. A module holding a law with no such door fails to start, naming the law.
 
 A step is a slice of a call: what one call runs from one `await` to the next. Each call runs as a task of its own, so where calls overlap, each slice is credited to its own call, and a law sees exactly what that call changed and when. `step.answered` is what the call answered, on the slice that ended it, and none before. A law a slice breaks is raised from that call when it ends (`BrokenLawError`), so a scenario sees it where it called.
 

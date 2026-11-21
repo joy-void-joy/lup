@@ -27,6 +27,7 @@ from lup import (
     Module,
     Modules,
     MutableModel,
+    Operator,
     Part,
     Parts,
     Project,
@@ -400,6 +401,27 @@ class TestingPromises(Part):
 
         with raises(ProjectError):
             await by.started(Project(modules=Modules.default().add(Unread())))
+
+    @lup.promise
+    async def a_law_reads_a_state_only_the_operator_may(self, by: Testing) -> None:
+        """A law reads its module's state through a door only the operator may call, as through any door that only reads, so a module's whole state needn't be every agent's to read."""
+
+        class OperatorsCount(CounterPart):
+            """The counter's tools, its count the operator's alone to read."""
+
+            @lup.tool(reads=True)
+            async def counted(self, _asking: Asking, by: Operator) -> Count:
+                """Read how far the counter has counted."""
+                return Count(count=self.module.tally.count)
+
+        class Guarded(Counter):
+            """A counter whose count only the operator reads."""
+
+            parts: Parts = Parts.of(OperatorsCount, CounterPromises)
+
+        started = await by.started(Project(modules=Modules.default().add(Guarded())))
+        [kept] = await started.checked("counter", "reading_changes_nothing")
+        assert isinstance(kept, Kept)
 
     @lup.promise
     async def a_stuck_check_fails_and_the_run_goes_on(self, by: Testing) -> None:
