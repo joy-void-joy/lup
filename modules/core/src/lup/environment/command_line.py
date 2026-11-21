@@ -41,6 +41,8 @@ from lup.environment.running.loader import Loader, LoaderError, Places
 from lup.environment.running.planning import plan_of
 from lup.environment.running.programs import Local
 from lup.environment.settings import LupSettings
+from lup.environment.shell.hosted import opened
+from lup.environment.shell.layout import DashboardPlaces
 from lup.programs import ProgramFailedError, run
 from lup.running.plan import CORE, typed
 from lup.running.wire import (
@@ -240,15 +242,23 @@ def main() -> None:
     try:
         layout = RepositoryLayout.found(Path.cwd())
         if calling is None and shutil.which("podman") is not None:
+            places = Places.found()
             loader = Loader(
-                places=Places.found(),
-                machine=machine(),
-                interactive=sys.stdin.isatty(),
+                places=places, machine=machine(), interactive=sys.stdin.isatty()
             )
             calling = asyncio.run(loader.ensured())
             said = asyncio.run(loader.reviewed(calling, layout))
             if said is not None:
                 sys.stderr.write(f"lup: {said}\n")
+            if not words:
+                shown = opened(DashboardPlaces.of(places.state, places.runtime))
+                if shown is not None:
+                    sys.stderr.write(f"lup: {shown}\n")
+                    sys.exit(0)
+                sys.stderr.write(
+                    "lup: the machine serves no dashboard; what it said is in "
+                    f"{places.log()}\n"
+                )
         if calling is not None:
             found = layout
 

@@ -30,6 +30,7 @@ from lup.shell.wire import (
     Write,
 )
 from lup.testing.harness import (
+    Acting,
     Answering,
     Broken,
     BrokenLawError,
@@ -54,6 +55,7 @@ from lup.told.guidance import Guidance, Section
 
 __all__ = [
     "Accepted",
+    "Acting",
     "Answered",
     "Answering",
     "Broken",

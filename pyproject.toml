@@ -211,6 +211,7 @@ source_modules = [
     "lup.inbox",
     "lup.setup",
     "lup.gate",
+    "lup.landing",
     "lup.runtimes",
     "lup.rooms",
     "lup.sessions",
@@ -241,6 +242,7 @@ forbidden_modules = [
     "lup.command_line.*",
     "lup.setup.*",
     "lup.gate.*",
+    "lup.landing.*",
     "lup.rooms.*",
     "lup.sessions.*",
 ]

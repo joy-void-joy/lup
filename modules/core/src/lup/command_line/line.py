@@ -206,9 +206,10 @@ async def typed(
     kept in what it answers. Typer's own help and messages are written to
     them as it parses: in typer's rich layout where `out` is a terminal, as
     the operator's is, and plain where it's piped, as an agent's always is.
+    Given no words, it shows the help: `lup` alone on the operator's machine
+    opens the dashboard before this is reached (`lup.environment.command_line`).
     """
     offered = await answerer.offered()
-    # lup: defer(issue=7, why="`lup` alone opens the dashboard, which is #7's: until then it shows the help")
     asked = words or ["--help"]
     named = reached(asked)
     if len(asked) == 1 and named in [[each] for each in grouped(offered, top)]:

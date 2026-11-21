@@ -414,6 +414,19 @@ class Projects(Part, machine=True, shared=True):
         return OPENINGS.validate_json(file.read_bytes())
 
     @lup.service
+    async def registered(self, asking: Asking, by: Machine) -> Opening:
+        """Return the project registered under a repository's name: where git keeps it, and its declaration.
+
+        Raise `RefusedError` where no project is registered under it.
+        """
+        del by
+        found = self.kept().get(asking.project)
+        if found is None:
+            message = f"no project named {asking.project} is registered with lup"
+            raise RefusedError(message, about=[asking.project])
+        return found
+
+    @lup.service
     async def opened(self, opening: Opening, by: Machine) -> Opened:
         """Run a project at the commit the operator approved last: plan its declaration, and start its containers, in place of those it ran before.
 

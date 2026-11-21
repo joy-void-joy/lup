@@ -850,7 +850,7 @@ class TreesPromises(Part):
 
     @lup.promise
     async def git_reads_the_repository_alone(self, by: Testing) -> None:
-        """git, reading a commit's objects, is held to the repository's own git directory, reading no `commondir`, graft, replace ref, commit-graph or configuration but the repository's own, with nothing that could run code."""
+        """git, reading a commit's objects, is held to the repository's own git directory, reading no `commondir`, graft, shallow file, replace ref, commit-graph or configuration but the repository's own, with nothing that could run code."""
         committed = Committed.of(by.any(Files))
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
@@ -863,6 +863,7 @@ class TreesPromises(Part):
             "GIT_DIR": "/srv/harmon.git",
             "GIT_COMMON_DIR": "/srv/harmon.git",
             "GIT_GRAFT_FILE": os.devnull,
+            "GIT_SHALLOW_FILE": os.devnull,
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_NO_LAZY_FETCH": "1",
         }

@@ -60,19 +60,41 @@ class Ran(Model):
         return f"{outcome}  {self.step.name:<{width}} {self.seconds:5.1f} s"
 
 
-class Timed(Model):
-    """A step's time in a pass recorded."""
+class Stepped(Model):
+    """A step as a run of the gate recorded it: whether it passed, its time, and what it said where it failed or tells."""
 
     name: str
+    passed: bool
     seconds: float
+    said: str = ""
+    """What it printed and said, where it failed or tells what it prints;
+    nothing otherwise."""
 
 
-class Pass(Model):
-    """A pass of the gate, recorded by what it passed on: the files, as git would commit them, and what crossed into it from outside them."""
+class Run(Model):
+    """A run of the gate, recorded by the files it ran on, as git would commit them, and what crossed into it from outside them: whether it passed, and how each step went."""
 
     tree: str
     """The tree git would commit the worktree's files as."""
-    steps: list[Timed] = []
+    passed: bool
+    steps: list[Stepped] = []
+
+    @classmethod
+    def of(cls, tree: str, ran: list[Ran]) -> Run:
+        """Return the run of the steps `ran` on `tree`, each told where it failed or tells."""
+        return cls(
+            tree=tree,
+            passed=all(each.passed() for each in ran),
+            steps=[
+                Stepped(
+                    name=each.step.name,
+                    passed=each.passed(),
+                    seconds=each.seconds,
+                    said=each.said if not each.passed() or each.step.tells else "",
+                )
+                for each in ran
+            ],
+        )
 
 
 class Gating(Part):
@@ -112,7 +134,7 @@ class Gating(Part):
         )
         recorded = await self.recorded(layout)
         tree = await self.tree(layout.root)
-        key = keyed(tree, layout)
+        key = keyed(tree, layout.local)
         if not checking.again and passed(recorded, key) is not None:
             return (
                 f"The gate passed on these files already (tree `{tree}`), so "
@@ -128,18 +150,9 @@ class Gating(Part):
         took = asyncio.get_running_loop().time() - start
         report = reported(fixed, ran, took)
         failed = [each.step.name for each in ran if not each.passed()]
+        kept(recorded, key, Run.of(tree, ran))
         if failed:
             raise RefusedError(report, about=failed)
-        kept(
-            recorded,
-            key,
-            Pass(
-                tree=tree,
-                steps=[
-                    Timed(name=each.step.name, seconds=each.seconds) for each in ran
-                ],
-            ),
-        )
         return (
             f"{report}\nIt's recorded for these files (tree `{tree}`), so running "
             "it again on them, or landing them, runs nothing."
@@ -218,26 +231,47 @@ def copied(index: Path, to: Path) -> None:
         shutil.copyfile(index, to)
 
 
-def keyed(tree: str, layout: RepositoryLayout) -> str:
-    """Return what a pass on the worktree at `layout`, whose files git would commit as `tree`, is recorded by: those files, and the layers of the declaration outside them, the repository's own and the machine's, which change what runs."""
+def keyed(tree: str, local: Path) -> str:
+    """Return what a pass on files git would commit as `tree` is recorded by: those files, and the layers of the declaration outside them, the repository's own at `local` and the machine's, which change what runs.
+
+    A landing reads a branch's pass by it too, so a pass recorded in a room is
+    found wherever the same files are checked.
+    """
     machine = MachineLayout(configuration=GateSettings().xdg_config_home)
     digest = hashlib.sha256(tree.encode())
-    for layer in [layout.local, machine.layer]:
+    for layer in [local, machine.layer]:
         digest.update(b"\0")
         digest.update(layer.read_bytes() if layer.is_file() else b"")
     return digest.hexdigest()
 
 
-def passed(recorded: GateLayout, key: str) -> Pass | None:
-    """Return the pass `recorded` keeps under `key`; none where there's none."""
-    found = recorded.passes / f"{key}.json"
-    return Pass.model_validate_json(found.read_bytes()) if found.is_file() else None
+def last(recorded: GateLayout, key: str) -> Run | None:
+    """Return the last run `recorded` keeps under `key`, passed or not; none where the gate hasn't run on those files, or where its file is a link, or leads out of the git directory, which the gate never writes.
+
+    A room writes the git directory, so what's read here is a room's word on
+    how its gate went, which steers and guards nothing; read on the operator's
+    machine, it's never a file elsewhere a link points at.
+    """
+    found = recorded.runs / f"{key}.json"
+    if (
+        not found.is_file()
+        or found.is_symlink()
+        or not found.resolve().is_relative_to(recorded.common.resolve())
+    ):
+        return None
+    return Run.model_validate_json(found.read_bytes())
 
 
-def kept(recorded: GateLayout, key: str, done: Pass) -> None:
-    """Keep `done` in `recorded` under `key`, written beside its place and moved there whole, so a gate reading it meanwhile never reads half of it."""
-    recorded.passes.mkdir(parents=True, exist_ok=True)
-    found = recorded.passes / f"{key}.json"
+def passed(recorded: GateLayout, key: str) -> Run | None:
+    """Return the run `recorded` keeps under `key` where it passed; none where there's none, or it failed."""
+    found = last(recorded, key)
+    return found if found is not None and found.passed else None
+
+
+def kept(recorded: GateLayout, key: str, done: Run) -> None:
+    """Keep `done` in `recorded` under `key`, in place of the run before it on those files, written beside its place and moved there whole, so a gate reading it meanwhile never reads half of it."""
+    recorded.runs.mkdir(parents=True, exist_ok=True)
+    found = recorded.runs / f"{key}.json"
     writing = found.with_suffix(".writing")
     writing.write_text(done.model_dump_json())
     writing.replace(found)
