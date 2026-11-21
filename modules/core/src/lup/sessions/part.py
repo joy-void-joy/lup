@@ -156,6 +156,7 @@ class Held(Part, machine=True, shared=True):
     module: Sessions
     holder: lup.Program = lup.Program(
         name=sys.executable,
+        optional=True,
         why="runs each session's holder, the machine's own code, with the machine's own Python",
     )
     """The machine's own Python, which runs each session's holder
