@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
 from typing import override
+lazy from datetime import timedelta
 
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, TypeAdapter
@@ -380,12 +381,15 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
         given: bytes | None,
         env: dict[str, str],
         cwd: Path | None,
+        *,
+        within: timedelta | None,
     ) -> Finished:
-        """Hear the run, and answer it as its program's script says.
+        """Hear the run, and answer it as its program's script says, whatever time it's given: what stands in for a program ends as it answers.
 
         Raise `UnrunError` where no answer of its script fits, as for a
         program that isn't there.
         """
+        del within
         self.heard.runs.append(
             ProgramRun(
                 program=program.name,

@@ -225,11 +225,12 @@ forbidden_modules = ["lup.environment"]
 # A promise reaches lup through the harness and modules' public surface alone, so
 # a change inside a module leaves its promises alone (`lup/testing/README.md`):
 # a module's promises import `lup` and `lup.testing`, never the core's insides.
-# Only what they import themselves counts, since `lup` imports everything.
+# Only what they import themselves counts, since `lup` imports everything. `**`
+# reaches a submodule's own submodule's promises, as git's companion's are.
 [[tool.importlinter.contracts]]
 name = "a promise imports the harness and lup's front door alone"
 type = "forbidden"
-source_modules = ["lup.*.promises"]
+source_modules = ["lup.**.promises"]
 forbidden_modules = [
     "lup.environment",
     "lup.core",
