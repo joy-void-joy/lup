@@ -178,12 +178,10 @@ ignore = ["lup_project.py"]
 testpaths = ["lup_declaration.py", "modules/*/src"]
 # `importlib` lets two modules' tests share a file name.
 addopts = ["--doctest-modules", "--import-mode=importlib"]
-# A check stuck past 30 seconds has its threads dumped and its worker ended,
-# which xdist reports as that check failing, rather than the run waiting silently
-# for good, as a thread left waiting once hung the second lup's run for 25
-# minutes with nothing naming the check.
-faulthandler_timeout = "30"
-faulthandler_exit_on_timeout = true
+# How long a check may take is lup's plugin's guard's to say: one stuck or past
+# its ceiling of the processor's time fails, one slow is listed to fix, and
+# none is failed by the clock alone, which a loaded machine moves
+# (`lup/testing/README.md`, *Checking*).
 
 [tool.importlinter]
 root_packages = ["lup"]

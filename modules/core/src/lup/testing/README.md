@@ -60,9 +60,18 @@ What the harness does is said on the library side and done on the environment's:
 
 A project's gate checks the promises of its own modules, not those of lup's it installs, which lup's own gate checks; but a promise about every project (`@lup.promise(every_project=True)`) of any module it selects, over its own declaration, which the harness hands it as `by.project()`, so the core's promise that a project's guidance fits is checked at every project's gate (`lup/told/README.md`). The plugin (`lup.environment.testing.plugin`, which pytest finds by the core's entry point) collects the promises of the modules the declaration resolves to, where pytest's paths reach it: `lup_project.py` at pytest's root, or the file `[tool.lup]`'s `declaration` names in `pyproject.toml`, as lup reads a repository's. Each promise is one check, named by its module, its class and its own name.
 
-The gate's check is repeatable: each promise draws a hundred runs, their values and their orders, from a seed its own name and source fix, with no deadline, so a tree gets the same verdict whatever the machine's load. `pytest --lup-explore=RUNS` checks each over that many runs of random values instead, to find what the gate's don't; the gate never runs it, and whoever fixes what it finds writes the values into a scenario, which the gate then keeps. Nothing waits on real time or starts a process, but the promises of running programs, which can't be checked otherwise (`lup/programs/README.md`).
+The gate's check is repeatable: each promise draws a hundred runs, their values and their orders, from a seed its own name and source fix, with no deadline, so a tree gets the same verdict whatever the machine's load. `pytest --lup-explore=RUNS` checks each over that many runs of random values instead, to find what the gate's don't; the gate never runs it, and whoever fixes what it finds writes the values into a scenario, which the gate then keeps. Nothing waits on real time or starts a process, but the promises of running programs, which can't be checked otherwise (`lup/programs/README.md`), and the guard's, below.
 
-A broken promise is told with what it promises, the smallest values it drew, the shortest run of calls that broke it and how their slices interleaved, and where.
+A promise the gate's check finds broken is checked once more on the same values. One that holds then depends on something besides its tree, so it passes, and is listed at the run's end with how it failed, to fix, rather than failing a branch it may have nothing to do with.
+
+**The guard** (`lup.environment.testing.guarding`) holds every check to limits a loaded machine barely moves, never to the clock alone. Each slice a run of a promise runs tells it the check is moving.
+- A check that goes `stalled` (30 s) without a run of it moving on, stuck on a lock or spinning in one place, fails there, naming where each thread was.
+- A check taking more of the processor's time than its `ceiling` (120 s) fails as too slow.
+- One taking more than `slow` (15 s) passes, and is listed to fix.
+
+Each limit is the plugin's ini option of its name (`lup_stalled`, `lup_ceiling`, `lup_slow`, in seconds). A failing promise halted while hypothesis shrinks it is told with the smallest run found so far, saying so. A halt that doesn't end its check, as a thread that never wakes, ends the process with every thread's stack, as the check that crashed its worker. Each check the guard halted, each slow one and each flaky one carries a property saying so in pytest's report (`lup-halted`, `lup-slow`, `lup-flaky`).
+
+A broken promise is told with what it promises, the smallest values it drew, each as Python writes it, the shortest run of calls that broke it and how their slices interleaved, and where. Hypothesis's explain phase is left out: the report says this itself, and explaining reruns a broken promise hundreds of times.
 
 ## What the gate runs
 

@@ -165,6 +165,10 @@ class Broken(Model, arbitrary_types_allowed=True):
     error: BaseException
     """What broke it: a law that didn't hold (`BrokenLawError`), an assertion
     that failed, or what the promise raised."""
+    halted: str = ""
+    """Why the gate's guard halted the check before hypothesis had shrunk the
+    run that broke it, where it did: the run is then the smallest found so
+    far."""
 
 
 class BrokenLawError(LupError, AssertionError):

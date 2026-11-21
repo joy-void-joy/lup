@@ -10,6 +10,7 @@ gate's doesn't; what it finds is written into a scenario by whoever fixes it
 import asyncio
 import hashlib
 import inspect
+from functools import partial
 from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, Phase, given, seed, settings
@@ -22,6 +23,7 @@ from lup.doors.parts import Given
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.doors import Entry
+from lup.environment.testing.guarding import Guard, HaltedError
 from lup.environment.testing.harness import Harness, Run, promises, watched
 from lup.environment.testing.simulation import Simulation
 from lup.testing.harness import (
@@ -63,6 +65,9 @@ class Check(Model, arbitrary_types_allowed=True):
 
     entry: Entry
     project: Project
+    guard: Guard | None = None
+    """What guards the check against being stuck or too slow, told of each
+    slice it runs; none where nothing guards it."""
 
     def said(self) -> str:
         """Name the promise: `CounterPromises.never_goes_back`."""
@@ -79,12 +84,16 @@ class Check(Model, arbitrary_types_allowed=True):
         runs: list[Run] = []
 
         def once(data: st.DataObject) -> None:
-            run = Run(checking=checked)
+            run = Run(checking=partial(checked, guard=self.guard))
             runs.append(run)
-            loop = Simulation(choose=chooser(data), watch=watched)
-            loop.run_until_complete(
-                self.ran(Harness(data=data, run=run, gated=self.project))
-            )
+            loop = Simulation(choose=chooser(data), watch=watching(self.guard))
+            try:
+                loop.run_until_complete(
+                    self.ran(Harness(data=data, run=run, gated=self.project))
+                )
+            except Exception as error:
+                run.error = error
+                raise
 
         test = given(st.data())(once)
         if exploring.seeded:
@@ -99,16 +108,25 @@ class Check(Model, arbitrary_types_allowed=True):
         )(test)
         try:
             test()
+        except HaltedError as halted:
+            broke = next((each for each in reversed(runs) if each.error), None)
+            if broke is None or broke.error is None:
+                raise
+            return self.broken(broke, broke.error, halted.why)
         except Exception as error:
-            last = runs[-1]
-            return Broken(
-                promise=self.said(),
-                drawn=last.drawn,
-                calls=last.calls,
-                slices=last.slices,
-                error=error,
-            )
+            return self.broken(runs[-1], error)
         return Kept(promise=self.said())
+
+    def broken(self, run: Run, error: BaseException, halted: str = "") -> Broken:
+        """Say the promise is broken by `run`, the smallest found, or the smallest found before the guard halted the check, saying why."""
+        return Broken(
+            promise=self.said(),
+            drawn=run.drawn,
+            calls=run.calls,
+            slices=run.slices,
+            error=error,
+            halted=halted,
+        )
 
     async def ran(self, harness: Harness) -> None:
         """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the law checked after each."""
@@ -165,12 +183,25 @@ def chooser(data: st.DataObject) -> Callable[[int], int]:
     return choose
 
 
+def watching(
+    guard: Guard | None,
+) -> Callable[[asyncio.Handle], Callable[[], None] | None]:
+    """Return how a run's loop watches each slice: told to `guard`, where there's one, as the check going on, and each law checked over it."""
+
+    def watch(handle: asyncio.Handle) -> Callable[[], None] | None:
+        if guard is not None:
+            guard.beat()
+        return watched(handle)
+
+    return watch
+
+
 def checked(
-    project: Project, module: Module, promise: str | None
+    project: Project, module: Module, promise: str | None, guard: Guard | None = None
 ) -> list[Kept | Broken]:
-    """Check the promise named `promise` of `module`, in `project`, or every one where none is named, as the gate does, and say how each fared."""
+    """Check the promise named `promise` of `module`, in `project`, or every one where none is named, as the gate does, guarded by `guard`, and say how each fared."""
     return [
-        Check(entry=entry, project=project).checked(Exploring())
+        Check(entry=entry, project=project, guard=guard).checked(Exploring())
         for entry in promises(module)
         if promise is None or promise == entry.name
     ]

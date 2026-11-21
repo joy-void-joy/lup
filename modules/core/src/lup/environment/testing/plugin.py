@@ -12,10 +12,15 @@ Every other check pytest collects names no promise, and fails, saying so,
 unless it's a docstring's example or marked `unpromised(why=…)`; and a class of
 promises no module lists fails, since nothing would check it
 (`lup/testing/README.md`, *What the gate runs*).
+
+Every check is guarded against being stuck or too slow, by what it does rather
+than the clock (`guarding`); one slow, or a promise that failed and then held
+on the same values, passes, and is listed at the run's end to fix.
 """
 
 import inspect
 import sysconfig
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -28,6 +33,7 @@ from lup.doors.door import served
 from lup.doors.parts import Part, Parts
 from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
+from lup.environment.testing.guarding import Guard, HaltedError, Limits, seconds
 from lup.environment.testing.harness import promises, readers
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
@@ -35,7 +41,7 @@ from lup.testing.promise import PromiseDoor
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
 
     from _pytest._code.code import ExceptionInfo, TerminalRepr
 
@@ -43,8 +49,27 @@ if TYPE_CHECKING:
     from lup.environment.doors import Entry
 
 
+GUARD = pytest.StashKey[Guard]()
+"""Where the run keeps its guard."""
+
+SLOW = "lup-slow"
+"""The property a slow check's report carries: the processor's seconds it took."""
+
+FLAKY = "lup-flaky"
+"""The property the report of a promise that failed and then held carries: its first failure."""
+
+HALTED = "lup-halted"
+"""The property the report of a check the guard halted carries: why."""
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Offer an exploring run."""
+    """Offer an exploring run, and the guard's limits, each in seconds."""
+    for name, said in [
+        ("stalled", "a check may go with nothing in it running before it fails"),
+        ("slow", "of the processor's time a check may take before it's listed to fix"),
+        ("ceiling", "of the processor's time a check may take before it fails"),
+    ]:
+        parser.addini(f"lup_{name}", f"How many seconds {said}.", default=None)
     parser.addoption(
         "--lup-explore",
         type=int,
@@ -59,12 +84,96 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Name the mark a check that names no promise is kept with."""
+    """Name the mark a check that names no promise is kept with, and start the guard."""
     config.addinivalue_line(
         "markers",
         "unpromised(why): a check that can't be said as a law or a scenario, kept, "
         "saying why; send a friction saying what couldn't be said",
     )
+    given = {
+        name: timedelta(seconds=float(str(value)))
+        for name in ["stalled", "slow", "ceiling"]
+        if (value := config.getini(f"lup_{name}")) is not None
+    }
+    guard = Guard(limits=Limits.model_validate(given))
+    guard.started()
+    config.stash[GUARD] = guard
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Guard the run's end, which a thread a check left stuck would hold."""
+    if GUARD in config.stash:
+        config.stash[GUARD].ending()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(
+    item: pytest.Item,
+) -> Generator[None, bool | None, bool | None]:
+    """Guard each check while it runs."""
+    with item.config.stash[GUARD].guarding(item.nodeid):
+        return (yield)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None]:
+    """Mark a check the guard halted, saying why, and one that took more of the processor's time than the guard's `slow`, to fix, passing or not."""
+    guard = item.config.stash[GUARD]
+    try:
+        return (yield)
+    except HaltedError as halted:
+        # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
+        item.user_properties.append((HALTED, halted.why))
+        raise
+    finally:
+        taken = guard.taken()
+        if taken >= guard.limits.slow:
+            # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
+            item.user_properties.append((SLOW, taken.total_seconds()))
+
+
+def pytest_enter_pdb(config: pytest.Config) -> None:
+    """Stop guarding the check a debugger takes over."""
+    config.stash[GUARD].paused()
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """List the checks to fix though they passed: each slow, and each promise that failed and then held on the same values."""
+    reports = [
+        report
+        for each in terminalreporter.stats.values()
+        for report in each
+        if isinstance(report, pytest.TestReport) and report.when == "call"
+    ]
+    marked = [
+        (report.nodeid, name, value)
+        for report in reports
+        for name, value in report.user_properties
+    ]
+    slow = [
+        f"{each} took {seconds(timedelta(seconds=float(str(value))))}"
+        for each, name, value in marked
+        if name == SLOW
+    ]
+    flaky = [
+        f"{each}, which failed first:\n{value}"
+        for each, name, value in marked
+        if name == FLAKY
+    ]
+    if slow:
+        terminalreporter.section("slow checks, to fix")
+        terminalreporter.write_line(
+            "Each took more of the processor's time than the guard's `slow`, "
+            "which a busy machine barely changes:"
+        )
+        for line in slow:
+            terminalreporter.write_line(f"  {line}")
+    if flaky:
+        terminalreporter.section(
+            "promises that failed, then held on the same values, to fix"
+        )
+        for line in flaky:
+            terminalreporter.write_line(line)
 
 
 def pytest_collect_file(file_path: Path, parent: pytest.Collector) -> Declared | None:
@@ -268,16 +377,36 @@ class Promised(pytest.Item):
         """Hold the promise behind `entry`, of a module of `project`, to check as `exploring` says."""
         # lup: ignore("reportUnknownMemberType", why="pytest leaves untyped the keyword arguments a node's constructor is passed")
         super().__init__(name=name, parent=parent)
-        self.check = Check(entry=entry, project=project)
+        self.check = Check(entry=entry, project=project, guard=self.config.stash[GUARD])
         self.exploring = exploring
 
     @override
     def runtest(self) -> None:
-        """Check the promise; raise `BrokenPromiseError` where a run broke it."""
+        """Check the promise; raise `BrokenPromiseError` where a run broke it.
+
+        A promise the gate's repeatable check finds broken is checked once more
+        on the same values: one that holds then depends on something besides
+        its tree, so it passes, its first failure listed to fix rather than
+        failing a branch it may have nothing to do with.
+        """
         match self.check.checked(self.exploring):
             case Kept():
                 return
             case Broken() as broken:
+                if broken.halted:
+                    # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
+                    self.user_properties.append((HALTED, broken.halted))
+                if self.exploring.seeded and not broken.halted:
+                    match self.check.checked(self.exploring):
+                        case Kept():
+                            told = said(
+                                broken, self.check.entry.method.taken.description
+                            )
+                            # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
+                            self.user_properties.append((FLAKY, told))
+                            return
+                        case Broken():
+                            pass
                 raise BrokenPromiseError(broken) from broken.error
 
     @override
@@ -287,10 +416,13 @@ class Promised(pytest.Item):
         style: str | None = None,
     ) -> str | TerminalRepr:
         """Say which promise broke, what it promises, the smallest run that broke it, and where."""
-        broken = excinfo.value
-        if not isinstance(broken, BrokenPromiseError):
-            return super().repr_failure(excinfo)
-        return said(broken.broken, self.check.entry.method.taken.description)
+        match excinfo.value:
+            case HaltedError() as halted:
+                return str(halted)
+            case BrokenPromiseError() as broken:
+                return said(broken.broken, self.check.entry.method.taken.description)
+            case _:
+                return super().repr_failure(excinfo)
 
     @override
     # lup: ignore("tuple-shape", why="pytest takes where a check is as this tuple: its file, its line and its name")
@@ -316,6 +448,13 @@ def said(broken: Broken, description: str) -> str:
             *(
                 ["Each slice, by the call it was of, in the order they ran:", *slices]
                 if len(calls) > 1
+                else []
+            ),
+            *(
+                [
+                    f"Shrinking stopped short, the run above the smallest found so far: {broken.halted}"
+                ]
+                if broken.halted
                 else []
             ),
             str(where.getrepr(style="short")),

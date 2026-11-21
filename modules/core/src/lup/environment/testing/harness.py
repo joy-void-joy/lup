@@ -87,6 +87,8 @@ class Run(MutableModel, arbitrary_types_allowed=True):
 
     # lup: ignore("bare-object", why="a value drawn is of whatever kind its promise asked the harness for, bytes and sets among them, which no one type holds")
     drawn: list[object] = []
+    error: Exception | None = None
+    """What broke the promise in this run; none where it held."""
     calls: list[Call] = []
     slices: list[Call] = []
     checking: Callable[[Project, Module, str | None], list[Kept | Broken]] | None = None
