@@ -12,11 +12,18 @@ from lup import (
     Codebase,
     Commented,
     Fold,
+    Line,
+    Machine,
     Model,
+    Module,
     Modules,
+    Offer,
     Operator,
     Part,
+    Parts,
     Project,
+    Recorded,
+    Viewing,
 )
 from lup.inbox import (
     Answering,
@@ -24,10 +31,13 @@ from lup.inbox import (
     Clearing,
     ConcernOf,
     ConcernSaid,
+    Decision,
     Ending,
     Everywhere,
     FrictionSaid,
     Inboxed,
+    Item,
+    Laid,
     Naming,
     NoteSaid,
     Nothing,
@@ -36,12 +46,21 @@ from lup.inbox import (
     PartyOf,
     Pile,
     Placed,
+    Posted,
+    Posting,
+    Question,
     Reached,
+    Ruling,
+    SaidSince,
     SendSaid,
+    Settling,
+    Since,
     Told,
+    Untelling,
+    Untold,
     WithdrawSaid,
 )
-from lup.testing import Accepted, Started, Step, Testing
+from lup.testing import Accepted, Refused, Started, Step, Testing
 
 HERE = Codebase(repository="harness")
 """The harness's project's own code, which calls the inbox's services for its agents."""
@@ -50,6 +69,61 @@ HERE = Codebase(repository="harness")
 def project() -> Project:
     """Return a project of lup's default modules, the inbox among them."""
     return Project(modules=Modules.default())
+
+
+class Change(Model):
+    """A change to review, by its name."""
+
+    change: str
+
+
+class ChangeWaits(Item):
+    """A change waiting on the operator's review: the reviewing module's own kind of item, laid out as a fold opening on its view, offering its command."""
+
+    kind: str = "reviewing:waits"
+    change: str
+
+    def waits(self) -> bool:
+        """Say that a change waits until the module settles it."""
+        return True
+
+    def laid(self) -> Laid:
+        """Lay it out as a fold opening on the change's review, offering to accept it."""
+        given = Change(change=self.change)
+        return Laid(
+            fold="body",
+            summary=f"the change {self.change}",
+            opens=Viewing.of(Reviews.review, given, module=Reviewing.name),
+            offers=[Offer.of(Reviews.accept, given, module=Reviewing.name)],
+        )
+
+
+class Reviews(Part):
+    """The reviewing module's part: a change's review, and accepting it."""
+
+    @lup.view
+    async def review(self, change: Change) -> Blocks:
+        """Show a change's review."""
+        return Blocks.of(Line.of("change", change.change))
+
+    @lup.command(verb="done", says="accept it")
+    async def accept(self, change: Change, by: Operator) -> str:
+        """Accept a change."""
+        del by
+        return f"accepted {change.change}"
+
+
+class Reviewing(Module):
+    """Reviewing: an example module the inbox's promises check a module's own kind of item with."""
+
+    name = "reviewing"
+    parts: Parts = Parts.of(Reviews)
+    kinds: Recorded = Recorded.of(ChangeWaits)
+
+
+def reviewing() -> Project:
+    """Return a project of lup's default modules and the reviewing module."""
+    return Project(modules=Modules.default().add(Reviewing()))
 
 
 async def inboxed(started: Started) -> Inboxed:
@@ -70,10 +144,20 @@ async def said(started: Started, tool: str, given: lup.Model, agent: Agent) -> s
 
 async def told(started: Started, agent: Agent) -> Told:
     """Tell `agent` what's for them, as their session's next call does."""
-    answered = await started.serve("told", Ending(agent=agent), HERE)
+    answered = await started.serve(
+        "told", Ending(repository="harness", agent=agent), Machine()
+    )
     assert isinstance(answered, Accepted)
     assert isinstance(answered.output, Told)
     return answered.output
+
+
+async def untold(started: Started) -> list[Agent]:
+    """Return each agent of the harness's repository who has something not yet told them, as a session reads whom to wake."""
+    answered = await started.serve("untold", Untelling(repository="harness"), Machine())
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Untold)
+    return answered.output.agents
 
 
 async def viewed(started: Started, view: str, given: Model) -> Blocks:
@@ -177,11 +261,15 @@ class InboxPromises(Part):
             ConcernSaid(text="watch the gate", title="the gate"),
             agent,
         )
-        await started.serve("agent_ended", Ending(agent=agent), HERE)
+        await started.serve(
+            "agent_ended", Ending(repository="harness", agent=agent), Machine()
+        )
         left = placed(await inboxed(started), "the gate")
         assert left.holder == "@no-agent"
         assert left.left_by is not None
-        await started.serve("agent_started", Ending(agent=agent), HERE)
+        await started.serve(
+            "agent_started", Ending(repository="harness", agent=agent), Machine()
+        )
         back = placed(await inboxed(started), "the gate")
         assert back.holder == left.left_by
         assert back.left_by is None
@@ -202,6 +290,59 @@ class InboxPromises(Part):
         assert any(
             each.kind == "inbox:answer" for each in (await told(started, agent)).items
         )
+
+    @lup.promise
+    async def what_was_said_reads_once_with_what_it_answered(self, by: Testing) -> None:
+        """Every item said reads once from a read of what's been said since, each with its words whole and what it's on: a question with each decision and its lean, an answer with the question and the decisions it rules on, a comment with the item and the lines it quotes."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        reader = by.any(Machine) if by.any(bool) else HERE
+        await said(
+            started,
+            "ask",
+            AskSaid(
+                question="which way?",
+                decisions=[Decision(decision="go left", lean="yes, it's shorter")],
+            ),
+            agent,
+        )
+        [question] = (await inboxed(started)).waiting
+        await started.run(
+            "core",
+            "answer",
+            Answering(question=question, rulings=[Ruling(number=1, verdict="leaning")]),
+            Operator(),
+        )
+        await said(started, "note", NoteSaid(remark="a doubt\n\nand why"), agent)
+        note = max((await inboxed(started)).new)
+        await started.run(
+            "core",
+            "comment",
+            Commented[OnItem](
+                on=OnItem(item=note), words="answered", lines=["and why"]
+            ),
+            Operator(),
+        )
+        first = await started.serve("said", Since(), reader)
+        assert isinstance(first, Accepted)
+        assert isinstance(first.output, SaidSince)
+        items = first.output.items
+        asked = next(each for each in items if each.number == question)
+        assert "go left" in asked.text
+        assert "yes, it's shorter" in asked.text
+        ruled = next(each for each in items if each.kind == "inbox:answer")
+        assert ruled.on == question
+        assert ruled.quoted is not None
+        assert "go left" in ruled.quoted
+        commented = next(each for each in items if each.text == "answered")
+        assert commented.on == note
+        assert commented.quoted == "and why"
+        assert commented.agent is None
+        assert len(dict.fromkeys(each.key for each in items)) == len(items)
+        again = await started.serve("said", Since(after=first.output.last), reader)
+        assert isinstance(again, Accepted)
+        assert isinstance(again.output, SaidSince)
+        assert again.output.items == []
 
     @lup.promise
     async def a_withdrawn_question_waits_on_nobody(self, by: Testing) -> None:
@@ -251,8 +392,16 @@ class InboxPromises(Part):
         """The operator's comment on a message one agent sent another reaches both: whoever wrote it, and whoever it was for."""
         started = await by.started(project())
         writer, reader = Agent.of("writer-id"), Agent.of("reader-id")
-        await started.serve("agent_named", Naming(agent=writer, name="writer"), HERE)
-        await started.serve("agent_named", Naming(agent=reader, name="reader"), HERE)
+        await started.serve(
+            "agent_named",
+            Naming(repository="harness", agent=writer, name="writer"),
+            Machine(),
+        )
+        await started.serve(
+            "agent_named",
+            Naming(repository="harness", agent=reader, name="reader"),
+            Machine(),
+        )
         await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
         message = max((await inboxed(started)).new)
         commented = await started.run(
@@ -268,13 +417,35 @@ class InboxPromises(Part):
             )
 
     @lup.promise
+    async def an_agent_is_untold_until_what_is_theirs_is_told(
+        self, by: Testing
+    ) -> None:
+        """An agent something was sent to is among those a session wakes until it's told them, and not after."""
+        started = await by.started(project())
+        writer, reader = Agent.of("writer-id"), Agent.of("reader-id")
+        for agent, name in [(writer, "writer"), (reader, "reader")]:
+            await started.serve(
+                "agent_named",
+                Naming(repository="harness", agent=agent, name=name),
+                Machine(),
+            )
+        await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
+        assert await untold(started) == [reader]
+        await told(started, reader)
+        assert await untold(started) == []
+
+    @lup.promise
     async def the_operator_finds_each_concern_from_the_list_of_parties(
         self, by: Testing
     ) -> None:
         """Every concern an agent opens is found from the list of parties, under the party holding it, and opens on what was said in it; a comment on it reaches its holder."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await started.serve("agent_named", Naming(agent=agent, name="builder"), HERE)
+        await started.serve(
+            "agent_named",
+            Naming(repository="harness", agent=agent, name="builder"),
+            Machine(),
+        )
         await said(
             started,
             "concern",
@@ -378,3 +549,40 @@ class InboxPromises(Part):
         assert isinstance(commented, Accepted), commented
         found = placed(await inboxed(started), "group these")
         assert found.holder == "@frictions/keys"
+
+    @lup.promise
+    async def a_modules_own_item_waits_until_the_module_settles_it(
+        self, by: Testing
+    ) -> None:
+        """An item of a module's own kind, posted for an agent, waits on the operator, laid out as its kind says, until the module settles it, and what came of it is told to the agent; the inbox's own kinds can't be posted."""
+        started = await by.started(reviewing())
+        agent = by.any(Agent)
+        waits = Posting.of(
+            ChangeWaits,
+            Change(change="tidy"),
+            by=agent,
+            repository="harness",
+            text="it waits",
+        )
+        posted = await started.serve("post", waits, Machine())
+        assert isinstance(posted, Accepted), posted
+        assert isinstance(posted.output, Posted)
+        number = posted.output.number
+        assert number in (await inboxed(started)).waiting
+        shown = await viewed(started, "waiting", PartiesOf(repository="harness"))
+        [fold] = [each for each in folds(shown) if each.id == f"item-{number}-laid"]
+        assert fold.content == Viewing(
+            module="reviewing", view="review", given={"change": "tidy"}
+        )
+        assert [(each.module, each.command) for each in fold.offers[1:]] == [
+            ("reviewing", "accept")
+        ]
+        settled = Settling(repository="harness", item=number, text="accepted")
+        assert isinstance(await started.serve("settle", settled, HERE), Accepted)
+        assert number not in (await inboxed(started)).waiting
+        assert any(
+            each.text == "accepted" for each in (await told(started, agent)).items
+        )
+        question = Posting.of(Question, by=agent, repository="harness", text="may I?")
+        refused = await started.serve("post", question, Machine())
+        assert isinstance(refused, Refused)

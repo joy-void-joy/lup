@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
-from lup.doors.parties import Agent, Codebase, Operator
-from lup.doors.parts import Data, Part
+from lup.doors.parties import Agent, Codebase, Machine, Operator
+from lup.doors.parts import Data, Declared, Part
 from lup.inbox import views
 from lup.inbox.inbox import Inbox, InboxError, first_line
 from lup.inbox.records import (
-    KINDS,
+    NODES,
     AgentRecord,
     Concern,
     Item,
@@ -36,6 +36,7 @@ from lup.inbox.said import (
     ConcernOf,
     ConcernSaid,
     Declining,
+    Ended,
     Ending,
     Everywhere,
     FrictionSaid,
@@ -48,13 +49,20 @@ from lup.inbox.said import (
     PartyOf,
     Pile,
     Piling,
+    Posted,
+    Posting,
     Reached,
     Reading,
+    SaidSince,
     SendSaid,
+    Settling,
     Showing,
+    Since,
     Spoken,
     Told,
     ToldItem,
+    Untelling,
+    Untold,
     Uttered,
     WithdrawSaid,
     Words,
@@ -64,6 +72,7 @@ from lup.shell.blocks import Blocks
 from lup.shell.draft import Commented, Commenting
 from lup.store.database import Database
 from lup.store.errors import StoreError
+from lup.store.records import Edge, Kinds, Node, Recorded
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -77,6 +86,10 @@ class Inboxes(Part, approved=True, shared=True):
 
     data: Data
     """Where the database is kept, across restarts."""
+    declared: Declared
+    """Every module of the project lup runs on the machine, for the kinds of
+    record each declares, which the database reads its records as: a module's
+    own kinds of item among them."""
     database: Database | None = None
     """The database, opened the first time it's needed."""
     state: Everywhere | None = None
@@ -87,7 +100,14 @@ class Inboxes(Part, approved=True, shared=True):
     def opened(self) -> Database:
         """Return the database the inbox is kept in, opening it the first time: before anything else of the part runs, whatever order its start and its first call come in."""
         if self.database is None:
-            self.database = Database.opened(self.data.path / DATABASE, KINDS)
+            kinds = self.declared.held(Recorded)
+            self.database = Database.opened(
+                self.data.path / DATABASE,
+                Kinds(
+                    nodes=[each for each in kinds if issubclass(each, Node)],
+                    edges=[each for each in kinds if issubclass(each, Edge)],
+                ),
+            )
         return self.database
 
     @lup.on(Stopping)
@@ -252,9 +272,23 @@ class Inboxes(Part, approved=True, shared=True):
         return self.state
 
     @lup.service
-    async def told(self, given: Ending, by: Codebase) -> Told:
+    async def said(self, given: Since, by: Codebase | Machine) -> SaidSince:
+        """Read every item kept since `given`'s key, every repository's, in the order kept: each with who said it, its words whole, and what it's on, as a search reads them."""
+        del by
+        database = self.opened()
+        items = [each for each in database.every(Item) if each.key > given.after]
+        return SaidSince(
+            items=[self.inbox(each.repository).as_said(each) for each in items],
+            last=max((each.key for each in items), default=given.after),
+        )
+
+    # What sessions say, from the machine's own part holding them
+
+    @lup.service
+    async def told(self, given: Ending, by: Machine) -> Told:
         """Tell an agent each item for them not told yet, once: what reaches them at their next call."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         items = inbox.taken(inbox.agent(given.agent))
         return Told(
             items=[
@@ -269,24 +303,83 @@ class Inboxes(Part, approved=True, shared=True):
         )
 
     @lup.service
-    async def agent_named(self, given: Naming, by: Codebase) -> None:
+    async def untold(self, given: Untelling, by: Machine) -> Untold:
+        """List each agent of a repository who has something not yet told them: whom a session wakes, or starts again."""
+        del by
+        inbox = self.inbox(given.repository)
+        return Untold(
+            agents=[each.caller() for each in inbox.agents() if inbox.untold(each)]
+        )
+
+    @lup.service
+    async def turn_ended(self, given: Ended, by: Machine) -> str:
+        """Keep an agent's last words of a turn, answering what the operator told them since their last."""
+        del by
+        inbox = self.inbox(given.repository)
+        item = inbox.turn_ended(inbox.agent(given.agent), given.text)
+        return f"Kept, @{item.number}."
+
+    @lup.service
+    async def agent_named(self, given: Naming, by: Machine) -> None:
         """Name an agent, as their session says its name, under the agent who spawned them where one did."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         spawner = None if given.spawner is None else inbox.agent(given.spawner)
         with refusing():
             inbox.agent(given.agent, given.name, spawner)
 
     @lup.service
-    async def agent_ended(self, given: Ending, by: Codebase) -> None:
+    async def agent_ended(self, given: Ending, by: Machine) -> None:
         """Say an agent's session ended: what they held reads as in `no-agent` until they start again."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         inbox.end(inbox.agent(given.agent))
 
     @lup.service
-    async def agent_started(self, given: Ending, by: Codebase) -> None:
+    async def agent_started(self, given: Ending, by: Machine) -> None:
         """Say an agent started again: what they held is theirs again."""
-        inbox = self.inbox(by.repository)
+        del by
+        inbox = self.inbox(given.repository)
         inbox.start(inbox.agent(given.agent))
+
+    # What modules say, in their own kinds of item
+
+    @lup.service
+    async def post(self, given: Posting, by: Machine | Codebase) -> Posted:
+        """Keep an item of a module's own kind, said by an agent to the operator in the concern the agent works in, and return its number: it waits on the operator as its kind says, laid out as its kind says, until the module settles it or the operator comments on it.
+
+        Raise `RefusedError` where its kind is the inbox's own or no module's, where its fields aren't its kind's, or, called by a project's code, where it names another repository than the project's.
+        """
+        kind = self.opened().kinds.node(given.kind)
+        if not issubclass(kind, Item) or kind in NODES:
+            message = (
+                f"`{given.kind}` isn't a module's own kind of item: a module "
+                "declares one in its `Recorded`, deriving from `Item`"
+            )
+            raise RefusedError(message)
+        theirs(by, given.repository)
+        inbox = self.inbox(given.repository)
+        with refusing():
+            kept = inbox.posted(inbox.agent(given.by), kind, given.text, given.fields)
+        return Posted(number=kept.number or 0)
+
+    @lup.service
+    async def settle(self, given: Settling, by: Machine | Codebase) -> None:
+        """Say what came of an item of a module's own kind, for the operator's act: told to whoever wrote it, at their next call, and answering it, so it waits no more.
+
+        Raise `RefusedError` where the item isn't one of a module's own kind, or, called by a project's code, where it's another repository's than the project's.
+        """
+        theirs(by, given.repository)
+        inbox = self.inbox(given.repository)
+        with refusing():
+            item = inbox.item(str(given.item))
+            if type(item) in NODES:
+                message = (
+                    f"@{given.item} is the inbox's own kind of item, which a "
+                    "module doesn't settle"
+                )
+                raise InboxError(message, about=[str(given.item)])
+            inbox.settled(item, given.text)
 
     # The operator's acts
 
@@ -531,6 +624,15 @@ class Speaking(Part):
         operator and the concerns you hold.
         """
         return await Inboxes.read(Spoken(agent=by, said=said))
+
+
+def theirs(by: Machine | Codebase, repository: str) -> None:
+    """Refuse a project's code naming another repository than its own: the machine names any."""
+    if isinstance(by, Codebase) and by.repository != repository:
+        message = (
+            f"{by.repository}'s code can't say what's kept in {repository}'s inbox"
+        )
+        raise RefusedError(message, about=[repository])
 
 
 @contextmanager
