@@ -18,18 +18,20 @@ which turns each batch git hands a remote helper into one call here
   forcing an update git didn't force.
 """
 
+import csv
 import difflib
+import io
 from typing import Annotated
 
 from pydantic import AfterValidator
 
 import lup
 from lup.doors.door import RefusedError
-from lup.doors.parties import Agent, Machine
+from lup.doors.parties import Agent, Codebase, Machine
 from lup.doors.parts import Declared, GitDirectory, Part, Program, SshAgent
 from lup.landing.module import Landing
-from lup.programs.git.answers import nul_separated, tab_separated
-from lup.programs.git.running import Git
+from lup.programs.git.answers import line, nul_separated, tab_separated
+from lup.programs.git.running import Git, unconfigured
 from lup.programs.git.stores import Store
 from lup.publishing.events import Changed, Commit, Line, Publishing, Push
 from lup.types import Model
@@ -190,6 +192,20 @@ class Fetched(Model):
     """Every object asked for is in the repository's store."""
 
 
+class Naming(Model):
+    """A remote, by its name in the repository's `config`, whose host is asked for."""
+
+    remote: RemoteName
+
+
+class Hosted(Model):
+    """Where a remote is: the host its URL reaches, an alias of the operator's ssh configuration resolved, and the path there, as git reads them from its URL."""
+
+    host: str
+    path: str
+    """From the host's root: `/joy-void-joy/lup`."""
+
+
 class Verdict(Model):
     """What came of holding one update to the limits and telling what it publishes: why it's refused, none where it isn't, and what a part hearing `Publishing` said refusing it."""
 
@@ -302,6 +318,42 @@ class Remotes(Part):
         self.require("push" if listing.for_push else "fetch")
         [url, *_] = await self.urls(listing.remote, push=listing.for_push)
         return Listed(refs=await self.refs_at(url))
+
+    @lup.service
+    async def hosted(self, naming: Naming, by: Codebase) -> Hosted:
+        """Say where one of the repository's remotes is: the host its URL reaches, an alias of the operator's ssh configuration resolved as ssh resolves it, and the path there, as `github` asks to name the project's repository there.
+
+        Raise `RefusedError` where the repository's `config` names no such
+        remote, or git or ssh can't read its URL.
+        """
+        del by
+        [url] = await self.urls(naming.remote, push=False)
+        git = Git(through=self.git)
+        scheme, host, path = [
+            line(
+                await git.done(
+                    "url-parse", "-c", component, "--", url, env=unconfigured()
+                )
+            )
+            for component in ["scheme", "host", "path"]
+        ]
+        if scheme != "ssh":
+            return Hosted(host=host, path=path)
+        resolved = await self.ssh.ran("-G", "--", host, env=self.agent.variables())
+        if resolved.status != 0:
+            message = f"ssh couldn't resolve `{host}`: {resolved.said()}"
+            raise RefusedError(message)
+        named = next(
+            (
+                row[1]
+                for row in csv.reader(
+                    io.StringIO(resolved.text()), delimiter=" ", quoting=csv.QUOTE_NONE
+                )
+                if len(row) > 1 and row[0] == "hostname"
+            ),
+            host,
+        )
+        return Hosted(host=named, path=path)
 
     @lup.service
     async def fetched(self, fetching: Fetching, by: Agent | Machine) -> Fetched:
