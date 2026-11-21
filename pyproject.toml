@@ -31,7 +31,7 @@ members = ["modules/*"]
 
 [tool.uv.sources]
 lup-core = { workspace = true }
-lup-dev = { git = "https://github.com/joy-void-joy/lup-legacy-2", subdirectory = "packages/lup-dev", rev = "7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
+lup-dev = { git = "https://github.com/joy-void-joy/lup-legacy-2", subdirectory = "packages/lup-dev", rev = "1957913e4ece285bf5fdece6325cf04cebbd6f65" }
 
 [tool.ruff]
 target-version = "py315"

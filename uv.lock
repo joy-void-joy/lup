@@ -419,7 +419,7 @@ wheels = [
 [[package]]
 name = "lup"
 version = "0.1.0"
-source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup&rev=7ce587e702bbec873ad1047fde4ee5be39c7c0d3#7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
+source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup&rev=1957913e4ece285bf5fdece6325cf04cebbd6f65#1957913e4ece285bf5fdece6325cf04cebbd6f65" }
 dependencies = [
     { name = "mcp" },
     { name = "pydantic" },
@@ -473,7 +473,7 @@ provides-extras = ["environment", "dashboard"]
 [[package]]
 name = "lup-dev"
 version = "0.1.0"
-source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-dev&rev=7ce587e702bbec873ad1047fde4ee5be39c7c0d3#7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
+source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-dev&rev=1957913e4ece285bf5fdece6325cf04cebbd6f65#1957913e4ece285bf5fdece6325cf04cebbd6f65" }
 dependencies = [
     { name = "filelock" },
     { name = "httpx" },
@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "lup-ledger"
 version = "0.1.0"
-source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-ledger&rev=7ce587e702bbec873ad1047fde4ee5be39c7c0d3#7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
+source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-ledger&rev=1957913e4ece285bf5fdece6325cf04cebbd6f65#1957913e4ece285bf5fdece6325cf04cebbd6f65" }
 dependencies = [
     { name = "lup" },
     { name = "pydantic" },
@@ -530,12 +530,12 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.10" },
 ]
-second-lup = [{ name = "lup-dev", git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-dev&rev=7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }]
+second-lup = [{ name = "lup-dev", git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-dev&rev=1957913e4ece285bf5fdece6325cf04cebbd6f65" }]
 
 [[package]]
 name = "lup-transcripts"
 version = "0.1.0"
-source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-transcripts&rev=7ce587e702bbec873ad1047fde4ee5be39c7c0d3#7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
+source = { git = "https://github.com/joy-void-joy/lup-legacy-2?subdirectory=packages%2Flup-transcripts&rev=1957913e4ece285bf5fdece6325cf04cebbd6f65#1957913e4ece285bf5fdece6325cf04cebbd6f65" }
 dependencies = [
     { name = "lup" },
 ]
