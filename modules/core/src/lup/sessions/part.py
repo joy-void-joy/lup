@@ -51,6 +51,7 @@ from lup.sessions.events import (
     TurnStarted,
 )
 from lup.sessions.held import Holds, Order, Standing
+from lup.sessions.promises import SessionsPromises
 from lup.sessions.said import Hooked
 from lup.types import Model
 
@@ -579,7 +580,7 @@ class Sessions(lup.Module):
     """Sessions lup starts and holds itself, each in a room of its own, on Claude Code or Codex: the machine's parts holding them and making their rooms."""
 
     name = "sessions"
-    parts: lup.Parts = lup.Parts.of(Held, Rooms)
+    parts: lup.Parts = lup.Parts.of(Held, Rooms, SessionsPromises)
     idle: timedelta = timedelta(hours=1)
     """How long a session may stay idle before its process and room are
     stopped: about as long as the runtime's prompt cache lasts, so starting it
