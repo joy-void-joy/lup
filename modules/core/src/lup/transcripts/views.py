@@ -8,6 +8,8 @@ prints these blocks as text: what an agent in a room reads.
 """
 
 import itertools
+import shlex
+from datetime import datetime
 
 from lup.doors.door import Method
 from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Span, Viewing
@@ -65,6 +67,13 @@ def heard(by: str | None) -> str:
             return "another conversation"
         case _:
             return "the runtime"
+
+
+def when(at: str | None) -> str:
+    """Say a moment the index keeps, to the minute, in UTC."""
+    if at is None:
+        return ""
+    return datetime.fromisoformat(at).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def first_line(text: str) -> str:
@@ -172,7 +181,7 @@ def hit_fold(hit: Hit, opens: Opens, *, whole: bool) -> Fold:
         summary=[
             Span(text=f"{item}{title}", tone="strong"),
             Span(
-                text=f"  {hit.at or ''}  {where(hit)}, from {hit.whose or hit.source}",
+                text=f"  {when(hit.at)}  {where(hit)}, from {hit.whose or hit.source}",
                 tone="muted",
             ),
         ],
@@ -189,6 +198,12 @@ def hit_fold(hit: Hit, opens: Opens, *, whole: bool) -> Fold:
             *around,
         ],
     )
+
+
+def showing_command(session: str, subagent: str | None, step: int) -> str:
+    """Return the command showing a conversation around a step, as an agent types it."""
+    words = ["lup", "transcripts", "show", session, "--at", str(step)]
+    return shlex.join([*words, *(["--subagent", subagent] if subagent else [])])
 
 
 def listed_blocks(listed: Listed, opens: Opens) -> Blocks:
@@ -229,7 +244,7 @@ def conversation_fold(conversation: Conversation, opens: Opens) -> Fold:
         summary=[
             Span(text=conversation.title or "untitled", tone="strong"),
             Span(
-                text=f"  {conversation.last or ''}  {where(conversation)}, {spoke}, "
+                text=f"  {when(conversation.last)}  {where(conversation)}, {spoke}, "
                 f"kept from {conversation.whose}",
                 tone="muted",
             ),
@@ -274,33 +289,39 @@ def shown_blocks(shown: Shown, showing: Showing) -> Blocks:
     )
 
 
+def named_step(step: Stepping) -> str:
+    """Return a step's id among blocks: its place in the record, or the item it is."""
+    return (
+        f"step-{step.step}"
+        if step.step is not None
+        else f"item-{step.number}-{step.at}"
+    )
+
+
 def answered_blocks(step: Stepping) -> list[Block]:
-    """Return the operator's words under the agent's last words before them."""
+    """Return the operator's words under what they answered: the agent's last words before them, or the passage of the item they're on."""
+    name = named_step(step)
+    answering = f"on @{step.on}:" if step.on is not None else "the agent:"
     answered = (
         [
-            Line(
-                id=f"step-{step.step}-answered",
-                spans=[Span(text="the agent:", tone="muted")],
-            ),
-            Markdown(
-                id=f"step-{step.step}-answered-text", text=step.answered, tone="muted"
-            ),
+            Line(id=f"{name}-answered", spans=[Span(text=answering, tone="muted")]),
+            Markdown(id=f"{name}-answered-text", text=step.answered, tone="muted"),
         ]
         if step.answered
         else [
             Line(
-                id=f"step-{step.step}-first",
-                spans=[Span(text="(the first words)", tone="muted")],
+                id=f"{name}-first", spans=[Span(text="(nothing before)", tone="muted")]
             )
         ]
     )
+    through = f" ({step.item} @{step.number})" if step.number is not None else ""
     return [
         *answered,
         Line(
-            id=f"step-{step.step}-by",
-            spans=[Span(text=f"you, {step.at or ''}:", tone="muted")],
+            id=f"{name}-by",
+            spans=[Span(text=f"you{through}, {when(step.at)}:", tone="muted")],
         ),
-        Markdown(id=f"step-{step.step}", text=step.text, tone="operator"),
+        Markdown(id=name, text=step.text, tone="operator"),
     ]
 
 
@@ -319,15 +340,20 @@ def run_blocks(run: list[Stepping]) -> list[Block]:
     """Return a run of steps: words under who said them, or calls as one fold naming each tool, a line each under it."""
     first = run[0]
     if first.kind == "said":
+        name = named_step(first)
+        through = f" ({first.item} @{first.number})" if first.number is not None else ""
         return [
             Line(
-                id=f"step-{first.step}-by",
+                id=f"{name}-by",
                 spans=[
-                    Span(text=f"{heard(first.by)}, {first.at or ''}:", tone="muted")
+                    Span(
+                        text=f"{heard(first.by)}{through}, {when(first.at)}:",
+                        tone="muted",
+                    )
                 ],
             ),
             Markdown(
-                id=f"step-{first.step}",
+                id=name,
                 text=first.text,
                 tone="operator" if first.by == "operator" else "plain",
             ),
@@ -339,12 +365,12 @@ def run_blocks(run: list[Stepping]) -> list[Block]:
     )
     return [
         Fold(
-            id=f"calls-{first.step}",
+            id=f"calls-{named_step(first)}",
             kind="calls",
             summary=[Span(text=f"· called {named or 'nothing named'}", tone="muted")],
             content=[
                 Line(
-                    id=f"step-{each.step}",
+                    id=named_step(each),
                     spans=[
                         Span(text=f"{each.tool or 'returned'}: ", tone="muted"),
                         Span(text=first_line(each.text)),

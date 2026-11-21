@@ -14,7 +14,7 @@ operator's own ledger (`docs/field-notes.md`, *The second lup's ledger*):
   comment on an approval or a held change, kept on its `inbox:decided` edge.
   A review reaching several conversations is kept once for each, every copy
   holding every comment, so a comment is read once, by the review's moment and
-  its place in it.
+  its place in it, from the copy that reached the conversation it's on.
 - **Agents' items** are their questions, each decision with its lean, their
   messages (a turn's last words among them, `ending`), frictions, how it felt,
   and why they stopped. The judge's flagged writes and held changes, and
@@ -241,25 +241,36 @@ def spoken(database: Path) -> list[Spoken]:
                     select(EDGES.c.target, EDGES.c.record).where(
                         EDGES.c.kind == "inbox:decided"
                     )
-                ).tuples()
+                ).all()
                 if (decision := parsed(Decision, record)) is not None
                 and decision.state.comment
             ]
     finally:
         engine.dispose()
-    reviews = dict.fromkeys(
-        (item.made, item.number)
+    copies = [
+        (item, each)
         for item in items.values()
         if item.reason.reason == "review"
-    )
-    first = dict(reversed(list(reviews)))
+        for each in read(item, items)
+    ]
+    reviewed = {
+        (each.at, each.part): each
+        for _, each in sorted(
+            copies,
+            key=lambda pair: (
+                pair[1].conversation == pair[0].recipient,
+                -pair[0].number,
+            ),
+        )
+    }
     words = [
         *(
             each
             for item in items.values()
-            if item.reason.reason != "review" or first.get(item.made) == item.number
+            if item.reason.reason != "review"
             for each in read(item, items)
         ),
+        *reviewed.values(),
         *(
             Spoken(
                 number=target,

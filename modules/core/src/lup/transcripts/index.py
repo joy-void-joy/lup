@@ -251,12 +251,17 @@ class Searching(Model):
     """Every one of them is there, case aside: a word matches any word that
     starts with it, a phrase its words in order."""
     by: Searcher = "operator"
+    """Whose words to look in: the operator's, typed or through lup; the
+    agents', their last words of each turn and their items through lup; lup's;
+    the calls and what they returned; or everything."""
     under: list[Path] = []
     """Only conversations that ran in a directory under one of these."""
     since: datetime | None = None
     until: datetime | None = None
     limit: Annotated[int, Field(ge=1)] = 20
     """The most hits answered, the latest; how many more there are is said."""
+    whole: bool = False
+    """Each hit with all of what it answered, rather than its first line."""
 
 
 type Source = Literal["record", "ledger", "inbox"]
@@ -350,21 +355,33 @@ class Showing(Model):
     around: Annotated[int, Field(ge=0)] = 10
     """How many steps before and after `at` to show."""
     whole: bool = False
-    """Every step; else the operator's words, each after the agent's last words
-    before them, or around `at`."""
+    """Every step, calls and the agent's words mid-turn among them; else the
+    operator's words, each after the agent's last words before them, or, around
+    `at`, what was said but the agent's words mid-turn."""
 
 
 class Stepping(Model):
-    """A step shown: what it is, who said it, and its text."""
+    """A step shown, of the conversation's record or said through lup in it: what it is, who said it, and its text."""
 
-    step: int
+    step: int | None = None
+    """The record's step; none for an item said through lup."""
+    number: int | None = None
+    """The item's number, for one said through lup."""
+    item: str | None = None
+    """What the item is, for one said through lup: a comment, a question, a
+    turn's end…"""
+    on: int | None = None
+    """The number of the item it's on, for one said through lup."""
     at: str | None
     kind: str
-    by: Speaker | None
-    tool: str | None
+    by: str | None
+    tool: str | None = None
     text: str
+    ending: bool = False
+    """For the agent's words, whether they were the last of a turn."""
     answered: str | None = None
-    """For the operator's words, the agent's last words before them."""
+    """For the operator's words, the agent's last words before them, or the
+    passage of the item they're on."""
 
 
 class Shown(Model):
@@ -684,6 +701,7 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             STEPS.c.by,
             STEPS.c.tool,
             STEPS.c.text,
+            STEPS.c.ending,
             answered.c.text.label("answered"),
         ]
         steps = (
@@ -691,11 +709,21 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             .outerjoin(answered, answered.c.id == STEPS.c.answers)
             .where(STEPS.c.record == record)
         )
+        said = [
+            STEPS.c.kind == "said",
+            or_(STEPS.c.by != "agent", STEPS.c.ending == 1),
+        ]
         match showing:
+            case Showing(at=int() as at, whole=True):
+                shown = steps.where(
+                    STEPS.c.id >= self.around(record, at, -showing.around),
+                    STEPS.c.id <= self.around(record, at, showing.around),
+                )
             case Showing(at=int() as at):
                 shown = steps.where(
                     STEPS.c.id >= self.around(record, at, -showing.around),
                     STEPS.c.id <= self.around(record, at, showing.around),
+                    *said,
                 )
             case Showing(whole=True):
                 shown = steps
@@ -717,9 +745,51 @@ class Index(MutableModel, arbitrary_types_allowed=True):
                 else 0
             )
         after = total - before - len(listed) if showing.at is not None else 0
-        return Shown(
-            conversation=conversation, steps=listed, before=before, after=after
+        items = self.said_in(conversation, showing, listed)
+        merged = sorted(
+            [*listed, *items], key=lambda each: (each.at or "", each.step or 0)
         )
+        return Shown(
+            conversation=conversation, steps=merged, before=before, after=after
+        )
+
+    def said_in(
+        self, conversation: Conversation, showing: Showing, steps: list[Stepping]
+    ) -> list[Stepping]:
+        """Return what was said through lup in `conversation`, as `showing` asks: the operator's words alone by default; every item, among `steps` as far as they reach, around a step or whole."""
+        whose = (
+            SAID.c.agent.is_(None)
+            if conversation.subagent is None
+            else SAID.c.agent == conversation.subagent
+        )
+        times = [each.at for each in steps if each.at]
+        window = (
+            [SAID.c.at >= min(times), SAID.c.at <= max(times)]
+            if showing.at is not None and times
+            else []
+        )
+        operator = (
+            [SAID.c.by == "operator"]
+            if showing.at is None and not showing.whole
+            else []
+        )
+        query = (
+            select(
+                SAID.c.number,
+                SAID.c.kind.label("item"),
+                SAID.c.on_number.label("on"),
+                SAID.c.at,
+                literal("said").label("kind"),
+                SAID.c.by,
+                SAID.c.text,
+                SAID.c.quoted.label("answered"),
+            )
+            .where(SAID.c.session == conversation.session, whose, *window, *operator)
+            .order_by(SAID.c.at, SAID.c.id)
+        )
+        with self.writing() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [Stepping.model_validate(dict(each)) for each in rows]
 
     def around(self, record: ScalarSelect[int], at: int, by: int) -> int:
         """Return the id of the step `by` steps from `at` in the record, or the first or last where fewer are there."""
@@ -828,9 +898,7 @@ class Index(MutableModel, arbitrary_types_allowed=True):
                         RECORDS.c.subagent.is_(None),
                         RECORDS.c.title.is_not(None),
                     )
-                )
-                .tuples()
-                .all()
+                ).all()
             )
         return [
             each
