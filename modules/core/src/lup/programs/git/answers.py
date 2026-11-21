@@ -7,6 +7,7 @@ a path is read as its bytes, whatever it holds.
 import csv
 import io
 import os
+from itertools import groupby
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -24,14 +25,13 @@ def line(ran: Finished) -> str:
 
 
 def nul_separated(output: bytes) -> list[str]:
-    r"""Return the fields of git's `-z` output, each ended by a NUL, the last one's end optional, each a path's bytes as the file system names it.
+    r"""Return the fields of git's `-z` output, each ended by a NUL, the last one's end optional, each a path's bytes as the file system names it: each run of bytes between NULs.
 
     >>> nul_separated(b"a.py\x00dir/b c.py\x00"), nul_separated(b"")
     (['a.py', 'dir/b c.py'], [])
     """
-    # lup: ignore("string-split", why="git's `-z` output is fields each ended by a NUL, written to be read this way, and this is the one place lup reads it")
-    fields = output.split(b"\0")
-    return [os.fsdecode(each) for each in fields if each]
+    runs = groupby(output, key=lambda byte: byte == 0)
+    return [os.fsdecode(bytes(run)) for ended, run in runs if not ended]
 
 
 def tab_separated(output: str) -> list[list[str]]:
