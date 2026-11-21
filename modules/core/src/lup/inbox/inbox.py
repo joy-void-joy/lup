@@ -46,7 +46,14 @@ from lup.inbox.records import (
     Withdrawn,
     WorksIn,
 )
-from lup.inbox.said import Comments, ConcernSaid, Inboxed, Placed, Telling
+from lup.inbox.said import (
+    Comments,
+    ConcernSaid,
+    Inboxed,
+    Placed,
+    SaidItem,
+    Telling,
+)
 from lup.store.database import Database
 from lup.store.errors import StoreError
 from lup.store.records import Edge, Node, named
@@ -943,6 +950,85 @@ class Inbox(Model, arbitrary_types_allowed=True):
                     if isinstance(each, Comment)
                 ],
             )
+
+    def as_said(self, item: Item) -> SaidItem:
+        """Read `item` as it reads in a search: who said it, its words whole, and what it's on."""
+        writer = self.by(item)
+        match item:
+            case Comment(on=int() as on):
+                target = self.database.found(on)
+                return self.said_item(
+                    item, writer, item.text, target, "\n".join(item.lines) or None
+                )
+            case Answer():
+                asked = next(
+                    (
+                        found
+                        for edge in self.database.drawn_from(item.key, Answers)
+                        if isinstance(
+                            found := self.database.found(edge.target), Question
+                        )
+                    ),
+                    None,
+                )
+                decisions = asked.decisions if asked is not None else []
+                ruled = "\n".join(
+                    " ".join(
+                        part
+                        for part in [
+                            f"{each.number}.",
+                            each.verdict or "",
+                            each.comment,
+                        ]
+                        if part
+                    )
+                    for each in item.rulings
+                )
+                quoted = "\n".join(
+                    f"{number}. {each.decision}"
+                    for number, each in enumerate(decisions, start=1)
+                    if any(ruling.number == number for ruling in item.rulings)
+                )
+                text = "\n\n".join(each for each in [item.text, ruled] if each)
+                return self.said_item(item, writer, text, asked, quoted or None)
+            case Question():
+                decided = "\n".join(
+                    f"{number}. {each.decision}\n   lean: {each.lean}"
+                    for number, each in enumerate(item.decisions, start=1)
+                )
+                text = "\n\n".join(each for each in [item.text, decided] if each)
+                return self.said_item(item, writer, text, None, None)
+            case _:
+                return self.said_item(item, writer, item.text, None, None)
+
+    def said_item(
+        self,
+        item: Item,
+        writer: PartyRecord,
+        text: str,
+        on: Node | None,
+        quoted: str | None,
+    ) -> SaidItem:
+        """Return `item` as it reads in a search, its words `text`, on `on` where it's on an item."""
+        return SaidItem(
+            key=item.key,
+            number=item.number or 0,
+            repository=item.repository,
+            at=item.at,
+            kind=item.kind,
+            by=self.called(writer),
+            agent=Agent(id=writer.id, session=writer.session)
+            if isinstance(writer, AgentRecord)
+            else None,
+            to=[
+                self.called(found)
+                for key in item.to
+                if isinstance(found := self.database.found(key), PartyRecord)
+            ],
+            text=text,
+            on=on.number if isinstance(on, Item) else None,
+            quoted=quoted,
+        )
 
     def tell(self, party: PartyRecord, items: list[Item]) -> None:
         """Say `items` were told to `party`: each is told once, never again."""

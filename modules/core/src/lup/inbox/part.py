@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
-from lup.doors.parties import Agent, Codebase, Operator
+from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import Data, Part
 from lup.inbox import views
 from lup.inbox.inbox import Inbox, InboxError, first_line
@@ -50,8 +50,10 @@ from lup.inbox.said import (
     Piling,
     Reached,
     Reading,
+    SaidSince,
     SendSaid,
     Showing,
+    Since,
     Spoken,
     Told,
     ToldItem,
@@ -250,6 +252,17 @@ class Inboxes(Part, approved=True, shared=True):
             )
             self.state_at = database.writes
         return self.state
+
+    @lup.service
+    async def said(self, given: Since, by: Codebase | Machine) -> SaidSince:
+        """Read every item kept since `given`'s key, every repository's, in the order kept: each with who said it, its words whole, and what it's on, as a search reads them."""
+        del by
+        database = self.opened()
+        items = [each for each in database.every(Item) if each.key > given.after]
+        return SaidSince(
+            items=[self.inbox(each.repository).as_said(each) for each in items],
+            last=max((each.key for each in items), default=given.after),
+        )
 
     @lup.service
     async def told(self, given: Ending, by: Codebase) -> Told:

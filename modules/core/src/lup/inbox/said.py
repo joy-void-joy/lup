@@ -8,6 +8,7 @@ operator's commands take what they do (`Answering`, `Clearing`…).
 from typing import Annotated, Literal
 
 from annotated_types import Ge, Lt
+from pydantic import AwareDatetime
 
 from lup.doors.parties import Agent, Party
 from lup.inbox.records import FRICTIONS, Decision, Ruling, Tone
@@ -272,6 +273,46 @@ class Everywhere(Model):
     """Every repository's inbox the store holds, as data."""
 
     inboxes: list[Inboxed] = []
+
+
+class Since(Model):
+    """Which items to read: those the store kept after one of its keys, every repository's."""
+
+    after: Annotated[int, Ge(0), Lt(2**63)] = 0
+    """The store's key of the last item read before; 0 for every item."""
+
+
+class SaidItem(Model):
+    """One item as it reads in a search: who said it, when, its words whole, and what it's on, where it's on something."""
+
+    key: int
+    """The store's key for it, which the next read starts after."""
+    number: int
+    repository: str
+    at: AwareDatetime
+    kind: str
+    by: str
+    """Who said it, as `@` cites them: the operator, or an agent."""
+    agent: Agent | None = None
+    """The agent who said it, by lup's ids for them; none for the operator."""
+    to: list[str] = []
+    """Whom it was for, as `@` cites them."""
+    text: str
+    """Its words whole: a question's decisions after its text, each with its
+    lean; an answer's rulings after its words, each by its decision's number."""
+    on: int | None = None
+    """The number of the item it's on, or answers; none where it's on
+    nothing."""
+    quoted: str | None = None
+    """What of that item it's on: the lines of the passage a comment quotes,
+    or the decisions an answer rules on; none where it's on the item whole."""
+
+
+class SaidSince(Model):
+    """The items kept since a read, every repository's, in the order kept, and the key to read after next."""
+
+    items: list[SaidItem] = []
+    last: int = 0
 
 
 # What the operator reads
