@@ -17,7 +17,7 @@ from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import Data, Declared, Part
-from lup.inbox import views
+from lup.inbox import conversion, views
 from lup.inbox.inbox import Inbox, InboxError, first_line
 from lup.inbox.records import (
     NODES,
@@ -35,6 +35,7 @@ from lup.inbox.said import (
     Clearing,
     ConcernOf,
     ConcernSaid,
+    Converting,
     Declining,
     Ended,
     Ending,
@@ -450,6 +451,17 @@ class Inboxes(Part, approved=True, shared=True):
         with refusing():
             made = inbox.pile(piling.path, inbox.operator())
         return f"Made {inbox.called(made)}."
+
+    @lup.command
+    async def convert(self, converting: Converting, by: Operator) -> str:
+        """Bring a repository's frictions and concerns over from the second lup's ledger, once: each a friction or a concern by the tool its first words were filed with, with its title, bodies, place, holder, done mark and the words filed in it; the agents who held or wrote them read as ended."""
+        del by
+        # lup: defer(issue=13, why="the second lup's ledger is read once, at the switch, and the command goes with the second lup")
+        inbox = self.inbox(converting.repository)
+        with refusing():
+            ledger = conversion.read(converting.ledger, converting.named)
+            converted = conversion.converted(inbox, ledger)
+        return converted.said()
 
     @lup.command(verb="seen", says="seen")
     async def shown(self, showing: Showing, by: Operator) -> str:

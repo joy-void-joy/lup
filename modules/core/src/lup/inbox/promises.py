@@ -5,6 +5,13 @@ call the inbox's tools, the operator its commands, and an agent's project's code
 its services, as #5's sessions will (`README.md` here).
 """
 
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from sqlalchemy import Column, Integer, MetaData, Table, Text, create_engine, insert
+from sqlalchemy.engine import URL
+
 import lup
 from lup import (
     Agent,
@@ -12,8 +19,10 @@ from lup import (
     Codebase,
     Commented,
     Fold,
+    JsonObject,
     Line,
     Machine,
+    Markdown,
     Model,
     Module,
     Modules,
@@ -32,6 +41,7 @@ from lup.inbox.said import (
     Clearing,
     ConcernOf,
     ConcernSaid,
+    Converting,
     Ending,
     Everywhere,
     FrictionSaid,
@@ -120,6 +130,233 @@ class Reviewing(Module):
 def reviewing() -> Project:
     """Return a project of lup's default modules and the reviewing module."""
     return Project(modules=Modules.default().add(Reviewing()))
+
+
+SECOND = MetaData()
+"""The second lup's ledger, as far as a conversion reads it: its tables as the second lup wrote them, stated apart from the conversion's own, so the scenario checks that reading against them."""
+
+SECOND_NODES = Table(
+    "nodes",
+    SECOND,
+    Column("number", Integer, primary_key=True),
+    Column("version", Integer, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("repository", Text, nullable=False),
+    Column("name", Text),
+)
+SECOND_VERSIONS = Table(
+    "versions",
+    SECOND,
+    Column("version", Integer, primary_key=True),
+    Column("number", Integer, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("record", Text, nullable=False),
+)
+SECOND_EDGES = Table(
+    "edges",
+    SECOND,
+    Column("drawn", Integer, primary_key=True),
+    Column("kind", Text, nullable=False),
+    Column("source", Integer),
+    Column("target", Integer, nullable=False),
+    Column("record", Text, nullable=False),
+)
+SECOND_RECORDS = Table(
+    "records",
+    SECOND,
+    Column("name", Text, primary_key=True),
+    Column("record", Text, nullable=False),
+)
+
+SECOND_REPOSITORY = "/repositories/lup.git"
+"""The repository, as the second lup's ledger names it: by its git directory."""
+
+
+class SecondNode(Model):
+    """One version of a node of the second lup's ledger, as a row of its tables reads, its record as the second lup wrote it."""
+
+    number: int
+    kind: str
+    repository: str = SECOND_REPOSITORY
+    name: str | None = None
+    record: JsonObject
+
+
+class SecondEdge(Model):
+    """An edge of the second lup's ledger, as a row of its table reads, its record as the second lup wrote it."""
+
+    kind: str
+    source: int | None = None
+    target: int
+    record: JsonObject = {}
+
+
+def second_ledger(path: Path) -> None:
+    """Write a ledger of the second lup's at `path`: a planning session and the session it spawned, with a subagent of its own, writing three threads of the repository, a note among their words, and a thread of another repository.
+
+    - `the-port`, held by the planner, its body rewritten once, a note filed in it;
+    - `the-gate`, under `the-port`, then held by the builder, with their words,
+      a copy of them told to the planner, their subagent's words, and a done mark;
+    - `keys-lag`, under `the-gate`, its words filed with `friction`;
+    - `elsewhere`, of another repository.
+    """
+
+    def party(session: str, agent: str | None = None) -> JsonObject:
+        return {
+            "party": "conversation",
+            "repository": SECOND_REPOSITORY,
+            "runtime": "claude",
+            "session": session,
+            "agent": agent,
+        }
+
+    plan, build, probe = party("s-plan"), party("s-build"), party("s-build", "a1")
+    operator: JsonObject = {"party": "operator"}
+
+    def at(hour: int) -> str:
+        return f"2026-11-16T{hour:02}:00:00Z"
+
+    def thread(
+        number: int,
+        name: str,
+        title: str,
+        hour: int,
+        *,
+        repository: str = SECOND_REPOSITORY,
+        parent: int | None = None,
+        holder: JsonObject | None = None,
+    ) -> SecondNode:
+        return SecondNode(
+            number=number,
+            kind="ledger:thread",
+            repository=repository,
+            name=name,
+            record={
+                "kind": "ledger:thread",
+                "repository": repository,
+                "by": plan,
+                "at": at(hour),
+                "number": number,
+                "name": name,
+                "title": title,
+                "parent": parent,
+                "holder": holder,
+            },
+        )
+
+    def item(
+        number: int,
+        by: JsonObject,
+        tool: str,
+        text: str,
+        hour: int,
+        to: JsonObject = operator,
+    ) -> SecondNode:
+        return SecondNode(
+            number=number,
+            kind="inbox:item",
+            record={
+                "kind": "inbox:item",
+                "repository": SECOND_REPOSITORY,
+                "by": by,
+                "at": at(hour),
+                "number": number,
+                "reason": {"tool": tool, "text": text, "title": text, "reason": tool},
+                "recipient": to,
+            },
+        )
+
+    versions = [
+        thread(1, "the-port", "How the port goes", 1, holder=plan),
+        item(2, plan, "concern", "Porting it", 1),
+        thread(3, "the-gate", "#10: the gate", 2, parent=1),
+        item(4, build, "concern", "The gate first", 3),
+        item(5, probe, "concern", "Probed it", 4),
+        item(6, build, "concern", "The gate first", 3, to=plan),
+        thread(7, "keys-lag", "the keys lag", 5, parent=3),
+        item(8, build, "friction", "the keys lag", 5),
+        item(9, plan, "note", "A note on the port", 6),
+        thread(10, "elsewhere", "Another's", 6, repository="/repositories/other.git"),
+        thread(3, "the-gate", "#10: the gate", 7, parent=1, holder=build),
+    ]
+    edges = [
+        *(
+            SecondEdge(kind="ledger:in", source=source, target=target)
+            for source, target in [(2, 1), (4, 3), (5, 3), (6, 3), (8, 7), (9, 1)]
+        ),
+        SecondEdge(
+            kind="ledger:body",
+            target=1,
+            record={"by": plan, "at": at(8), "text": "The port's body"},
+        ),
+        SecondEdge(
+            kind="ledger:done",
+            target=3,
+            record={"by": build, "at": at(9), "to_try": "Try the gate"},
+        ),
+    ]
+    conversations: list[JsonObject] = [
+        {"conversation": plan, "since": at(0), "parent": None, "name": None},
+        {"conversation": build, "since": at(1), "parent": plan, "name": None},
+        {"conversation": probe, "since": at(2), "parent": None, "name": "probe"},
+    ]
+    latest = {each.number: version for version, each in enumerate(versions, 1)}
+    engine = create_engine(URL.create("sqlite", database=str(path)))
+    with engine.begin() as connection:
+        SECOND.create_all(connection)
+        connection.execute(
+            insert(SECOND_VERSIONS),
+            [
+                {
+                    "version": version,
+                    "number": each.number,
+                    "kind": each.kind,
+                    "record": json.dumps(each.record),
+                }
+                for version, each in enumerate(versions, 1)
+            ],
+        )
+        connection.execute(
+            insert(SECOND_NODES),
+            [
+                {
+                    "number": each.number,
+                    "version": version,
+                    "kind": each.kind,
+                    "repository": each.repository,
+                    "name": each.name,
+                }
+                for version, each in enumerate(versions, 1)
+                if latest[each.number] == version
+            ],
+        )
+        connection.execute(
+            insert(SECOND_EDGES),
+            [
+                {
+                    "kind": each.kind,
+                    "source": each.source,
+                    "target": each.target,
+                    "record": json.dumps(
+                        {
+                            "kind": each.kind,
+                            "source": each.source,
+                            "target": each.target,
+                            **each.record,
+                        }
+                    ),
+                }
+                for each in edges
+            ],
+        )
+        connection.execute(
+            insert(SECOND_RECORDS),
+            [
+                {"name": f"inbox:conversation:{number}", "record": json.dumps(each)}
+                for number, each in enumerate(conversations)
+            ],
+        )
+    engine.dispose()
 
 
 async def inboxed(started: Started) -> Inboxed:
@@ -582,3 +819,49 @@ class InboxPromises(Part):
         question = Posting.of(Question, by=agent, repository="harness", text="may I?")
         refused = await started.serve("post", question, Machine())
         assert isinstance(refused, Refused)
+
+    @lup.promise
+    async def the_second_lups_concerns_come_over_once(self, by: Testing) -> None:
+        """A repository's threads in the second lup's ledger come over once, each a friction or a concern by the tool its first words were filed with, with its body, place, holder and done mark, and the words filed in it; the notes sent into one, another repository's threads, and a second run don't."""
+        started = await by.started(project())
+        with TemporaryDirectory() as directory:
+            ledger = Path(directory) / "ledger.sqlite3"
+            second_ledger(ledger)
+            converting = Converting(
+                ledger=ledger, named=SECOND_REPOSITORY, repository="harness"
+            )
+            converted = await started.run("core", "convert", converting, Operator())
+            assert isinstance(converted, Accepted), converted
+            again = await started.run("core", "convert", converting, Operator())
+            assert isinstance(again, Refused)
+            missing = converting.model_copy(update={"ledger": Path(directory) / "no"})
+            assert isinstance(
+                await started.run("core", "convert", missing, Operator()), Refused
+            )
+        state = await inboxed(started)
+        assert [each.title for each in state.concerns] == [
+            "How the port goes",
+            "#10: the gate",
+            "the keys lag",
+        ]
+        port = placed(state, "How the port goes")
+        gate = placed(state, "#10: the gate")
+        keys = placed(state, "the keys lag")
+        assert (port.holder, port.left_by, port.said) == (
+            "@no-agent",
+            "agent s-plan",
+            1,
+        )
+        assert (gate.left_by, gate.said, gate.done) == ("agent s-build", 2, True)
+        assert gate.number in state.waiting
+        assert (keys.kind, keys.holder) == ("inbox:friction", "@frictions")
+        assert not state.new
+        body = await viewed(started, "concern_view", ConcernOf(number=port.number))
+        assert any(
+            isinstance(each, Markdown) and each.text == "The port's body"
+            for each in body.blocks
+        )
+        probe = await started.view(
+            "core", "party", PartyOf(repository="harness", name="probe"), Operator()
+        )
+        assert isinstance(probe, Accepted), probe
