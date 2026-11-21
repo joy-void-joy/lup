@@ -39,11 +39,12 @@ Beside the code rules every project gets:
 
 ## Tests
 
-Until #14 gives modules `@lup.promise`, write each test as one:
-- **It checks a promise someone relies on,** said in its docstring. A test that can't say one isn't written.
-- **Through the module's surface:** its tools, views, commands and events, never its internal types, so a change inside the module leaves its tests alone.
-- **Properties, not the whole output:** what's among the results and what holds for all of them, with ids read from what the test made. A message's words aren't asserted: check the structured result behind it.
-- **No real time:** wait on the event, never on a sleep or a timeout.
+A test is a promise, a method behind `@lup.promise` (`modules/core/src/lup/testing/README.md`):
+- **Start from the invariants:** what always holds of a module, or never happens, said over the state its part keeps (`State`), which every run of every promise then checks. A scenario is for what only a story shows: that something can happen at all, or where several steps end up.
+- **A piece's proposal names its invariants,** so the operator reads its rules before its code.
+- **It checks what someone relies on,** said in its docstring, through the module's doors, never its internal types, so a change inside the module leaves its promises alone.
+- **Properties, not the whole output:** one field, membership, what holds of all, with ids read from what the promise made. A refusal's or a message's words aren't asserted: check its `about`, or the structured result behind it.
+- **No real time:** the harness's clock moves only to the next timer, so wait on the event, never on a sleep.
 
 ## docs/
 
