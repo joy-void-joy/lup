@@ -8,8 +8,7 @@ from datetime import UTC, datetime
 
 import lup
 from lup import LupError, Module, Modules, Node, Part, Project, ProjectError, Recorded
-from lup.store.database import Database
-from lup.store.records import Kinds
+from lup.store import Database, Kinds
 from lup.testing import Testing, raises
 
 
