@@ -85,12 +85,14 @@ class ClaudeRooming(Rooming):
         "ExitWorktree",
     ]
     """Built-in tools left out of every session: large, or lup's to do."""
-    hook_timeout: timedelta = timedelta(hours=25)
+    hook_timeout: timedelta = timedelta(days=24)
     """How long a hook may hold its call: past any wait on the operator lup
     makes, which a hook's answer can be."""
-    tool_timeout: timedelta = timedelta(hours=25)
+    tool_timeout: timedelta = timedelta(days=24)
     """How long a call to lup's tools may run, `wait_inbox` and `ask` among
-    them."""
+    them: about the most Claude Code takes, which clamps a server's timeout to
+    24.8 days (`docs/field-notes.md`, *MCP in a launched session*), since a
+    call held on the operator's answer waits as long as they take."""
     variables: dict[str, str] = {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",

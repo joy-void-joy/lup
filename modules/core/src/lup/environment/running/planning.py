@@ -40,6 +40,7 @@ def planned(root: Path, declaration: Path) -> Plan:
 def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> Plan:
     """Return the plan of a declaration resolved, which loading imported `loaded`, each part's source read relative to `root`, where one is given."""
     entries = resolved.doors.entries()
+
     def named(entry: Entry) -> str:
         return entry.serves.named()
 
