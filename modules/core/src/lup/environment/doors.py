@@ -48,9 +48,9 @@ from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
 
 
-def refused(given: JsonValue, reason: str) -> Refused:
-    """Return a call refused, with what was sent and why."""
-    return Refused(rejection=Rejection(submitted=given, reason=reason))
+def refused(given: JsonValue, reason: str, about: list[str]) -> Refused:
+    """Return a call refused, with what was sent, why, and what it's about by name."""
+    return Refused(rejection=Rejection(submitted=given, reason=reason, about=about))
 
 
 class Serves(Model):
@@ -432,17 +432,18 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
         raises goes up as raised.
         """
         method = entry.method
+        named = [method.taken.qualified]
         if not method.admits(by):
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` is "
                 f"called by {said(method.parties())}, never by `{type(by).__name__}`"
             )
-            return refused(given, reason)
+            return refused(given, reason, named)
         try:
             value = method.validated(given)
         except ValidationError as wrong:
             reason = f"`{entry.name}` doesn't take what it was given: {wrong}"
-            return refused(given, reason)
+            return refused(given, reason, named)
         instance = self.instance(entry)
         unrun = next(
             (each for each in self.unrun if each.part == entry.serves.named()), None
@@ -452,17 +453,17 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` isn't "
                 f"running: {unrun.why}"
             )
-            return refused(given, reason)
+            return refused(given, reason, named)
         if instance is None:
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` runs "
                 "elsewhere, not where it was called"
             )
-            return refused(given, reason)
+            return refused(given, reason, named)
         try:
             output = await self.ran(method, instance, value, by)
         except RefusedError as refusal:
-            return refused(given, str(refusal))
+            return refused(given, str(refusal), refusal.about)
         return Accepted(value=value, output=output)
 
     async def call(
@@ -471,7 +472,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
         """Call the tool named `tool` with `arguments`, called by `by`, and say what came of it."""
         found = [entry for entry in self.doors.through(ToolDoor) if entry.name == tool]
         if not found:
-            return refused(arguments, f"no module serves a tool `{tool}`")
+            return refused(arguments, f"no module serves a tool `{tool}`", [tool])
         return await self.answered(found[0], arguments, by)
 
     async def serve(
@@ -482,7 +483,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             entry for entry in self.doors.through(ServiceDoor) if entry.name == service
         ]
         if not found:
-            return refused(given, f"no module serves a service `{service}`")
+            return refused(given, f"no module serves a service `{service}`", [service])
         return await self.answered(found[0], given, by)
 
     async def run(
@@ -523,7 +524,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             reason = (
                 f"`{name}` isn't {door.called} of `{module}`, whose are {listed(names)}"
             )
-            return refused(given, reason)
+            return refused(given, reason, [name])
         return await self.answered(found[0], given, by)
 
     @override

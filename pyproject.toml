@@ -179,14 +179,10 @@ ignore = ["lup_project.py"]
 testpaths = ["lup_declaration.py", "modules/*/src"]
 # `importlib` lets two modules' tests share a file name.
 addopts = ["--doctest-modules", "--import-mode=importlib"]
-# A check stuck past 120 seconds has its threads dumped and its worker ended,
-# which xdist reports as that check failing, rather than the run waiting silently
-# for good, as a thread left waiting once hung the second lup's run for 25
-# minutes with nothing naming the check. A scenario starting the machine's parts
-# runs its hundred runs in 10 to 15 seconds alone, and well past 30 under a
-# gate's twelve workers and other sessions' gates on the same machine.
-faulthandler_timeout = "120"
-faulthandler_exit_on_timeout = true
+# How long a check may take is lup's plugin's guard's to say: one stuck or past
+# its ceiling of the processor's time fails, one slow is listed to fix, and
+# none is failed by the clock alone, which a loaded machine moves
+# (`lup/testing/README.md`, *Checking*).
 
 [tool.importlinter]
 root_packages = ["lup"]
@@ -224,34 +220,16 @@ forbidden_modules = ["lup.environment"]
 
 # A promise reaches lup through the harness and modules' public surface alone, so
 # a change inside a module leaves its promises alone (`lup/testing/README.md`):
-# a module's promises import `lup` and `lup.testing`, never the core's insides.
-# Only what they import themselves counts, since `lup` imports everything. `**`
-# reaches a submodule's own submodule's promises, as git's companion's are.
+# a module's promises import `lup`, `lup.testing` and modules' packages, never a
+# module inside one, nor the core's own modules beside them. Written as a
+# pattern, so a module added later is covered without naming it. Only what they
+# import themselves counts, since `lup` imports everything. `**` reaches a
+# submodule's own submodule's promises, as git's companion's are.
 [[tool.importlinter.contracts]]
 name = "a promise imports the harness and lup's front door alone"
 type = "forbidden"
 source_modules = ["lup.**.promises"]
-forbidden_modules = [
-    "lup.environment",
-    "lup.core",
-    "lup.types",
-    "lup.errors",
-    "lup.declaration.*",
-    "lup.doors.*",
-    "lup.shell.*",
-    "lup.testing.*",
-    "lup.programs.*",
-    "lup.running.*",
-    "lup.hosting.*",
-    "lup.told.*",
-    "lup.command_line.*",
-    "lup.setup.*",
-    "lup.gate.*",
-    "lup.landing.*",
-    "lup.rooms.*",
-    "lup.sessions.*",
-    "lup.code_rules.*",
-]
+forbidden_modules = ["lup.environment", "lup.core", "lup.types", "lup.errors", "lup.*.*"]
 allow_indirect_imports = true
 
 [tool.lup]

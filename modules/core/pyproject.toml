@@ -36,6 +36,11 @@ dependencies = [
 # workspace and a project's gate install it; a shipped project's command doesn't.
 environment = [
     "hypothesis>=6.170",
+    # Which promise runs which line, recorded where a landing asks, so the
+    # lines a branch changed that no promise runs, and the small breaks of the
+    # others that none notices, are told in its review
+    # (`lup/testing/README.md`, *Mutation*).
+    "coverage>=7.10",
 ]
 # The dashboard's server: the page, and one socket carrying what it watches.
 # Only what serves the dashboard needs it, never a module's code.

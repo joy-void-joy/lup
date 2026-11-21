@@ -52,6 +52,7 @@ from lup.doors.parts import (
     Program,
     Runtime,
     Secret,
+    State,
     UnrunError,
 )
 from lup.doors.service import UncarriedError, service
@@ -150,6 +151,7 @@ __all__ = [
     "Settings",
     "Span",
     "Starting",
+    "State",
     "Step",
     "Steps",
     "Stopping",

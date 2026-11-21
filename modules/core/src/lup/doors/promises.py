@@ -87,7 +87,7 @@ class EchoPart(Part):
         """Merge a branch, refusing `main`, which is merged into."""
         if merging.branch == "main":
             message = "`main` is merged into, never merged"
-            raise lup.RefusedError(message)
+            raise lup.RefusedError(message, about=[merging.branch])
         return merging.branch
 
     @lup.command
@@ -415,6 +415,21 @@ class DoorsPromises(Part):
         assert isinstance(dev, Accepted)
 
     @lup.promise
+    async def a_refusal_names_what_its_about(self, by: Testing) -> None:
+        """A refusal names what it's about, as an error does, so a caller reads names rather than words: the method its caller may not call, a tool no module serves, or what the method refusing named."""
+        started = await by.started(declared(Echo()))
+        agent = by.any(Agent)
+        greeted = await started.run("echo", "greet", Greeting(name="kai"), agent)
+        whispered = await started.call("whisper", {}, agent)
+        merged = await started.run("echo", "merge", Merging(branch="main"), Operator())
+        assert isinstance(greeted, Refused)
+        assert isinstance(whispered, Refused)
+        assert isinstance(merged, Refused)
+        assert "EchoPart.greet" in greeted.rejection.about
+        assert "whisper" in whispered.rejection.about
+        assert "main" in merged.rejection.about
+
+    @lup.promise
     async def a_method_read_through_an_instance_is_called_as_any(
         self, by: Testing
     ) -> None:
@@ -459,6 +474,24 @@ class DoorsPromises(Part):
         with raises(ProjectError) as failed:
             await by.started(Repository(declaration=loud(misshapen.methods())))
         assert "LoudPart.wrong" in failed.raised().about
+
+    @lup.promise
+    async def a_door_outside_a_part_fails_the_load_naming_it(self, by: Testing) -> None:
+        """A method behind a door in a class that isn't a part, which nothing would serve, fails the declaration's load, naming it, rather than going unserved, or unchecked where it's a promise."""
+        declaration = f'''
+{loud("")}
+
+class Notes(lup.Model):
+    """A model, which is no part."""
+
+    @lup.tool
+    async def jot(self, said: Said) -> str:
+        """Jot what's said."""
+        return said.text
+'''
+        with raises(ProjectError) as failed:
+            await by.started(Repository(declaration=declaration))
+        assert "Notes.jot" in failed.raised().about
 
     @lup.promise
     async def a_door_reads_a_class_defined_further_down_its_file(
