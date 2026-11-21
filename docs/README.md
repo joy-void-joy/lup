@@ -10,6 +10,7 @@ Each module's doc is in its directory:
 - `modules/core/src/lup/doors/README.md`: the doors a module's methods are reached through, who may call them, and a module's parts, made once where they run.
 - `modules/core/src/lup/testing/README.md`: promises, what a module promises and how the gate checks it, and the harness a promise reaches lup through.
 - `modules/core/src/lup/programs/README.md`: running programs, lup's one runner of them, and why its promises start real ones.
+- `modules/core/src/lup/programs/git/README.md`: git's companion, where every module asks git, how git is run, and what a store a room writes is read as.
 - `modules/core/src/lup/running/README.md`: running a project's modules: the plan the program on the operator's machine reads, what crosses between it and a container, and the program a container runs.
 - `modules/core/src/lup/told/README.md`: guidance, each module's sections of what a session is told at its start, the door they're written behind, rendering them, and the room they may take.
 - `modules/core/src/lup/shell/README.md`: the shell, the view door, the blocks a view answers and the kinds a module declares for them.
