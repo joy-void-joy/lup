@@ -27,6 +27,9 @@ from lup.hosting.approvals import Approvals, Approving, Asking
 from lup.hosting.git import Git
 from lup.hosting.projects import Opening, Projects
 from lup.hosting.trees import Commit, Entry, Objects
+from lup.inbox.part import Inboxes
+from lup.inbox.records import Item, Laid
+from lup.inbox.said import Posting, Settling
 from lup.landing.merging import Composed, Unmerged, apart
 from lup.running.plan import Name
 from lup.shell.blocks import (
@@ -87,6 +90,9 @@ class Landed(Model):
     """Whether `live` runs it while it's on trial: the operator's toggle."""
     wanted: list[Wanted] = []
     ended: Literal["accepted", "dropped"] | None = None
+    item: int | None = None
+    """The number of the item that waits on the operator in the agent's
+    conversation for its last landing; none before it's posted."""
 
     def waiting(self) -> bool:
         """Say whether it waits on the operator's review: landed at a tip they haven't said yes to."""
@@ -316,7 +322,18 @@ class Landings(Part, machine=True, shared=True):
                 picked=True if before is None else before.picked,
                 wanted=[] if before is None else before.wanted,
             )
-            # lup: defer(issue=8, why="the landing's item waiting on the operator in the agent's conversation, once the inbox takes a module's item")
+            if before is not None and before.item is not None:
+                await self.settled(project, before, f"landed again, at {tip}")
+            posted = await Inboxes.post(
+                Posting.of(
+                    WaitsOnReview,
+                    Waited(branch=landing.branch, tip=tip),
+                    by=landing.agent,
+                    repository=project,
+                    text=f"`{landing.branch}` waits on your review.\n\n{landing.message}",
+                )
+            )
+            landed = landed.model_copy(update={"item": posted.number})
             self.keep(project, trial.with_landing(landed))
             return landed
 
@@ -364,9 +381,11 @@ class Landings(Part, machine=True, shared=True):
             trial = trial.with_landing(
                 landed.model_copy(update={"reviewed": landed.tip})
             )
-            return await self.ran(
+            said = await self.ran(
                 reviewing.project, trial, f"{reviewing.branch} is on trial"
             )
+            await self.settled(reviewing.project, landed, said)
+            return said
 
     @lup.command(verb="toggle", says="run it or not")
     async def toggle(self, naming: Naming, by: Operator) -> str:
@@ -388,9 +407,11 @@ class Landings(Part, machine=True, shared=True):
             trial = self.kept(naming.project)
             landed = trial.landing(naming.branch)
             trial = trial.with_landing(landed.model_copy(update={"ended": "dropped"}))
-            return await self.ran(
+            said = await self.ran(
                 naming.project, trial, f"{naming.branch} is off trial"
             )
+            await self.settled(naming.project, landed, said)
+            return said
 
     @lup.command(verb="accept", says="accept it onto the integration branch")
     async def accept(self, naming: Naming, by: Operator) -> str:
@@ -440,10 +461,19 @@ class Landings(Part, machine=True, shared=True):
             ).model_copy(update={"accepted": merge})
             self.keep(naming.project, trial)
             cleaned = await self.cleaned(git, trial, landed, merge)
-            return await self.ran(
+            said = await self.ran(
                 naming.project,
                 trial,
                 f"{naming.branch} is accepted onto {trial.integration} as {merge}{cleaned}",
+            )
+            await self.settled(naming.project, landed, said)
+            return said
+
+    async def settled(self, project: str, landed: Landed, said: str) -> None:
+        """Tell the agent who landed `landed` what came of it, in `said`, answering its item so it waits no more; nothing where it has none."""
+        if landed.item is not None:
+            await Inboxes.settle(
+                Settling(repository=project, item=landed.item, text=said)
             )
 
     async def merged(
@@ -699,6 +729,39 @@ def gate_lines(run: Run | None) -> list[Line | Markdown]:
             ]
         ),
     ]
+
+
+class Waited(Model):
+    """What a landing's item says of it beyond its words: the branch, and the tip that landed."""
+
+    branch: str
+    tip: Commit
+
+
+class WaitsOnReview(Item):
+    """A branch that waits on the operator's review, as the agent who landed it says in their conversation: opening on its review, and offering the operator's yes on the tip that landed, or declining it."""
+
+    kind: str = "landing:waits-on-review"
+    branch: str
+    tip: Commit
+
+    def waits(self) -> bool:
+        """Say it waits on the operator, until what came of it answers it."""
+        return True
+
+    def laid(self) -> Laid:
+        """Return its review under a fold of the landing kind, offering a yes to the tip that landed, and declining it."""
+        naming = Naming(project=self.repository, branch=self.branch)
+        reviewing = Reviewing(project=self.repository, branch=self.branch, tip=self.tip)
+        return Laid(
+            fold="landing",
+            summary=f"{self.branch} at {self.tip}",
+            opens=Viewing.of(Landings.review, naming, module="landing"),
+            offers=[
+                Offer.of(Landings.yes, reviewing, module="landing"),
+                Offer.of(Landings.drop, naming, module="landing"),
+            ],
+        )
 
 
 def landing_fold(project: str, landed: Landed, *, left_out: bool) -> Fold:

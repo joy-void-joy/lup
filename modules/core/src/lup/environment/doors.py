@@ -39,7 +39,7 @@ from lup.doors.door import (
     Rejection,
     served,
 )
-from lup.doors.events import Event, Starting, Stopping
+from lup.doors.events import Event, Heeded, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Codebase, Machine, Party, said
 from lup.doors.parts import Given, Part, Parts, Runs
@@ -335,9 +335,15 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     isn't at a version it takes, the program being optional."""
 
     def instance(self, entry: Entry) -> Part | None:
-        """Return the part `entry` belongs to, as it was made here; none where it runs elsewhere."""
+        """Return the part `entry` belongs to, as it was made here; none where it runs elsewhere.
+
+        A part is found by its name in the plan, its module's and its class's:
+        a run finds one for every method at every event, and comparing the
+        modules whole each time would be most of a scenario's time.
+        """
+        named = entry.serves.named()
         return next(
-            (each.made for each in self.made if each.serves == entry.serves), None
+            (each.made for each in self.made if each.serves.named() == named), None
         )
 
     def part(self, entry: Entry) -> Part:
@@ -370,6 +376,21 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
                 self.started.append(asyncio.create_task(hook))
             else:
                 await hook
+
+    async def heard(self, event: Event) -> Heeded:
+        """Run every method run at `event`'s class made here, one after another, and return what they answered: each one's words, and the first refusal, after which none runs."""
+        told: list[str] = []
+        for entry in self.here():
+            door = entry.method.door
+            if not (isinstance(door, OnDoor) and isinstance(event, door.event)):
+                continue
+            try:
+                said = await entry.method.function(self.part(entry), event)
+            except RefusedError as refusing:
+                return Heeded(told=told, refused=str(refusing))
+            if isinstance(said, str) and said.strip():
+                told = [*told, said]
+        return Heeded(told=told)
 
     async def hooked(self, entry: Entry, event: Event) -> None:
         """Run the method behind `entry` at `event`, on its part: nobody calls it, so it's handed no caller."""

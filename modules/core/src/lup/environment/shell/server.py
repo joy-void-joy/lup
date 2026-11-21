@@ -8,35 +8,42 @@ view and the project's kinds (`Opened`), and answers each view the page watches
 a browser keeps few connections to a host; a frame the server can't read is
 refused alone, never closing the socket (`README.md` in `lup/shell/`, *The server*).
 
-Until the program on the host runs services (#3), it's started as the core's
-command, `dashboard`; #3 then runs the same application as the dashboard's
-service, from a commit the operator approved, since it holds their approvals.
+The machine serves it beside its socket, from the commit the operator approved
+(`lup.environment.shell.hosted`), its page built there by `Pages`: until the
+page is built, or where it can't be, the server says why in its place.
 """
 
 import asyncio
+import contextlib
 import hmac
+import html
 import json
 import logging
 import secrets
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+lazy import socket
+lazy from collections.abc import Generator
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
 
-from lup.doors.door import Accepted, Refused
+from lup.command_line.answering import Answerer, Offered
+from lup.doors.door import RefusedError
 from lup.doors.parties import Operator
 from lup.environment.doors import Running
+from lup.environment.running.container import REPLIES, answered
 from lup.environment.shell.layout import ShellLayout
 from lup.environment.shell.review import Going, reviewed
-from lup.environment.shell.viewing import viewed
 from lup.inbox.records import NO_AGENT
 from lup.inbox.said import Pile, Reached
+from lup.running import wire as crossing
+from lup.running.plan import Plan
+from lup.running.wire import Call, CommandCalled, Reply, ViewCalled, read
 from lup.shell.blocks import Block, BlockError, Blocks, Fold, Offer, Viewing
 from lup.shell.draft import Comment, Commenting, Draft, Marked, Outcome, Quote
 from lup.shell.looks import Looks
@@ -72,6 +79,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+CALLS = TypeAdapter[Call](Call)
+
 
 class AsSent(GenerateJsonSchema):
     """JSON Schema of a model as it's sent: every field there, a default one among them, since dumping a model writes each; and no field titled, so a type generated from it is named after its model alone."""
@@ -100,6 +109,27 @@ def described() -> str:
     """Describe what the page reads from the core, as JSON Schema of what's sent, which the page's types are generated from, so the two can't disagree."""
     schema = Read.model_json_schema(mode="serialization", schema_generator=AsSent)
     return json.dumps(schema, indent=2)
+
+
+class Serving(MutableModel):
+    """The page the dashboard serves: where it's built, or why there's none to serve yet."""
+
+    page: Path | None = Field(default_factory=lambda: ShellLayout().page)
+    """The built page's directory, its `index.html` and assets; none until
+    it's built. Left out, the page built beside the package, as the page's
+    build writes it in a worktree."""
+    why: str = ""
+    """Why there's no page, where there's none."""
+    building: bool = False
+    """Whether it's being built, so the page saying why reloads itself."""
+
+    def unbuilt(self) -> str:
+        """Return what's served in the page's place: why there's none, reloading itself while it's built."""
+        reloads = '<meta http-equiv="refresh" content="5">' if self.building else ""
+        return (
+            '<!doctype html><meta charset="utf-8"><title>lup</title>'
+            f"{reloads}<p>lup's dashboard has no page yet: {html.escape(self.why)}</p>"
+        )
 
 
 class Keeping(MutableModel, arbitrary_types_allowed=True):
@@ -140,6 +170,32 @@ class Placed(Model):
     reaches: dict[str, JsonValue] | None = None
 
 
+class Over(Model, Answerer, arbitrary_types_allowed=True):
+    """Calls answered over parts started in this process, as the operator makes them: the harness's dashboard, whose parts it started itself, and a dashboard served from a worktree."""
+
+    running: Running
+    looks: Looks
+    """The kinds the project declares, which its views' blocks are checked
+    against as its containers check them."""
+    plan: Plan
+
+    @override
+    async def offered(self) -> Offered:
+        """Return that the calls are the operator's, and the project's plan."""
+        return Offered(by=Operator(), plan=self.plan)
+
+    @override
+    async def answered(self, call: Call) -> Reply:
+        """Answer `call` as the operator's, over the parts started here, as their container answers one."""
+        made = call.model_copy(update={"by": Operator()})
+        text = await answered(self.running, CALLS.dump_json(made), looks=self.looks)
+        return read(text, REPLIES)
+
+    @override
+    async def stopped(self) -> None:
+        """Stop nothing: whoever started the parts stops them."""
+
+
 class Taken(Model):
     """What takes a comment at a send: the command it's given to, offered as its block offers one, and whom it reaches, as the review says it."""
 
@@ -150,8 +206,11 @@ class Taken(Model):
 class Dashboard(Model, arbitrary_types_allowed=True):
     """The dashboard of a running project: its page, and what its views answer the operator."""
 
-    running: Running
-    """The project's parts, made and running: what answers its views."""
+    answerer: Answerer
+    """What answers its views and runs its commands, as the operator's: in the
+    machine, its socket, through which a project's own views reach its
+    containers (`lup.environment.running.calling.Calling`); in the harness, the
+    parts it started (`Over`)."""
     looks: Looks
     """The kinds its modules declare, which their views may name."""
     root: Viewing | None
@@ -161,7 +220,8 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     token: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     """What the page has to say before anything is answered: rooms reach every
     port on the operator's machine, so being on localhost keeps nothing out."""
-    layout: ShellLayout = ShellLayout()
+    serving: Serving = Field(default_factory=Serving)
+    """The page it serves, or why there's none yet."""
     repository: str | None = None
     """The repository the dashboard serves, whose No agent pile takes a comment
     on what reaches no party; none where nothing takes one."""
@@ -235,12 +295,26 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     def application(self) -> FastAPI:
         """Return the server's application: the page, its assets, and the socket."""
         application = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
-        page = self.layout.page
 
-        @application.get("/")
-        async def index() -> FileResponse:
-            """Serve the page."""
+        @application.get("/", response_model=None)
+        async def index() -> Response:
+            """Serve the page, or say why there's none yet."""
+            page = self.serving.page
+            if page is None or not (page / "index.html").is_file():
+                return HTMLResponse(self.serving.unbuilt(), status_code=503)
             return FileResponse(page / "index.html")
+
+        @application.get("/assets/{name:path}")
+        async def asset(name: str) -> FileResponse:
+            """Serve one of the page's assets, none outside its directory of them."""
+            page = self.serving.page
+            if page is None:
+                raise HTTPException(status_code=404)
+            assets = (page / "assets").resolve()
+            found = (assets / name).resolve()
+            if not found.is_relative_to(assets) or not found.is_file():
+                raise HTTPException(status_code=404)
+            return FileResponse(found)
 
         @application.websocket("/api/socket")
         async def socket(websocket: WebSocket) -> None:
@@ -248,36 +322,30 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             await websocket.accept()
             await Session(dashboard=self, socket=Carried(websocket=websocket)).run()
 
-        if (page / "assets").is_dir():
-            application.mount(
-                "/assets", StaticFiles(directory=page / "assets"), name="assets"
-            )
         return application
 
     async def answer(self, watch: int, viewing: Viewing) -> Answered | Unanswered:
         """Answer `viewing`, watched under `watch`, as the operator reads it."""
         if viewing.module is None:
             return Unanswered(watch=watch, reason=f"`{viewing.view}` names no module")
+        call = ViewCalled(module=viewing.module, view=viewing.view, given=viewing.given)
         try:
-            answered = await viewed(
-                self.running,
-                self.looks,
-                viewing.module,
-                viewing.view,
-                viewing.given,
-                Operator(),
-            )
-        except BlockError as wrong:
-            return Unanswered(watch=watch, reason=str(wrong))
-        match answered:
-            case Accepted(output=Blocks() as blocks):
-                return Answered(watch=watch, blocks=blocks)
-            case Accepted():
-                return Unanswered(
-                    watch=watch, reason=f"`{viewing.view}` answered no blocks"
-                )
-            case _:
-                return Unanswered(watch=watch, reason=answered.rejection.reason)
+            reply = await self.answerer.answered(call)
+        except RefusedError as lost:
+            return Unanswered(watch=watch, reason=str(lost))
+        match reply:
+            case crossing.Answered(output=output):
+                try:
+                    blocks = Blocks.model_validate(output)
+                    self.looks.checked(blocks, viewing.module)
+                except (ValidationError, BlockError) as wrong:
+                    return Unanswered(
+                        watch=watch,
+                        reason=f"`{viewing.view}` answered no blocks: {wrong}",
+                    )
+                return Answered(watch=watch, blocks=blocks.versioned())
+            case crossing.Declined(rejection=rejection):
+                return Unanswered(watch=watch, reason=rejection.reason)
 
     async def sent(self) -> Delivered:
         """Send the draft, one send at a time whichever pages ask: each comment and mark on its own, a comment that says nothing dropped rather than sent.
@@ -403,10 +471,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             "on": offer.given,
         }
         module = offer.module or quote.viewing.module or ""
-        answered = await self.running.run(module, offer.command, given, Operator())
-        return Outcome(
-            reason=answered.rejection.reason if isinstance(answered, Refused) else None
-        )
+        return Outcome(reason=await self.ran(module, offer.command, given))
 
     async def acted(self, mark: Marked) -> str | None:
         """Run the command `mark` marks; why not, where it can't run, as on a block that changed since it was marked."""
@@ -417,10 +482,20 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             return "what it's on changed since it was marked"
         offer = mark.offer
         module = offer.module or mark.on.viewing.module or ""
-        answered = await self.running.run(
-            module, offer.command, offer.given, Operator()
-        )
-        return answered.rejection.reason if isinstance(answered, Refused) else None
+        return await self.ran(module, offer.command, offer.given)
+
+    async def ran(self, module: str, command: str, given: JsonValue) -> str | None:
+        """Run the command `command` of the module named `module` on `given`, as the operator; why not, where it's refused or can't be reached."""
+        call = CommandCalled(module=module, command=command, given=given)
+        try:
+            reply = await self.answerer.answered(call)
+        except RefusedError as lost:
+            return str(lost)
+        match reply:
+            case crossing.Answered():
+                return None
+            case crossing.Declined(rejection=rejection):
+                return rejection.reason
 
 
 class Socket(ABC):
@@ -547,10 +622,23 @@ def named(party: JsonValue) -> str:
     return " ".join(str(value) for key, value in party.items() if key != "party")
 
 
-async def serve(dashboard: Dashboard, port: int) -> None:
-    """Serve `dashboard` on localhost's `port` until stopped, saying where to open it."""
-    log.warning("lup's dashboard: http://127.0.0.1:%d/#%s", port, dashboard.token)
-    config = uvicorn.Config(
-        dashboard.application(), host="127.0.0.1", port=port, log_level="warning"
-    )
-    await uvicorn.Server(config).serve()
+class Quiet(uvicorn.Server):
+    """uvicorn's server leaving signals to whoever serves it, as the machine stops it with the rest of its parts."""
+
+    @override
+    @contextlib.contextmanager
+    def capture_signals(self) -> Generator[None]:
+        yield
+
+
+async def serve(
+    dashboard: Dashboard, listening: socket.socket, stopping: asyncio.Event
+) -> None:
+    """Serve `dashboard` on `listening`, a socket bound already, until `stopping` is set."""
+    server = Quiet(uvicorn.Config(dashboard.application(), log_level="warning"))
+    serving = asyncio.ensure_future(server.serve([listening]))
+    waiting = asyncio.ensure_future(stopping.wait())
+    await asyncio.wait([serving, waiting], return_when=asyncio.FIRST_COMPLETED)
+    server.should_exit = True
+    waiting.cancel()
+    await serving
