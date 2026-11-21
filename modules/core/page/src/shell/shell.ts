@@ -13,6 +13,7 @@ import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offse
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
+import { markdown, sourced, sourcesOf, unindented } from "./markdown";
 import { standings } from "./palette";
 import { framed } from "./frame";
 import { Outline } from "./outline";
@@ -151,6 +152,11 @@ export class Shell {
                     // vim's `u` and Ctrl+R undo and redo what the operator wrote, never what views answered.
                     history(),
                     EditorState.transactionExtender.of((transaction) => (transaction.annotation(fromCore) === true ? { annotations: Transaction.addToHistory.of(false) } : null)),
+                    // What's written in Markdown is read anew as the shell lays the text out, its tree already the text's.
+                    EditorState.transactionExtender.of((transaction) =>
+                        transaction.annotation(fromCore) === true && transaction.docChanged ? { effects: sourced.of(sourcesOf(shell.document.root)) } : null,
+                    ),
+                    markdown(),
                     EditorView.updateListener.of((update) => {
                         shell.comments.changed(update);
                         if (!shell.#made) {
@@ -175,7 +181,17 @@ export class Shell {
             }),
         });
         this.comments.start();
+        let inserting = false;
         getCM(this.view)?.on("vim-mode-change", (event: { mode: string }) => {
+            const was = inserting;
+            inserting = event.mode === "insert" || event.mode === "replace";
+            if (was && !inserting) {
+                // An indentation nothing was typed after goes as the writing ends, in the comment it was typed in.
+                const emptied = unindented(this.view.state, this.view.state.selection.main.head);
+                if (emptied !== null) {
+                    this.view.dispatch(emptied);
+                }
+            }
             this.comments.moded(event.mode);
             (this.owner ?? this).reframe();
         });
@@ -590,6 +606,18 @@ export const look = EditorView.theme(
         },
         ".lup-bold": { fontWeight: "700" },
         ".lup-dim": { opacity: "0.7" },
+        // Markdown, in a block and a comment (`markdown.ts`): headings, strong, emphasis and links as such; code in
+        // the colour of strings, each line of a block of it barred; a construct's marks, where they show, muted, as a
+        // quote's and a list's always are; and a table's cells padded by what's drawn beside them, muted as its pipes.
+        ".tok-heading": { color: "var(--lup-orange)", fontWeight: "700" },
+        ".tok-strong": { fontWeight: "700" },
+        ".tok-emphasis": { fontStyle: "italic" },
+        ".tok-link, .tok-url": { color: "var(--lup-link)", textDecoration: "underline" },
+        ".tok-monospace": { color: "var(--lup-cyan)" },
+        ".tok-processingInstruction, .tok-labelName, .tok-contentSeparator, .tok-quote, .tok-meta": { color: "var(--lup-muted)" },
+        ".tok-strikethrough": { textDecoration: "line-through" },
+        ".lup-line.lup-md-code": { boxShadow: "inset 2px 0 0 var(--lup-muted)" },
+        ".lup-md-pad": { whiteSpace: "pre", color: "var(--lup-muted)" },
         ".cm-gutters": { background: "var(--lup-bg)", border: "0" },
         ".lup-margin": { width: "calc(2px + var(--lup-columns) * var(--lup-column))", borderRight: "1px solid var(--lup-rule)" },
         ".lup-margin .cm-gutterElement": { position: "relative", padding: "0" },

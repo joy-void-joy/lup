@@ -13,6 +13,8 @@ from itertools import accumulate, groupby
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from lup.inbox.records import (
     NO_AGENT,
     AgentRecord,
@@ -32,6 +34,7 @@ from lup.inbox.records import (
     Item,
     Message,
     OperatorRecord,
+    Outcome,
     PartyRecord,
     PileRecord,
     Question,
@@ -46,7 +49,14 @@ from lup.inbox.records import (
     Withdrawn,
     WorksIn,
 )
-from lup.inbox.said import Comments, ConcernSaid, Inboxed, Placed, Telling
+from lup.inbox.said import (
+    Comments,
+    ConcernSaid,
+    Inboxed,
+    Placed,
+    SaidItem,
+    Telling,
+)
 from lup.store.database import Database
 from lup.store.errors import StoreError
 from lup.store.records import Edge, Node, named
@@ -805,6 +815,48 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 self.edge(Answers, told, end, by)
         return end
 
+    def posted[I: Item](
+        self, by: AgentRecord, kind: type[I], text: str, fields: dict[str, JsonValue]
+    ) -> I:
+        """Keep an item of `kind`, a module's own, as `by`'s to the operator in `text`, its own fields `fields`, in the concern `by` works in where they work in one, and return it as kept.
+
+        Raise `InboxError` where `fields` aren't its kind's.
+        """
+        try:
+            item = kind.model_validate(
+                {
+                    **fields,
+                    "repository": self.repository,
+                    "by": by.key,
+                    "at": self.now(),
+                    "to": [self.operator().key],
+                    "text": text,
+                }
+            )
+        except ValidationError as wrong:
+            message = f"what's posted isn't a `{kind.declared()}`: {wrong}"
+            raise InboxError(message, about=[kind.__name__]) from wrong
+        kept = self.database.kept(item)
+        concern = self.working_in(by)
+        if concern is not None:
+            self.edge(In, concern, kept, by)
+        return kept
+
+    def settled(self, item: Item, text: str) -> Outcome:
+        """Keep what came of `item` for the operator's act, in `text`: told to whoever wrote it, answering it."""
+        operator = self.operator()
+        outcome = self.database.kept(
+            Outcome(
+                repository=self.repository,
+                by=operator.key,
+                at=self.now(),
+                to=[] if item.by is None else [item.by],
+                text=text,
+            )
+        )
+        self.edge(Answers, item, outcome, operator)
+        return outcome
+
     def withdrawn(self, by: AgentRecord, item: Item, why: str) -> None:
         """Take back `by`'s `item`, saying why: it waits on nobody after."""
         if item.by != by.key:
@@ -947,6 +999,85 @@ class Inbox(Model, arbitrary_types_allowed=True):
                     if isinstance(each, Comment)
                 ],
             )
+
+    def as_said(self, item: Item) -> SaidItem:
+        """Read `item` as it reads in a search: who said it, its words whole, and what it's on."""
+        writer = self.by(item)
+        match item:
+            case Comment(on=int() as on):
+                target = self.database.found(on)
+                return self.said_item(
+                    item, writer, item.text, target, "\n".join(item.lines) or None
+                )
+            case Answer():
+                asked = next(
+                    (
+                        found
+                        for edge in self.database.drawn_from(item.key, Answers)
+                        if isinstance(
+                            found := self.database.found(edge.target), Question
+                        )
+                    ),
+                    None,
+                )
+                decisions = asked.decisions if asked is not None else []
+                ruled = "\n".join(
+                    " ".join(
+                        part
+                        for part in [
+                            f"{each.number}.",
+                            each.verdict or "",
+                            each.comment,
+                        ]
+                        if part
+                    )
+                    for each in item.rulings
+                )
+                quoted = "\n".join(
+                    f"{number}. {each.decision}"
+                    for number, each in enumerate(decisions, start=1)
+                    if any(ruling.number == number for ruling in item.rulings)
+                )
+                text = "\n\n".join(each for each in [item.text, ruled] if each)
+                return self.said_item(item, writer, text, asked, quoted or None)
+            case Question():
+                decided = "\n".join(
+                    f"{number}. {each.decision}\n   lean: {each.lean}"
+                    for number, each in enumerate(item.decisions, start=1)
+                )
+                text = "\n\n".join(each for each in [item.text, decided] if each)
+                return self.said_item(item, writer, text, None, None)
+            case _:
+                return self.said_item(item, writer, item.text, None, None)
+
+    def said_item(
+        self,
+        item: Item,
+        writer: PartyRecord,
+        text: str,
+        on: Node | None,
+        quoted: str | None,
+    ) -> SaidItem:
+        """Return `item` as it reads in a search, its words `text`, on `on` where it's on an item."""
+        return SaidItem(
+            key=item.key,
+            number=item.number or 0,
+            repository=item.repository,
+            at=item.at,
+            kind=item.kind,
+            by=self.called(writer),
+            agent=Agent(id=writer.id, session=writer.session)
+            if isinstance(writer, AgentRecord)
+            else None,
+            to=[
+                self.called(found)
+                for key in item.to
+                if isinstance(found := self.database.found(key), PartyRecord)
+            ],
+            text=text,
+            on=on.number if isinstance(on, Item) else None,
+            quoted=quoted,
+        )
 
     def tell(self, party: PartyRecord, items: list[Item]) -> None:
         """Say `items` were told to `party`: each is told once, never again."""

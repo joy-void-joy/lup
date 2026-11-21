@@ -8,9 +8,10 @@ operator's commands take what they do (`Answering`, `Clearing`…).
 from typing import Annotated, Literal
 
 from annotated_types import Ge, Lt
+from pydantic import AwareDatetime, BaseModel, JsonValue
 
 from lup.doors.parties import Agent, Party
-from lup.inbox.records import FRICTIONS, Decision, Ruling, Tone
+from lup.inbox.records import FRICTIONS, Decision, Item, Ruling, Tone
 from lup.types import Model
 
 type Cited = Annotated[int, Ge(1), Lt(2**63)]
@@ -221,6 +222,62 @@ class Untold(Model):
     agents: list[Agent] = []
 
 
+# What modules say, in their own kinds of item
+
+
+class Posting(Model):
+    """An item of a module's own kind, said by an agent to the operator in the concern the agent works in: a branch that waits on the operator's review, as a landing says it."""
+
+    by: Agent
+    """The agent it's said by, in whose conversation it shows: the one whose
+    call it came from."""
+    repository: str
+    """The repository whose inbox keeps it."""
+    kind: str
+    """Its kind, one a module declares in its `Recorded`, never the inbox's
+    own."""
+    text: str
+    """Its words, as the operator reads them above what its kind lays out."""
+    fields: dict[str, JsonValue] = {}
+    """Its kind's own fields, as JSON; who it's by and for, when, and its
+    number are the inbox's to say."""
+
+    @classmethod
+    def of(
+        cls,
+        kind: type[Item],
+        said: BaseModel | None = None,
+        *,
+        by: Agent,
+        repository: str,
+        text: str,
+    ) -> Posting:
+        """Return an item of `kind`, its own fields `said`'s, said by `by` in `repository`'s inbox in `text`."""
+        return cls(
+            by=by,
+            repository=repository,
+            kind=kind.declared() or "",
+            text=text,
+            fields={} if said is None else said.model_dump(mode="json"),
+        )
+
+
+class Posted(Model):
+    """The number an item of a module's own kind is kept under: what the module settles it by."""
+
+    number: Cited
+
+
+class Settling(Model):
+    """What came of an item of a module's own kind, said for the operator's act: told to whoever wrote it, and answering it, so it waits no more."""
+
+    repository: str
+    item: Cited
+    """The item, by its number."""
+    text: str
+    """What came of it, in words: `on trial at 4f2a1c0`, or the operator's own."""
+
+
 # What stands, as data
 
 
@@ -294,6 +351,46 @@ class Everywhere(Model):
     """Every repository's inbox the store holds, as data."""
 
     inboxes: list[Inboxed] = []
+
+
+class Since(Model):
+    """Which items to read: those the store kept after one of its keys, every repository's."""
+
+    after: Annotated[int, Ge(0), Lt(2**63)] = 0
+    """The store's key of the last item read before; 0 for every item."""
+
+
+class SaidItem(Model):
+    """One item as it reads in a search: who said it, when, its words whole, and what it's on, where it's on something."""
+
+    key: int
+    """The store's key for it, which the next read starts after."""
+    number: int
+    repository: str
+    at: AwareDatetime
+    kind: str
+    by: str
+    """Who said it, as `@` cites them: the operator, or an agent."""
+    agent: Agent | None = None
+    """The agent who said it, by lup's ids for them; none for the operator."""
+    to: list[str] = []
+    """Whom it was for, as `@` cites them."""
+    text: str
+    """Its words whole: a question's decisions after its text, each with its
+    lean; an answer's rulings after its words, each by its decision's number."""
+    on: int | None = None
+    """The number of the item it's on, or answers; none where it's on
+    nothing."""
+    quoted: str | None = None
+    """What of that item it's on: the lines of the passage a comment quotes,
+    or the decisions an answer rules on; none where it's on the item whole."""
+
+
+class SaidSince(Model):
+    """The items kept since a read, every repository's, in the order kept, and the key to read after next."""
+
+    items: list[SaidItem] = []
+    last: int = 0
 
 
 # What the operator reads

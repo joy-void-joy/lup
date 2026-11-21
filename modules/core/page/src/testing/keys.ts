@@ -1,6 +1,7 @@
 // Keys as the operator's keyboard sends them, for the page's promises: in Normal and Visual mode each goes to vim; in
 // Insert mode a character, Enter or Backspace edits the text as the browser's input does, which vim leaves to the
-// editor; an ex command (`:w`) runs as vim's command line runs it once Enter is pressed.
+// editor, Enter going first to the editor's own key handlers, as a key event does, which may take it; an ex command
+// (`:w`) runs as vim's command line runs it once Enter is pressed.
 
 import { EditorSelection } from "@codemirror/state";
 import { Vim, getCM } from "@replit/codemirror-vim";
@@ -20,8 +21,12 @@ export async function press(shell: Shell, keys: readonly string[]): Promise<void
         const inserting = (cm.state.vim as { insertMode?: boolean } | null)?.insertMode === true;
         if (key.startsWith(":") && key.length > 1) {
             Vim.handleEx(cm as Parameters<typeof Vim.handleEx>[0], key.slice(1));
-        } else if (inserting && (key.length === 1 || key === "<CR>")) {
-            typed(shell, key === "<CR>" ? "\n" : key);
+        } else if (inserting && key === "<CR>") {
+            if (!taken(shell, "Enter")) {
+                typed(shell, "\n");
+            }
+        } else if (inserting && key.length === 1) {
+            typed(shell, key);
         } else if (inserting && key === "<BS>") {
             const { from, to } = shell.view.state.selection.main;
             if (from === to && from > 0) {
@@ -39,6 +44,13 @@ async function settled(): Promise<void> {
     await new Promise<void>((resolve) => {
         queueMicrotask(resolve);
     });
+}
+
+/** Send a key event of `key` to `shell`'s editor, as the keyboard does, and say whether a handler took it, so the browser does nothing more of it. */
+function taken(shell: Shell, key: string): boolean {
+    const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    shell.view.contentDOM.dispatchEvent(event);
+    return event.defaultPrevented;
 }
 
 /** Type `text` at the cursor, as the browser's input does in Insert mode. */

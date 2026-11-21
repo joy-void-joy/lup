@@ -88,6 +88,11 @@ class Check(Model, arbitrary_types_allowed=True):
         test = given(st.data())(once)
         if exploring.seeded:
             test = seed(self.seed())(test)
+        # Hypothesis's explain phase traces every line of every run once one
+        # fails, to say which parts of what it drew mattered: that makes a
+        # broken promise's check many times slower, and the run it replays
+        # last, which the report names, isn't the shrunk one. The report says
+        # what was drawn, called and interleaved itself.
         test = settings(
             database=None,
             deadline=None,
