@@ -591,23 +591,29 @@ class Harness(Testing, arbitrary_types_allowed=True):
     ) -> Reached:
         """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
 
-        Each secret a class holds, and each field the operator's GitHub login
-        fills, is `secrets`'s, or drawn where they're left out. A class
-        holding the project's git directory is given `git`, or an empty
-        directory where it's left out, as a law's runs give none; one holding
+        Each secret a class holds is `secrets`'s, or drawn where they're left
+        out. What the operator's machine lends is given, never drawn, since a
+        promise reaches nothing it would open, and a run drawing nothing is
+        checked once: the operator's GitHub login, `secrets`' where they give
+        it, else a token nothing takes; the project's git directory, `git`, or
+        an empty directory where it's left out, as a law's runs give none; and
         the operator's SSH agent, a socket nothing answers on.
         """
         resolved = resolve(project)
         held = [
-            name
-            for each in resolved.doors.served
-            for name in [*each.part.holds().secrets, *each.part.holds().github]
+            name for each in resolved.doors.served for name in each.part.holds().secrets
         ]
-        given = (
-            dict(secrets)
-            if secrets is not None
-            else {name: self.any(str) for name in dict.fromkeys(held)}
-        )
+        logins = [
+            name for each in resolved.doors.served for name in each.part.holds().github
+        ]
+        given = {
+            **dict.fromkeys(logins, "a login nothing takes"),
+            **(
+                dict(secrets)
+                if secrets is not None
+                else {name: self.any(str) for name in dict.fromkeys(held)}
+            ),
+        }
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
         lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
         lent = tempfile.TemporaryDirectory(prefix="lup-lent-")
