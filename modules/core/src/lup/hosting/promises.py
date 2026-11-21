@@ -1495,3 +1495,21 @@ class HerePromises(Part):
         )
         assert isinstance(refused, Refused)
         assert isinstance(carried, Accepted)
+
+    @lup.promise
+    async def status_says_why_a_project_isnt_open(self, by: Testing) -> None:
+        """Where opening a project registered was refused, the operator's status says why, beside saying it isn't open."""
+        podman = Scripted(
+            answers=[
+                VERSIONED,
+                Answering(when=["stop"]),
+                Answering(when=["image", "exists"], status=125),
+            ]
+        )
+        started = await started_approved(by, podman)
+        await started.run("hosting", "register", Opens().given(), lup.Operator())
+        await started.serve("resumed", {}, Machine())
+        status = await started.run("hosting", "status", {}, lup.Operator())
+        assert isinstance(status, Accepted)
+        said = status.answer()
+        assert "harmon is registered, and not open: opening it was refused" in said
