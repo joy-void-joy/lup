@@ -1,0 +1,10 @@
+# Nothing published in the last three days resolves or installs, a lockfile's
+# entries among them, as uv's `exclude-newer` holds the Python side; each
+# package is pinned exactly, its lock holding the rest.
+minimumReleaseAge: 4320
+saveExact: true
+# esbuild's install script only checks the binary its platform's package brings,
+# so it's skipped: pnpm refuses an install whose scripts it isn't told to run or
+# to skip.
+allowBuilds:
+  esbuild: false

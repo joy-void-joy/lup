@@ -7,6 +7,7 @@ in `pyproject.toml`'s pytest settings).
 # lup: defer(issue=13, why="named apart from `lup_project.py`, which the second lup, judging this repository's sessions until this lup runs its own, reads as its own declaration and would refuse")
 
 from lup import Gate, Module, Modules, Project, Step, Steps
+from lup.code_rules import CodeRules
 from lup.hosting.module import Hosting
 
 
@@ -48,5 +49,5 @@ project = Project(
         ),
         why="lup's promises are many, and run on several workers",
     )
-    .add(Hosting(), Page())
+    .add(Hosting(), Page(), CodeRules())
 )
