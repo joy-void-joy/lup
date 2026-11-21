@@ -241,3 +241,7 @@ def main() -> None:
     except HelperError as failed:
         message = f"lup: {failed}"
         raise SystemExit(message) from failed
+
+
+if __name__ == "__main__":
+    main()
