@@ -10,7 +10,9 @@ own (first ready, first run, a timer when nothing else can), so a run shrinks
 towards what asyncio would do anyway (`lup/testing/README.md`, *Laws*).
 
 It runs no I/O and starts no process: what a promise runs is lup in this
-process, through its doors.
+process, through its doors. Work handed to a thread (`asyncio.to_thread`), as
+code moving blocking file work off the loop does, runs as a task of this loop,
+in its thread, taking no time on its clock.
 """
 
 import asyncio
@@ -23,6 +25,7 @@ from lup.types import Model
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
+    from concurrent.futures import Executor
     from contextvars import Context
 
 
@@ -129,6 +132,21 @@ class Simulation(asyncio.AbstractEventLoop):
         return asyncio.Task(
             coro, loop=self, name=name, context=context, eager_start=bool(eager_start)
         )
+
+    @override
+    def run_in_executor[*A, R](
+        self,
+        executor: Executor | None,
+        func: Callable[[*A], R],
+        *args: *A,
+    ) -> asyncio.Future[R]:
+        """Run `func` in this thread, as a task of this loop, which gives what it gives and raises what it raises where it's awaited: a thread's work, as `asyncio.to_thread` hands it, is a slice of its own, taking no time on this loop's clock."""
+        del executor
+
+        async def worked() -> R:
+            return func(*args)
+
+        return self.create_task(worked())
 
     @override
     def get_debug(self) -> bool:

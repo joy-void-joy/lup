@@ -209,6 +209,17 @@ class TestingPromises(Part):
         assert loop.time() - began >= 3600
 
     @lup.promise
+    async def work_handed_to_a_thread_runs_within_a_run(self, by: Testing) -> None:
+        """Work handed to a thread (`asyncio.to_thread`), as code moving blocking file work off the loop does, runs within a run, taking no time on its clock: what it gives is what's awaited, and what it raises is raised there."""
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        number = by.any(int)
+        assert await asyncio.to_thread(abs, number) == abs(number)
+        with raises(ValueError):
+            await asyncio.to_thread(int, "not a number")
+        assert loop.time() == began
+
+    @lup.promise
     async def a_promise_that_holds_is_kept(self, by: Testing) -> None:
         """A law that holds over every run, and a scenario that holds for every value it draws, are kept."""
         started = await by.started(counter())
