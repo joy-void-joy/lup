@@ -26,7 +26,7 @@ The hook command reads nothing of its payload. The machine reads it with the ses
 
 ## Events
 
-A session's runtime's hooks are lup's events (`events.py`): a session started, resumed, forked, cleared or compacted (`SessionStarted`); a turn started; a call about to run (`CallStarting`), which lists the files a file tool writes; a call finished; a turn ended; a subagent started or ended; the session ended. Each carries the agent whose conversation it's of.
+A session's runtime's hooks are lup's events (`events.py`): a session started, resumed, forked, cleared or compacted (`SessionStarted`); a turn started; a call about to run (`CallStarting`), which lists the files a file tool writes; a call finished; a turn ended; a subagent started or ended; the session ended. Each carries the agent whose conversation it's of. A module's methods hear them through `@lup.on`, each imported from the package's front door (`from lup.sessions import CallFinished`), which a promise may import.
 
 Each reaches every part of the project whose methods run at it (`@lup.on`), wherever it runs: in the project's containers, and, for a part run in the room (`Part, room=True`), in the session's own room, whose first program starts them from the worktree's own code beside the runtime (`Carrying.heard`). At a session's start, a turn's start, a call's start and a call's end, what they answer is told the agent beside the hook, with what waits for them in the inbox; at a call's start, a refusal refuses the call.
 

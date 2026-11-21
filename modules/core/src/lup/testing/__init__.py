@@ -11,6 +11,7 @@ promise door, `lup.promise`. Checking promises is the environment's
 
 from lup.command_line.answering import Typed
 from lup.doors.door import Accepted, Refused, Rejection
+from lup.doors.events import Heeded
 from lup.doors.tool import ToolSpec
 from lup.shell.draft import Comment, Draft, Marked, Quote, Within
 from lup.shell.wire import (
@@ -68,6 +69,7 @@ __all__ = [
     "Drafted",
     "Erase",
     "Guidance",
+    "Heeded",
     "Hello",
     "Kept",
     "Mark",

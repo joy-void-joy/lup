@@ -15,6 +15,10 @@ type Category = Literal["design", "spelling", "heuristic"]
 
 pyright's and ruff's findings are design's."""
 
+type Reads = Literal["code", "tests"]
+"""Which files a rule of lup's reads: code, every file but a test's, or
+tests, a test's and a module's promises, whose checks are what it's about."""
+
 type Owner = Literal["lup", "pyright", "ruff"]
 """Who found it: lup's rules, pyright's checks, or ruff's."""
 
@@ -110,4 +114,5 @@ class RuleInfo(Model):
     steer: str
     """Where it steers instead, a sentence standing alone."""
     category: Category
+    reads: Reads = "code"
     examples: Examples
