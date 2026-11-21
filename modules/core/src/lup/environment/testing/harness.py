@@ -7,6 +7,7 @@ it must be given and no `by`, since a module's state is the same whoever asks
 """
 
 import asyncio
+import copy
 import tempfile
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import override
 
 from hypothesis import strategies as st
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
@@ -71,7 +72,8 @@ lazy from lup.told.guidance import Guidance
 class Run(MutableModel, arbitrary_types_allowed=True):
     """What one run of a promise did: the values it drew, the calls it made and the order their slices ran in, kept to say what broke it."""
 
-    drawn: list[JsonValue] = []
+    # lup: ignore("bare-object", why="a value drawn is of whatever kind its promise asked the harness for, bytes and sets among them, which no one type holds")
+    drawn: list[object] = []
     calls: list[Call] = []
     slices: list[Call] = []
     checking: Callable[[Project, Module, str | None], list[Kept | Broken]] | None = None
@@ -640,7 +642,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
     def any[T](self, kind: type[T]) -> T:
         """Return a value of `kind`, drawn by hypothesis, which shrinks one that breaks the promise."""
         value = self.data.draw(st.from_type(kind))
-        self.run.drawn.append(TypeAdapter(kind).dump_python(value, mode="json"))
+        self.run.drawn.append(copy.deepcopy(value))
         return value
 
 

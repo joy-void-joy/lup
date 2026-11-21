@@ -138,6 +138,11 @@ class CounterPromises(Part):
         """Every number is below ten, which ten breaks."""
         assert by.any(Small).number < 10
 
+    @lup.promise
+    async def every_byte_is_ascii(self, by: Testing) -> None:
+        """Every byte drawn is ASCII, which a byte past it, as in `b"\\x80"`, breaks."""
+        assert by.any(bytes).isascii()
+
     @lup.promise(every_project=True)
     async def the_project_counts(self, by: Testing) -> None:
         """Whichever project's gate checks this selects the counter."""
@@ -234,7 +239,18 @@ class TestingPromises(Part):
         started = await by.started(counter())
         [broken] = await started.checked("counter", "every_number_is_small")
         assert isinstance(broken, Broken)
-        assert [Small.model_validate(each).number for each in broken.drawn] == [10]
+        [small] = broken.drawn
+        assert isinstance(small, Small)
+        assert small.number == 10
+
+    @lup.promise
+    async def a_promise_may_draw_a_value_of_any_kind(self, by: Testing) -> None:
+        """A scenario may draw a value of any kind, bytes that aren't text among them, and is told broken with the smallest it drew, as drawn."""
+        started = await by.started(counter())
+        [broken] = await started.checked("counter", "every_byte_is_ascii")
+        assert isinstance(broken, Broken)
+        [drawn] = broken.drawn
+        assert drawn == b"\x80"
 
     @lup.promise
     async def a_law_reads_its_state_through_a_door_that_only_reads(

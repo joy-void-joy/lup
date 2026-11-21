@@ -153,8 +153,10 @@ class Broken(Model, arbitrary_types_allowed=True):
 
     promise: str
     """The promise, by its class's name and its own: `CounterPromises.counts`."""
-    drawn: list[JsonValue]
-    """What the run drew from the harness, in order, as JSON."""
+    # lup: ignore("bare-object", why="a value drawn is of whatever kind its promise asked the harness for, bytes and sets among them, which no one type holds")
+    drawn: list[object]
+    """What the run drew from the harness, in order, each a copy taken as it
+    was drawn."""
     calls: list[Call]
     """The calls the run made through lup's doors, in the order they started."""
     slices: list[Call] = []

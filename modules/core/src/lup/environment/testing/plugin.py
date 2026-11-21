@@ -15,7 +15,6 @@ promises no module lists fails, since nothing would check it
 """
 
 import inspect
-import json
 import sysconfig
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -305,7 +304,7 @@ class Promised(pytest.Item):
 
 def said(broken: Broken, description: str) -> str:
     """Say what a broken promise promised, the smallest run that broke it, and where."""
-    drawn = [f"  {json.dumps(each)}" for each in broken.drawn]
+    drawn = [f"  {each!r}" for each in broken.drawn]
     calls = [f"  {each.model_dump_json()}" for each in broken.calls]
     slices = [f"  {broken.calls.index(each) + 1}" for each in broken.slices]
     where = pytest.ExceptionInfo[BaseException].from_exception(broken.error)
