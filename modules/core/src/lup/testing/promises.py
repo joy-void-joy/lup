@@ -2,13 +2,21 @@
 
 Each is checked through the harness over an example module, a counter, whose
 own promises the harness checks as the gate does (`Started.checked`). Its count
-lives in an object its module holds, made afresh each time lup starts: a
-stand-in for the store, which lup doesn't have yet. Its bump reads the count,
-waits, then writes it, so two bumps that overlap lose one: a race a law catches
-only where calls interleave (`README.md` here, *Laws*).
+is its part's `State`, made afresh each time lup starts; a party reads it
+through a tool. Its bump reads the count, waits, then writes it, so two bumps
+that overlap lose one: a race an invariant catches only where calls interleave
+(`README.md` here, *Invariants*).
+
+The guard's promises run pytest itself on a scratch repository, as the gate
+does, since what they promise is how a check fares against the clock and the
+processor, which nothing in the process checking them can stand in for.
 """
 
 import asyncio
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from pydantic import Field
 
@@ -18,16 +26,18 @@ from lup import (
     Model,
     Module,
     Modules,
-    MutableModel,
+    Operator,
     Part,
     Parts,
     Project,
     ProjectError,
+    State,
 )
+from lup.programs import run
 from lup.testing import (
     Accepted,
     Broken,
-    BrokenLawError,
+    BrokenInvariantError,
     Kept,
     Step,
     Testing,
@@ -36,8 +46,8 @@ from lup.testing import (
 )
 
 
-class Tally(MutableModel):
-    """Where the counter keeps its count while lup runs."""
+class Tally(Model):
+    """How far the counter has counted, as its part keeps it while lup runs."""
 
     count: int = 0
 
@@ -73,7 +83,8 @@ class Small(Model):
 class CounterPart(Part):
     """The counter's tools: one moves the count, one reads it."""
 
-    module: Counter
+    tally: State[Tally] = Tally()
+    """How far it has counted."""
 
     @lup.tool
     async def bump(self, bumping: Bumping) -> Count:
@@ -82,23 +93,23 @@ class CounterPart(Part):
         It reads the count, waits, then writes it, so a bump overlapping
         another loses it.
         """
-        count = self.module.tally.count
+        count = self.tally.count
         await asyncio.sleep(0)
-        self.module.tally.count = count + bumping.by
-        return Count(count=self.module.tally.count)
+        self.tally = Tally(count=count + bumping.by)
+        return Count(count=self.tally.count)
 
     @lup.tool(reads=True)
     async def counted(self, _asking: Asking) -> Count:
         """Read how far the counter has counted."""
-        return Count(count=self.module.tally.count)
+        return Count(count=self.tally.count)
 
 
 class CounterPromises(Part):
-    """The counter's promises: laws it keeps and laws it breaks, alone or only where bumps overlap, and a scenario of each."""
+    """The counter's promises: invariants it keeps and invariants it breaks, alone or only where bumps overlap, over its part's state or what its tool reads, and a scenario of each."""
 
     @lup.promise
     def reading_changes_nothing(self, step: Step[Count]) -> bool:
-        """Reading the count never moves it."""
+        """Reading the count never moves it, as its tool reads it."""
         match step.call:
             case ToolCall(tool="counted"):
                 return step.after.count == step.before.count
@@ -106,7 +117,7 @@ class CounterPromises(Part):
                 return True
 
     @lup.promise
-    def moves_by_what_its_bumped(self, step: Step[Count]) -> bool:
+    def moves_by_what_its_bumped(self, step: Step[Tally]) -> bool:
         """The count moves by what a bump asks, on the slice that ends it, and not at all otherwise, which two bumps overlapping break."""
         moved = step.after.count - step.before.count
         match step.call:
@@ -118,7 +129,7 @@ class CounterPromises(Part):
                 return moved == 0
 
     @lup.promise
-    def never_goes_back(self, step: Step[Count]) -> bool:
+    def never_goes_back(self, step: Step[Tally]) -> bool:
         """The count never goes down, which a bump by a negative number breaks."""
         return step.after.count >= step.before.count
 
@@ -138,6 +149,11 @@ class CounterPromises(Part):
         """Every number is below ten, which ten breaks."""
         assert by.any(Small).number < 10
 
+    @lup.promise
+    async def every_byte_is_ascii(self, by: Testing) -> None:
+        """Every byte drawn is ASCII, which a byte past it, as in `b"\\x80"`, breaks."""
+        assert by.any(bytes).isascii()
+
     @lup.promise(every_project=True)
     async def the_project_counts(self, by: Testing) -> None:
         """Whichever project's gate checks this selects the counter."""
@@ -149,7 +165,6 @@ class Counter(Module):
     """Counting: an example module the testing submodule's promises check the harness with."""
 
     name = "counter"
-    tally: Tally = Field(default_factory=Tally)
     parts: Parts = Parts.of(CounterPart, CounterPromises)
 
 
@@ -158,43 +173,192 @@ def counter() -> Project:
     return Project(modules=Modules.default().add(Counter()))
 
 
+class Checked(Model):
+    """How one check of a run of pytest ended, as its report says."""
+
+    name: str
+    failed: bool
+    told: str = ""
+    """What its failure told, where it failed."""
+    properties: dict[str, str]
+    """What the gate's plugin marked it with, by name: why the guard halted it
+    (`lup-halted`), the processor's seconds it took past its `slow`
+    (`lup-slow`), or how it failed before it held (`lup-flaky`)."""
+
+
+def gated(files: dict[str, str], limits: dict[str, float]) -> list[Checked]:
+    """Run pytest, as the gate does, on a scratch repository holding `files`, by their names, its guard's limits in seconds `limits`, and say how each check ended."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for name, text in files.items():
+            (root / name).write_text(text)
+        report = root / "report.xml"
+        settings = [
+            each
+            for name, value in limits.items()
+            for each in ["-o", f"lup_{name}={value}"]
+        ]
+        run(
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            f"--junitxml={report}",
+            *settings,
+            cwd=root,
+            checked=False,
+        )
+        # lup: ignore("S314", why="the XML is the report of a run of pytest this promise started")
+        cases = ET.parse(report).getroot().iter("testcase")
+        return [checked(case) for case in cases]
+
+
+def checked(case: ET.Element) -> Checked:
+    """Read how one check ended from its case in pytest's JUnit report."""
+    failure = case.find("failure")
+    return Checked(
+        name=case.get("name", ""),
+        failed=failure is not None,
+        told="" if failure is None else "".join(failure.itertext()),
+        properties={
+            each.get("name", ""): each.get("value", "")
+            for each in case.iter("property")
+        },
+    )
+
+
+STUCK = """
+import threading
+
+import pytest
+
+
+@pytest.mark.unpromised(why="stuck on purpose, for the guard's promise")
+def test_stuck():
+    held = threading.Lock()
+    held.acquire()
+    held.acquire()
+
+
+@pytest.mark.unpromised(why="the check after a stuck one, for the guard's promise")
+def test_after():
+    pass
+"""
+"""A check stuck on a lock nothing releases, and one after it."""
+
+SPINNING = """
+import time
+
+import pytest
+
+
+@pytest.mark.unpromised(why="spending the processor's time on purpose, for the guard's promise")
+def test_spinning():
+    began = time.process_time()
+    while time.process_time() - began < {seconds}:
+        pass
+"""
+"""A check spending as many seconds of the processor's time as `seconds` says."""
+
+FLAKY = """
+from pathlib import Path
+
+import lup
+from lup import Module, Modules, Part, Parts, Project
+from lup.testing import Testing
+
+MARK = Path(__file__).parent / "failed"
+
+
+class FlakyPromises(Part):
+    \"\"\"A promise that fails the first time it's checked.\"\"\"
+
+    @lup.promise
+    async def holds_once_it_failed(self, by: Testing) -> None:
+        \"\"\"It holds once it has failed.\"\"\"
+        failed = MARK.exists()
+        MARK.touch()
+        assert failed
+
+
+class Flaky(Module):
+    \"\"\"A module whose promise depends on more than its tree.\"\"\"
+
+    name = "flaky"
+    parts: Parts = Parts.of(FlakyPromises)
+
+
+project = Project(modules=Modules.default().add(Flaky()))
+"""
+"""A declaration whose module's promise fails the first time it's checked and holds after, as one depending on more than its tree does."""
+
+BROKEN = """
+import lup
+from lup import Module, Modules, Part, Parts, Project
+from lup.testing import Testing
+
+
+class BrokenPromises(Part):
+    \"\"\"A promise every number below ten breaks.\"\"\"
+
+    @lup.promise
+    async def every_number_is_ten_or_more(self, by: Testing) -> None:
+        \"\"\"Every number is ten or more.\"\"\"
+        assert by.any(int) >= 10
+
+
+class Broken(Module):
+    \"\"\"A module whose promise doesn't hold.\"\"\"
+
+    name = "broken"
+    parts: Parts = Parts.of(BrokenPromises)
+
+
+project = Project(modules=Modules.default().add(Broken()))
+"""
+"""A declaration whose module's promise any number below ten breaks, the smallest being 0."""
+
+
 class TestingPromises(Part):
     """What a module's author can count on of how their promises are checked."""
 
     @lup.promise
-    async def a_law_is_checked_after_every_call_a_scenario_makes(
+    async def an_invariant_is_checked_after_every_call_a_scenario_makes(
         self, by: Testing
     ) -> None:
-        """Every law of every module a scenario starts is checked over each call it makes, and one that doesn't hold fails the scenario there."""
+        """Every invariant of every module a scenario starts is checked over each call it makes, and one that doesn't hold fails the scenario there."""
         started = await by.started(counter())
         agent = by.any(Agent)
         await started.call("bump", Bumping(by=1), agent)
-        with raises(BrokenLawError) as broken:
+        with raises(BrokenInvariantError) as broken:
             await started.call("bump", Bumping(by=-1), agent)
-        assert broken.raised().step.before.model_dump() == {"count": 1}
+        before = broken.raised().step.before
+        assert isinstance(before, Tally)
+        assert before.count == 1
 
     @lup.promise
-    async def a_broken_law_is_told_with_the_shortest_run_that_breaks_it(
+    async def a_broken_invariant_is_told_with_the_shortest_run_that_breaks_it(
         self, by: Testing
     ) -> None:
-        """A law that a run of calls through its project's doors breaks is reported broken, with the shortest run hypothesis finds, its last call the one that broke it."""
+        """An invariant that a run of calls through its project's doors breaks is reported broken, with the shortest run hypothesis finds, its last call the one that broke it."""
         started = await by.started(counter())
         [broken] = await started.checked("counter", "never_goes_back")
         assert isinstance(broken, Broken)
-        assert isinstance(broken.error, BrokenLawError)
+        assert isinstance(broken.error, BrokenInvariantError)
         [call] = broken.calls
         assert isinstance(call, ToolCall)
         assert Bumping.model_validate(call.arguments).by == -1
 
     @lup.promise
-    async def a_law_broken_only_where_calls_overlap_is_told_with_how_they_interleaved(
+    async def an_invariant_broken_only_where_calls_overlap_is_told_with_how_they_interleaved(
         self, by: Testing
     ) -> None:
-        """A law that only calls overlapping break, each slice of a call a step of its own, is reported broken with the calls and the order their slices ran in."""
+        """An invariant that only calls overlapping break, each slice of a call a step of its own, is reported broken with the calls and the order their slices ran in."""
         started = await by.started(counter())
         [broken] = await started.checked("counter", "moves_by_what_its_bumped")
         assert isinstance(broken, Broken)
-        assert isinstance(broken.error, BrokenLawError)
+        assert isinstance(broken.error, BrokenInvariantError)
         first, second = broken.calls
         assert all(isinstance(each, ToolCall) for each in (first, second))
         ends = max(at for at, each in enumerate(broken.slices) if each == first)
@@ -221,11 +385,11 @@ class TestingPromises(Part):
 
     @lup.promise
     async def a_promise_that_holds_is_kept(self, by: Testing) -> None:
-        """A law that holds over every run, and a scenario that holds for every value it draws, are kept."""
+        """An invariant that holds over every run, and a scenario that holds for every value it draws, are kept."""
         started = await by.started(counter())
-        [law] = await started.checked("counter", "reading_changes_nothing")
+        [invariant] = await started.checked("counter", "reading_changes_nothing")
         [scenario] = await started.checked("counter", "counts_what_its_told")
-        assert isinstance(law, Kept)
+        assert isinstance(invariant, Kept)
         assert isinstance(scenario, Kept)
 
     @lup.promise
@@ -245,18 +409,112 @@ class TestingPromises(Part):
         started = await by.started(counter())
         [broken] = await started.checked("counter", "every_number_is_small")
         assert isinstance(broken, Broken)
-        assert [Small.model_validate(each).number for each in broken.drawn] == [10]
+        [small] = broken.drawn
+        assert isinstance(small, Small)
+        assert small.number == 10
 
     @lup.promise
-    async def a_law_reads_its_state_through_a_door_that_only_reads(
+    async def a_promise_may_draw_a_value_of_any_kind(self, by: Testing) -> None:
+        """A scenario may draw a value of any kind, bytes that aren't text among them, and is told broken with the smallest it drew, as drawn."""
+        started = await by.started(counter())
+        [broken] = await started.checked("counter", "every_byte_is_ascii")
+        assert isinstance(broken, Broken)
+        [drawn] = broken.drawn
+        assert drawn == b"\x80"
+
+    @lup.promise
+    async def an_invariant_with_nowhere_to_read_its_state_fails_to_start(
         self, by: Testing
     ) -> None:
-        """A law reads its module's state through a door of the module that only reads: a module holding a law with no such door fails to start, rather than its law going unchecked."""
+        """An invariant reads its module's state from a part's field typed `State[…]`, or through a door of the module that only reads: a module holding an invariant with neither fails to start, naming it, rather than its invariant going unchecked."""
 
         class Unread(Counter):
-            """A counter whose count can't be read."""
+            """A counter whose count is neither held nor read."""
 
             parts: Parts = Parts.of(CounterPromises)
 
-        with raises(ProjectError):
+        with raises(ProjectError) as failed:
             await by.started(Project(modules=Modules.default().add(Unread())))
+        invariants = [
+            "CounterPromises.reading_changes_nothing",
+            "CounterPromises.moves_by_what_its_bumped",
+            "CounterPromises.never_goes_back",
+        ]
+        assert any(each in failed.raised().about for each in invariants)
+
+    @lup.promise
+    async def an_invariant_reads_a_state_only_the_operator_may(
+        self, by: Testing
+    ) -> None:
+        """An invariant reads its module's state through a door only the operator may call, as through any door that only reads, so a module's whole state needn't be every agent's to read."""
+
+        class OperatorsCount(CounterPart):
+            """The counter's tools, its count the operator's alone to read."""
+
+            @lup.tool(reads=True)
+            async def counted(self, _asking: Asking, by: Operator) -> Count:
+                """Read how far the counter has counted."""
+                return Count(count=self.tally.count)
+
+        class Guarded(Counter):
+            """A counter whose count only the operator reads."""
+
+            parts: Parts = Parts.of(OperatorsCount, CounterPromises)
+
+        started = await by.started(Project(modules=Modules.default().add(Guarded())))
+        [kept] = await started.checked("counter", "reading_changes_nothing")
+        assert isinstance(kept, Kept)
+
+    @lup.promise
+    async def a_stuck_check_fails_and_the_run_goes_on(self, by: Testing) -> None:
+        """A check in which nothing runs for the guard's `stalled`, as one stuck on a lock, fails, saying why, and the run goes on to the next check, rather than hanging the gate."""
+        stuck, after = gated({"test_stuck.py": STUCK}, {"stalled": 1})
+        assert stuck.failed
+        assert "lup-halted" in stuck.properties
+        assert not after.failed
+
+    @lup.promise
+    async def a_check_past_its_ceiling_fails(self, by: Testing) -> None:
+        """A check taking more of the processor's time than the guard's `ceiling` fails as too slow, though it goes on moving."""
+        [spinning] = gated(
+            {"test_spinning.py": SPINNING.format(seconds=30)},
+            {"stalled": 60, "ceiling": 1},
+        )
+        assert spinning.failed
+        assert "lup-halted" in spinning.properties
+
+    @lup.promise
+    async def a_slow_check_passes_marked_to_fix(self, by: Testing) -> None:
+        """A check taking more of the processor's time than the guard's `slow`, within its ceiling, passes, marked as slow to fix."""
+        [spinning] = gated(
+            {"test_spinning.py": SPINNING.format(seconds=0.5)},
+            {"stalled": 60, "slow": 0.2},
+        )
+        assert not spinning.failed
+        assert "lup-slow" in spinning.properties
+
+    @lup.promise
+    async def a_promise_failing_then_holding_passes_marked_to_fix(
+        self, by: Testing
+    ) -> None:
+        """A promise that fails, then holds when checked again on the same values, depends on more than its tree: it passes, marked with how it failed, to fix, rather than failing a branch it may have nothing to do with."""
+        ran = gated({"lup_project.py": FLAKY}, {})
+        [flaky] = [
+            each for each in ran if each.name == "FlakyPromises.holds_once_it_failed"
+        ]
+        assert not flaky.failed
+        assert "lup-flaky" in flaky.properties
+
+    @lup.promise
+    async def a_broken_promise_fails_its_check_told_with_what_broke_it(
+        self, by: Testing
+    ) -> None:
+        """A promise a run breaks fails its check in pytest's report, as the gate runs it, whatever checks it inside: told with the smallest value it drew."""
+        ran = gated({"lup_project.py": BROKEN}, {})
+        [broken] = [
+            each
+            for each in ran
+            if each.name == "BrokenPromises.every_number_is_ten_or_more"
+        ]
+        assert broken.failed
+        assert repr(0) in broken.told

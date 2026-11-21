@@ -1,4 +1,4 @@
-"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, a law over runs of calls through every door of its module, and the smallest run that breaks either kept to say so.
+"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, an invariant over runs of calls through every door of its module, and the smallest run that breaks either kept to say so.
 
 The gate's check is repeatable: each promise draws from a seed its own source
 fixes, so a tree gets the same values, and the same verdict, every time. An
@@ -10,6 +10,7 @@ gate's doesn't; what it finds is written into a scenario by whoever fixes it
 import asyncio
 import hashlib
 import inspect
+from functools import partial
 from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, Phase, given, seed, settings
@@ -22,6 +23,7 @@ from lup.doors.parts import Given
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.doors import Entry
+from lup.environment.testing.guarding import Guard, HaltedError
 from lup.environment.testing.harness import Harness, Run, promises, watched
 from lup.environment.testing.simulation import Simulation
 from lup.testing.harness import (
@@ -59,10 +61,13 @@ class Exploring(Model):
 
 
 class Check(Model, arbitrary_types_allowed=True):
-    """One promise to check, with the project whose doors a law's runs call."""
+    """One promise to check, with the project whose doors an invariant's runs call."""
 
     entry: Entry
     project: Project
+    guard: Guard | None = None
+    """What guards the check against being stuck or too slow, told of each
+    slice it runs; none where nothing guards it."""
 
     def said(self) -> str:
         """Name the promise: `CounterPromises.never_goes_back`."""
@@ -73,26 +78,35 @@ class Check(Model, arbitrary_types_allowed=True):
 
         Hypothesis's explain phase is left out: a broken promise is told by its
         own run, its calls and their slices, and explaining which of its values
-        matter runs it again hundreds of times.
+        matter runs it again hundreds of times, tracing every line, after which
+        the run it replays last, which the report names, isn't the shrunk one.
+
+        Shown here as well as promised, since a promise checking this runs
+        under the very check it's about, which couldn't tell it fails no more:
+
+        >>> from lup.testing.promises import Counter, counter
+        >>> [small] = [each for each in promises(Counter()) if each.name == "every_number_is_small"]
+        >>> broken = Check(entry=small, project=counter()).checked(Exploring())
+        >>> type(broken).__name__, broken.drawn
+        ('Broken', [Small(number=10)])
         """
         runs: list[Run] = []
 
         def once(data: st.DataObject) -> None:
-            run = Run(checking=checked)
+            run = Run(checking=partial(checked, guard=self.guard))
             runs.append(run)
-            loop = Simulation(choose=chooser(data), watch=watched)
-            loop.run_until_complete(
-                self.ran(Harness(data=data, run=run, gated=self.project))
-            )
+            loop = Simulation(choose=chooser(data), watch=watching(self.guard))
+            try:
+                loop.run_until_complete(
+                    self.ran(Harness(data=data, run=run, gated=self.project))
+                )
+            except Exception as error:
+                run.error = error
+                raise
 
         test = given(st.data())(once)
         if exploring.seeded:
             test = seed(self.seed())(test)
-        # Hypothesis's explain phase traces every line of every run once one
-        # fails, to say which parts of what it drew mattered: that makes a
-        # broken promise's check many times slower, and the run it replays
-        # last, which the report names, isn't the shrunk one. The report says
-        # what was drawn, called and interleaved itself.
         test = settings(
             database=None,
             deadline=None,
@@ -103,29 +117,38 @@ class Check(Model, arbitrary_types_allowed=True):
         )(test)
         try:
             test()
+        except HaltedError as halted:
+            broke = next((each for each in reversed(runs) if each.error), None)
+            if broke is None or broke.error is None:
+                raise
+            return self.broken(broke, broke.error, halted.why)
         except Exception as error:
-            last = runs[-1]
-            return Broken(
-                promise=self.said(),
-                drawn=last.drawn,
-                calls=last.calls,
-                slices=last.slices,
-                error=error,
-            )
+            return self.broken(runs[-1], error)
         return Kept(promise=self.said())
 
+    def broken(self, run: Run, error: BaseException, halted: str = "") -> Broken:
+        """Say the promise is broken by `run`, the smallest found, or the smallest found before the guard halted the check, saying why."""
+        return Broken(
+            promise=self.said(),
+            drawn=run.drawn,
+            calls=run.calls,
+            slices=run.slices,
+            error=error,
+            halted=halted,
+        )
+
     async def ran(self, harness: Harness) -> None:
-        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the law checked after each."""
+        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the invariant checked after each."""
         try:
             await self.told(harness)
         finally:
             await harness.run.stopped()
 
     async def told(self, harness: Harness) -> None:
-        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its module, the law checked after each."""
+        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its module, the invariant checked after each."""
         method = self.entry.method
         door = method.door
-        if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
+        if not (isinstance(door, PromiseDoor) and door.invariant(method.taken)):
             serves = self.entry.serves
             made = serves.part.made(serves.module, Given())
             told = method.function(made, by=harness)
@@ -137,11 +160,12 @@ class Check(Model, arbitrary_types_allowed=True):
         reached = await harness.reached(self.project)
         mine = reached.model_copy(
             update={
-                "laws": [
-                    law
-                    for law in reached.laws
-                    if law.method is method
-                    and law.entry.serves.module.name == self.entry.serves.module.name
+                "invariants": [
+                    invariant
+                    for invariant in reached.invariants
+                    if invariant.method is method
+                    and invariant.entry.serves.module.name
+                    == self.entry.serves.module.name
                 ]
             }
         )
@@ -169,12 +193,25 @@ def chooser(data: st.DataObject) -> Callable[[int], int]:
     return choose
 
 
+def watching(
+    guard: Guard | None,
+) -> Callable[[asyncio.Handle], Callable[[], None] | None]:
+    """Return how a run's loop watches each slice: told to `guard`, where there's one, as the check going on, and each invariant checked over it."""
+
+    def watch(handle: asyncio.Handle) -> Callable[[], None] | None:
+        if guard is not None:
+            guard.beat()
+        return watched(handle)
+
+    return watch
+
+
 def checked(
-    project: Project, module: Module, promise: str | None
+    project: Project, module: Module, promise: str | None, guard: Guard | None = None
 ) -> list[Kept | Broken]:
-    """Check the promise named `promise` of `module`, in `project`, or every one where none is named, as the gate does, and say how each fared."""
+    """Check the promise named `promise` of `module`, in `project`, or every one where none is named, as the gate does, guarded by `guard`, and say how each fared."""
     return [
-        Check(entry=entry, project=project).checked(Exploring())
+        Check(entry=entry, project=project, guard=guard).checked(Exploring())
         for entry in promises(module)
         if promise is None or promise == entry.name
     ]
@@ -183,10 +220,10 @@ def checked(
 def calls(doors: Doors, module: str) -> SearchStrategy[Call]:
     """Return every call a party could make through the doors `doors` serve of the module named `module`: each tool, command and service, given a value of what it takes, by a party of any its doors name.
 
-    A law's runs call its own module's doors alone: only they change the state
+    An invariant's runs call its own module's doors alone: only they change the state
     it reads, its services among them, which code in another module calls; the
     rest of a project's doors, the core's growing with each submodule, would
-    only dilute the search. A scenario checks every law of every module it
+    only dilute the search. A scenario checks every invariant of every module it
     starts, over every call it makes.
     """
     entries = [
