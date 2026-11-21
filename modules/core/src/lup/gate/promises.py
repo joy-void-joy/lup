@@ -1,13 +1,12 @@
 """The gate's promises: what an agent or the operator typing `lup gate check` in a worktree can count on.
 
-Each runs the check through the harness on a worktree in a temporary directory,
-git and each step's program stood in for as the promise scripts them (git
-answering as a repository there would, ruff laying out what it's given), and
+Each runs the check through the harness on a scratch repository in a temporary
+directory, git run for real (`lup.testing.RealGit`) and each step's program
+stood in for as the promise scripts it (ruff laying out what it's given), and
 reads what ran, where, in what order, and whether the check was refused, never
 its words (`README.md` here, *Promises*).
 """
 
-import hashlib
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -15,15 +14,27 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import lup
-from lup import Agent, Model, Module, Modules, Operator, Part, Project, Step, Steps
+from lup import (
+    Agent,
+    Model,
+    Module,
+    Modules,
+    Operator,
+    Part,
+    Project,
+    Step,
+    Steps,
+)
 from lup.testing import (
     Accepted,
     Answering,
+    RealGit,
     Refused,
     Responding,
     Scripted,
     Testing,
 )
+lazy from lup import Gate
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,7 +42,7 @@ if TYPE_CHECKING:
 LAID_OUT = "laid = 'out'\n"
 """What a Python file holds once ruff's formatter, as the promises stand it in, has laid it out."""
 LOCAL = "lup_project.local.py"
-"""The repository's own layer of the declaration, which git ignores."""
+"""The repository's own layer of the declaration, which its `.gitignore` ignores."""
 
 
 class Checking(Model):
@@ -43,60 +54,17 @@ class Checking(Model):
 
 
 class Worktree(Model):
-    """A worktree in a temporary directory, its git directory inside it, as a clone's is."""
+    """A scratch repository's worktree in a temporary directory, a clone's."""
 
     root: Path
 
-    def files(self) -> list[Path]:
-        """List the files git would commit: every file under the root but the git directory's and the local layer, which git ignores."""
+    def python(self) -> list[Path]:
+        """List the Python files of the worktree, outside its git directory, but the local layer, which git ignores."""
         return sorted(
             each
-            for each in self.root.rglob("*")
-            if each.is_file()
-            and ".git" not in each.relative_to(self.root).parts
-            and each.name != LOCAL
+            for each in self.root.rglob("*.py")
+            if ".git" not in each.relative_to(self.root).parts and each.name != LOCAL
         )
-
-    def tree(self) -> str:
-        """Return the tree git would commit the files as: a digest of each file's path and content."""
-        digest = hashlib.sha1(usedforsecurity=False)
-        for each in self.files():
-            digest.update(str(each.relative_to(self.root)).encode())
-            digest.update(each.read_bytes())
-        return digest.hexdigest()
-
-
-class Git(Model, Responding):
-    """git, stood in for: answering what the gate asks of the worktree at `worktree`."""
-
-    worktree: Worktree
-
-    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
-        """Answer what the gate asks: the worktree's root, its git directory, whether it's bare, its index, and the tree its files make."""
-        del given
-        root = self.worktree.root
-        match arguments:
-            case ["-C", _, "rev-parse", "--show-toplevel"]:
-                return Answering(output=f"{root}\n")
-            case ["-C", _, "rev-parse", "--path-format=absolute", "--git-common-dir"]:
-                return Answering(output=f"{root}/.git\n")
-            case ["-C", _, "config", "--bool", "core.bare"]:
-                return Answering(output="false\n")
-            case [
-                "-C",
-                _,
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-path",
-                "index",
-            ]:
-                return Answering(output=f"{root}/.git/index\n")
-            case ["-C", _, "add", "--all"]:
-                return Answering()
-            case ["-C", _, "write-tree"]:
-                return Answering(output=f"{self.worktree.tree()}\n")
-            case _:
-                return None
 
 
 class Ruff(Model, Responding):
@@ -107,7 +75,7 @@ class Ruff(Model, Responding):
     def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
         """Check the worktree's layout, or lay it out."""
         del given
-        python = [each for each in self.worktree.files() if each.suffix == ".py"]
+        python = self.worktree.python()
         match arguments:
             case ["format", "--check"]:
                 unlaid = [each for each in python if each.read_text() != LAID_OUT]
@@ -132,26 +100,43 @@ def project() -> Project:
     return Project(modules=Modules.default().add(Noting()))
 
 
+def formatting() -> Project:
+    """Return a project of lup's default modules, its gate the format step alone and its fix, so nothing runs beside it."""
+    alone = Steps.of(
+        Step(
+            name="format", command=["ruff", "format", "--check"], fix=["ruff", "format"]
+        )
+    )
+    return Project(modules=Modules.default().edit(Gate(steps=alone)))
+
+
 @contextmanager
 def worktree(*, laid_out: bool = True) -> Generator[Worktree]:
-    """Make a worktree in a temporary directory holding one Python file, laid out where `laid_out`, and its git directory."""
+    """Make a scratch repository in a temporary directory, its one commit holding a Python file, laid out where `laid_out`, and a `.gitignore` ignoring the local layer."""
     with tempfile.TemporaryDirectory() as scratch:
-        root = Path(scratch)
-        (root / ".git").mkdir()
-        (root / "main.py").write_text(LAID_OUT if laid_out else "laid='out'\n")
+        git = RealGit()
+        root = git.made(Path(scratch) / "project")
+        git.committed(
+            root,
+            {
+                "main.py": LAID_OUT if laid_out else "laid='out'\n",
+                ".gitignore": f"/{LOCAL}\n",
+                "docs/README.md": "the project\n",
+            },
+        )
         yield Worktree(root=root)
 
 
 def standing(
     at: Worktree, failing: str | None = None
-) -> dict[str, Git | Ruff | Scripted]:
-    """Return git and every step's program stood in for over the worktree `at`, each step passing but the program named `failing`."""
+) -> dict[str, RealGit | Ruff | Scripted]:
+    """Return git, run for real, and every step's program stood in for over the worktree `at`, each step passing but the program named `failing`."""
 
     def ending(name: str) -> Scripted:
         return Scripted(answers=[Answering(status=1 if name == failing else 0)])
 
     return {
-        "git": Git(worktree=at),
+        "git": RealGit(),
         "ruff": Ruff(worktree=at),
         "pytest": ending("pytest"),
         "lint-imports": ending("lint-imports"),
@@ -175,7 +160,7 @@ class GatePromises(Part):
                 project(), programs=standing(at, "pytest" if failing else None)
             )
             checked = await started.run(
-                "gate", "check", Checking(directory=at.root / ".git"), party
+                "gate", "check", Checking(directory=at.root / "docs"), party
             )
             stepped = [each for each in started.heard.runs if each.program != "git"]
         assert isinstance(checked, Refused if failing else Accepted)
@@ -188,14 +173,13 @@ class GatePromises(Part):
     @lup.promise
     async def a_pass_runs_nothing_again_on_the_same_files(self, by: Testing) -> None:
         """Once the gate passed on a worktree's files, checking the same files again runs no step, unless it's asked to run again; a file changed, or the repository's own layer of the declaration changed, runs every step."""
-        party = by.any(Agent) if by.any(bool) else Operator()
         with worktree() as at:
-            started = await by.started(project(), programs=standing(at))
+            started = await by.started(formatting(), programs=standing(at))
             asking = Checking(directory=at.root)
 
             async def stepped(checking: Checking) -> list[str]:
                 before = len(started.heard.runs)
-                checked = await started.run("gate", "check", checking, party)
+                checked = await started.run("gate", "check", checking, Operator())
                 assert isinstance(checked, Accepted)
                 return [
                     each.program
@@ -211,13 +195,13 @@ class GatePromises(Part):
             (at.root / "other.py").write_text(LAID_OUT)
             changed = await stepped(asking)
         assert same == []
-        assert all("pytest" in each for each in [first, again, layered, changed])
+        assert all("ruff" in each for each in [first, again, layered, changed])
 
     @lup.promise
     async def a_fix_runs_before_any_step_checks(self, by: Testing) -> None:
         """Asked to fix, the gate runs each step's fix before any step checks, so the files are checked as the fixes left them; unasked, it fixes nothing."""
         with worktree(laid_out=False) as at:
-            started = await by.started(project(), programs=standing(at))
+            started = await by.started(formatting(), programs=standing(at))
             unfixed = await started.run(
                 "gate", "check", Checking(directory=at.root), Operator()
             )
@@ -265,12 +249,12 @@ class GatePromises(Part):
             started = await by.started(
                 project(),
                 programs={
-                    "git": Scripted(answers=[Answering(status=128)]),
+                    "git": RealGit(),
                     "ruff": Scripted(answers=[Answering()]),
                 },
             )
             checked = await started.run(
-                "gate", "check", Checking(directory=nowhere), by.any(Agent)
+                "gate", "check", Checking(directory=nowhere), Agent.of("gate")
             )
         assert isinstance(checked, Refused)
         assert started.ran("ruff") == []

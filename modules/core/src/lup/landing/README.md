@@ -8,14 +8,14 @@ An agent calls `land` with their branch and what its merge will say. It lands wh
 - **the branch holds the integration branch's tip on the remote:** the agent merged it in, in their worktree, where they resolve a conflict and see what it brought;
 - **the gate passed on its files:** a pass recorded for the tree its tip names, with the local layers (`lup gate check`, everything committed).
 
-So `land` runs neither a merge nor the gate: it reads the remote's tip and the pass, and is answered at once. The pass is a room's word on how its gate went, since a room writes the git directory: it steers, and guards nothing, the operator's review being what does. It returns as soon as the landing waits on the operator's review: an item in the agent's conversation, of landing's own kind (`WaitsOnReview`, posted through the inbox), opening on the branch's review and offering the operator's yes on the tip that landed, or declining it. It waits until they answer it, and what came of it is told to the agent at their next call: on trial, declined, or their comment, after which the agent lands it again. Landing again answers the item before, the tip that landed since waiting in its place; an accept is told the same way. A branch landed again puts its new tip before them; what's on trial stays at the tip they said yes to until they say yes to the new one.
+So `land` runs neither a merge nor the gate: it reads the remote's tip and the pass, and is answered at once. The pass is a room's word on how its gate went, since a room writes the git directory: it steers, and guards nothing, the operator's review being what does. It says the `# lup: defer` comments the branch adds, removes and rewords in its Python files against the integration branch it holds, read from each version's text with the code rules' reader (`changed_deferrals`), a deferral moved to another line neither: work left undone shows as it lands, to the agent and in the review. It returns as soon as the landing waits on the operator's review: an item in the agent's conversation, of landing's own kind (`WaitsOnReview`, posted through the inbox), opening on the branch's review and offering the operator's yes on the tip that landed, or declining it. It waits until they answer it, and what came of it is told to the agent at their next call: on trial, declined, or their comment, after which the agent lands it again. Landing again answers the item before, the tip that landed since waiting in its place; an accept is told the same way. A branch landed again puts its new tip before them; what's on trial stays at the tip they said yes to until they say yes to the new one.
 
 `want` asks the operator to accept a branch on trial, saying why, which shows on its line: a branch on trial isn't on the integration branch, so another agent's branch doesn't hold it until it's accepted.
 
 ## On trial
 
 `Landings` is the machine's part (`machine=True, shared=True`): only the machine's parts read a repository's store hash-checked, record an approval and restart a project's containers. It keeps each project's landings, a JSON file each, and serves the operator:
-- **`review`**, a landing's view: how the gate went on its tip, what a step that tells said (what the rules listed without failing, say), then each file its tip changes, read from each object's own bytes;
+- **`review`**, a landing's view: how the gate went on its tip, what a step that tells said (what the rules listed without failing, say), the `# lup: defer` comments it changes, then each file its tip changes, read from each object's own bytes;
 - **`yes`** (`done`): the branch goes on trial at the tip whose review they read, which the yes names: one landed again since is refused, a review of its own;
 - **`toggle`**: takes a branch on trial out of what runs, or puts it back, as when they want to see whether it's the one causing what they see;
 - **`drop`** (`decline`): takes it off trial, or declines a landing waiting, and leaves the branch as it is;
@@ -33,13 +33,13 @@ The integration branch moves only by an accept: `land` never pushes it, and a ro
 
 ## git on the machine
 
-Every git command runs through `Git` (`lup/hosting/git.py`), pinned to the repository's common git directory, nothing a room planted read, and what it prints read there alone: no submodule fetched or pushed, no index but its own, no shallow file. The operator's global git configuration isn't read, so a remote reached over HTTPS through a credential helper it names doesn't push; one over SSH does.
+Every git command runs through git's companion, the repository's store pinned (`Git.pinned`, `lup/programs/git/README.md`): nothing a room planted read, and what git prints read there alone, no submodule fetched or pushed, no index but its own, no shallow file. The gate asks it for the worktree it's typed in (`Git.located`) and the tree its files make (`Worktree.staged`). The operator's global git configuration isn't read, so a remote reached over HTTPS through a credential helper it names doesn't push; one over SSH does.
 
 `trial` and `review` are the operator's views alone: a project's landings are read by nobody else's call.
 
 ## What's left
 
-- The `# lup: defer` comments a landing adds and removes, through #9's reader.
+- The `# lup: defer` comments of a TypeScript file, which need the code rules' engine, on Node, to read: a landing lists a Python file's alone.
 - A gate's result shown on the agent's line in the dashboard, beside the review where it's shown now.
 
 ## Promises

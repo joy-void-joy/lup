@@ -8,8 +8,6 @@ the commit the operator approved (`README.md` here, *Where it runs*).
 
 import asyncio
 import hashlib
-import shutil
-import tempfile
 from itertools import groupby
 from pathlib import Path
 
@@ -21,6 +19,7 @@ from lup.doors.parts import Declared, Part, Program, UnrunError
 from lup.gate.layout import GateLayout
 from lup.gate.settings import GateSettings
 from lup.gate.steps import Step, Steps
+from lup.programs.git import Git
 from lup.types import Model
 
 
@@ -120,20 +119,21 @@ class Gating(Part):
         """
         start = asyncio.get_running_loop().time()
         within = checking.directory or Path.cwd()
-        layout = await RepositoryLayout.located(self.git, within)
-        if layout is None:
+        worktree = await Git.located(within, self.git)
+        if worktree is None:
             message = (
                 f"{within} is in no git worktree, so the gate has no files to check"
             )
             raise RefusedError(message)
+        layout = RepositoryLayout.of(worktree)
         steps = self.declared.held(Steps)
         fixed = (
             [await self.ran(step, step.fix, layout.root) for step in steps if step.fix]
             if checking.fix
             else []
         )
-        recorded = await self.recorded(layout)
-        tree = await self.tree(layout.root)
+        recorded = GateLayout(common=worktree.common)
+        tree = await worktree.staged()
         key = keyed(tree, layout.local)
         if not checking.again and passed(recorded, key) is not None:
             return (
@@ -182,53 +182,6 @@ class Gating(Part):
         return Ran(
             step=step, status=finished.status, seconds=loop.time() - start, said=said
         )
-
-    async def recorded(self, layout: RepositoryLayout) -> GateLayout:
-        """Return where the repository at `layout` keeps its passes: in the git directory every worktree shares."""
-        common = await self.git.ran(
-            "-C",
-            str(layout.root),
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-common-dir",
-        )
-        if common.status != 0:
-            message = (
-                f"git can't say where {layout.root} keeps its history: {common.said()}"
-            )
-            raise RefusedError(message)
-        return GateLayout(common=Path(common.text().strip()))
-
-    async def tree(self, root: Path) -> str:
-        """Return the tree git would commit the worktree at `root`'s files as, every change and every file it doesn't ignore added, its own index left as it is."""
-        index = await self.git.ran(
-            "-C",
-            str(root),
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "index",
-        )
-        with tempfile.TemporaryDirectory() as scratch:
-            kept = Path(scratch) / "index"
-            if index.status == 0:
-                copied(Path(index.text().strip()), kept)
-            apart = {"GIT_INDEX_FILE": str(kept)}
-            added = await self.git.ran("-C", str(root), "add", "--all", env=apart)
-            written = await self.git.ran("-C", str(root), "write-tree", env=apart)
-        if added.status != 0 or written.status != 0:
-            message = (
-                f"git can't read {root}'s files as it would commit them: "
-                f"{added.said() or written.said()}"
-            )
-            raise RefusedError(message)
-        return written.text().strip()
-
-
-def copied(index: Path, to: Path) -> None:
-    """Copy the worktree's own index to `to`, where it has one, so git reads the files it holds unchanged from it rather than each again; a worktree with none starts from nothing."""
-    if index.is_file():
-        shutil.copyfile(index, to)
 
 
 def keyed(tree: str, local: Path) -> str:

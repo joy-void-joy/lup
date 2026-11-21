@@ -24,7 +24,7 @@ These are the second lup's room's walls, as measured with rootless podman 6.1 (`
 
 `Trees` also says which files two commits differ in, from each object's own bytes (`compared`), and gives their whole diff (`diffed`) as git compares the two commits written out, with no repository, configuration or diff driver of anyone's having a say in it, so what the operator reads is what would run.
 
-`Objects` is that reading, apart from `Trees`, for another machine part to read a commit through, as the trial does (`lup/landing/README.md`); `Git` (`git.py`) is every other git command the machine runs on a repository a room writes, pinned the same way, what it prints read there alone.
+`Objects` is that reading, apart from `Trees`; git's companion holds the same reading for every other part, a store pinned (`lup/programs/git/README.md`), which the trial reads a commit through (`lup/landing/README.md`).
 
 ## Approvals
 

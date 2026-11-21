@@ -29,8 +29,8 @@ from lup import (
 )
 from lup.testing import (
     Accepted,
-    Acting,
     Answering,
+    RealGit,
     Refused,
     Repository,
     Scripted,
@@ -61,24 +61,6 @@ stand in for passing, saying `TOLD`: the gate as an agent runs it, on the files
 the promise committed."""
 TOLD = "historical-voice: main.py:3"
 """What the gate's step tells where it passes."""
-
-
-class RealGit(Model, Acting):
-    """git, run for real, with the variables and from the directory each run asks."""
-
-    def ran(
-        self,
-        arguments: list[str],
-        given: bytes | None,
-        env: dict[str, str],
-        cwd: Path | None,
-    ) -> Answering:
-        """Run git as asked, and answer how it ended."""
-        pinned = [f"{name}={value}" for name, value in env.items()]
-        done = lup.programs.run(
-            "env", *pinned, "git", *arguments, cwd=cwd, stdin=given, checked=False
-        )
-        return Answering(status=done.status, output=done.output, error=done.error)
 
 
 class Places(Model):
@@ -224,6 +206,19 @@ class Told(Model):
     """What's told to an agent at their next call."""
 
     items: list[ToldItem] = []
+
+
+class Seen(Model):
+    """A `# lup: defer` a landing says its branch changes: the file, and what the branch does to it."""
+
+    path: str
+    how: str
+
+
+class LandedDeferrals(Model):
+    """What a landing says of the work left undone it lands."""
+
+    deferrals: list[Seen] = []
 
 
 class LandedItem(Model):
@@ -455,6 +450,30 @@ class LandingPromises(Part):
         assert heard
 
     @lup.promise
+    async def a_landing_says_the_work_left_undone_it_lands(self, by: Testing) -> None:
+        """A landing says each `# lup: defer` its branch adds and removes in a Python file against the integration branch it holds, and none it only moves to another line."""
+        agent = Agent.of("landing")
+        with places() as at:
+            at.committed("dev", "kept.py", '# lup: defer(issue=1, why="moved")\n')
+            at.committed("dev", "gone.py", '# lup: defer(issue=2, why="done")\n')
+            at.git("push", "--quiet", "origin", "dev")
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed(
+                "feature", "kept.py", 'x = 1\n# lup: defer(issue=1, why="moved")\n'
+            )
+            at.committed("feature", "gone.py", "y = 2\n")
+            at.committed("feature", "new.py", '# lup: defer(issue=3, why="later")\n')
+            await gated(started, at)
+            answered = await landed(started, "feature", agent)
+        assert isinstance(answered, Accepted)
+        assert isinstance(answered.output, Model)
+        seen = LandedDeferrals.model_validate(answered.output.model_dump()).deferrals
+        assert Seen(path="new.py", how="adds") in seen
+        assert Seen(path="gone.py", how="removes") in seen
+        assert all(each.path != "kept.py" for each in seen)
+
+    @lup.promise
     async def a_yes_is_to_the_tip_whose_review_was_read(self, by: Testing) -> None:
         """A yes names the tip whose review the operator read: where the branch landed again since, at a tip they haven't read, it's refused and nothing of the tip it landed at since runs."""
         agent = Agent.of("landing")
@@ -502,7 +521,7 @@ class LandingPromises(Part):
     async def a_store_reading_anothers_objects_pushes_nothing(
         self, by: Testing
     ) -> None:
-        """Accepting pushes nothing from a store that reads objects from outside it, whose history a push would send: the integration branch on the remote stays as it was."""
+        """Accepting pushes nothing from a store that reads objects from outside it, through `alternates` or `http-alternates`, whose history a push would send: the integration branch on the remote stays as it was."""
         agent = Agent.of("landing")
         with places() as at:
             started = await machine(by, at)
@@ -511,14 +530,22 @@ class LandingPromises(Part):
             await gated(started, at)
             assert isinstance(await landed(started, "feature", agent), Accepted)
             await started.run("landing", "yes", reviewing(at, "feature"), Operator())
-            alternates = at.project / ".git" / "objects" / "info" / "alternates"
-            alternates.parent.mkdir(parents=True, exist_ok=True)
-            alternates.write_text(f"{at.remote / 'objects'}\n")
-            refused = await started.run(
-                "landing", "accept", Naming(branch="feature"), Operator()
-            )
+            info = at.project / ".git" / "objects" / "info"
+            info.mkdir(parents=True, exist_ok=True)
+
+            async def refused_with(name: str) -> bool:
+                (info / name).write_text(f"{at.remote / 'objects'}\n")
+                accepted = await started.run(
+                    "landing", "accept", Naming(branch="feature"), Operator()
+                )
+                (info / name).unlink()
+                return isinstance(accepted, Refused)
+
+            refused = [
+                await refused_with(name) for name in ["alternates", "http-alternates"]
+            ]
             after = at.remote_file("dev", "feature.txt")
-        assert isinstance(refused, Refused)
+        assert all(refused)
         assert after is None
 
     @lup.promise

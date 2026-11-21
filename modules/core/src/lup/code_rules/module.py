@@ -29,7 +29,7 @@ from lup.code_rules.reporting import Report
 from lup.code_rules.reports import FileReport, RuleInfo
 from lup.code_rules.ruff import ruff_findings
 from lup.declaration.layout import RepositoryLayout
-from lup.hosting.git import nul_separated
+from lup.programs.git.answers import nul_separated
 
 
 class Rules(Named[str]):
