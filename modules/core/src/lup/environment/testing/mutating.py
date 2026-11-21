@@ -316,7 +316,6 @@ class Reaching(Model):
             ranked = sorted(
                 checks, key=lambda check: -nearness(self.path, written.get(check, far))
             )
-            # lup: ignore("silent-truncation", why="a break is tried against the checks nearest its file, and the report says how many each ran")
             return ranked[:most]
 
         return [

@@ -165,13 +165,11 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None]:
     try:
         return (yield)
     except HaltedError as halted:
-        # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
         item.user_properties.append((HALTED, halted.why))
         raise
     finally:
         taken = guard.taken()
         if taken >= guard.limits.slow:
-            # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
             item.user_properties.append((SLOW, taken.total_seconds()))
 
 
@@ -444,7 +442,6 @@ class Promised(pytest.Item):
                 return
             case Broken() as broken:
                 if broken.halted:
-                    # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
                     self.user_properties.append((HALTED, broken.halted))
                 if self.exploring.seeded and not broken.halted:
                     match self.check.checked(self.exploring):
@@ -452,7 +449,6 @@ class Promised(pytest.Item):
                             told = said(
                                 broken, self.check.entry.method.taken.description
                             )
-                            # lup: ignore("tuple-shape", why="pytest takes a report's property as this tuple: its name and its value")
                             self.user_properties.append((FLAKY, told))
                             return
                         case Broken():
