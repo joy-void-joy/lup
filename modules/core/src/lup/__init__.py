@@ -58,7 +58,7 @@ from lup.doors.parts import (
     SshAgent,
     UnrunError,
 )
-from lup.doors.service import UncarriedError, service
+from lup.doors.service import UncarriedError, heeded, service
 from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.gate.steps import Step, Steps
@@ -169,6 +169,7 @@ __all__ = [
     "chosen",
     "command",
     "guidance",
+    "heeded",
     "on",
     "programs",
     "promise",

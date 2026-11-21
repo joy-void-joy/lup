@@ -10,7 +10,7 @@ commit an event, and a post's parts (`README.md` here).
 
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import Base64Bytes, Field
+from pydantic import Field
 
 from lup.doors.events import Event
 from lup.types import Model
@@ -23,7 +23,7 @@ class Line(Model):
     text: str
 
 
-class Changed(Model):
+class Changed(Model, ser_json_bytes="base64", val_json_bytes="base64"):
     """A file a commit adds or changes, as the commit publishes it: its path, and the lines it adds against each parent, or its bytes whole where it isn't text."""
 
     path: str
@@ -31,8 +31,9 @@ class Changed(Model):
     added: list[Line] = []
     """The lines it adds, where it's text: against a merge's every parent,
     the merge's own resolution, never what a parent brought."""
-    content: Base64Bytes | None = None
-    """Its bytes, where it isn't text, read whole; none for text."""
+    content: bytes | None = None
+    """Its bytes, where it isn't text, read whole, in base64 on the wire; none
+    for text."""
 
 
 class Commit(Model):
@@ -76,5 +77,6 @@ class Publishing(Event):
     """Something about to leave under the operator's name: a method hearing it may refuse it, raising `RefusedError` with where it found what isn't published, and nothing leaves."""
 
     answered: ClassVar[bool] = True
+    fired: ClassVar[bool] = True
     kind: Literal["publishing"] = "publishing"
     published: Published

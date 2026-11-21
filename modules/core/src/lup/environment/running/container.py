@@ -18,6 +18,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.doors.door import Answer, Method, Refused, RefusedError, Rejection
+from lup.doors.events import Event, Heeded
 from lup.doors.on import OnDoor
 from lup.doors.service import Carrier
 from lup.environment.declaration import Resolved, load, resolve
@@ -159,6 +160,21 @@ class Outward(Model, Carrier):
     calling: Path
     """The program's socket, which this container calls out through: the
     program says who the call is by, from the socket, so it's sent without."""
+
+    @override
+    async def heeded(self, event: Event) -> Heeded:
+        """Tell `event` to the parts of the project hearing it in its other containers, through the program on the operator's machine, and return what they answered.
+
+        Raise `RefusedError` where it can't be carried there.
+        """
+        # lup: defer(issue=3, why="the machine carrying a part's event to the parts of its project hearing it in its other containers, which `Carrying` is to route")
+        kind = type(event).__name__
+        message = (
+            f"`{kind}` can't reach the parts hearing it in the project's other "
+            "containers: the program on the operator's machine doesn't carry a "
+            "part's event yet"
+        )
+        raise RefusedError(message, about=[kind])
 
     @override
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:

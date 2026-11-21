@@ -26,7 +26,17 @@ from typing import TYPE_CHECKING, ClassVar, Concatenate, overload
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from lup.doors.door import Answer, Door, DoorError, Method, Taken, is_model, spelled
+from lup.doors.door import (
+    Answer,
+    Door,
+    DoorError,
+    Method,
+    RefusedError,
+    Taken,
+    is_model,
+    spelled,
+)
+from lup.doors.events import Event, Heeded
 from lup.doors.parties import Codebase, Party
 from lup.errors import LupError
 from lup.types import Model
@@ -50,10 +60,35 @@ class Carrier(ABC):
         or the method refusing.
         """
 
+    @abstractmethod
+    async def heeded(self, event: Event) -> Heeded:
+        """Tell every part of the project hearing `event`'s class of it, here and wherever else each runs, and return what they answered: their words in order, and the first refusal, after which none is told."""
+
 
 CARRYING = ContextVar[Carrier | None]("carrying", default=None)
 """What carries a service's call from here: set by lup wherever it runs a
 module's code, none outside lup."""
+
+
+async def heeded(event: Event) -> Heeded:
+    """Tell every part of the project hearing `event`'s class of it, wherever each runs, and return what they answered: their words, in order, and the first refusal, after which none is told.
+
+    Only an event a part may fire (`Event.fired`) is told so: one only lup
+    tells, as a session's is, is refused. Raise `UncarriedError` where nothing
+    carries it, outside lup.
+    """
+    kind = type(event).__name__
+    if not type(event).fired:
+        message = f"`{kind}` is an event only lup tells: a part's code doesn't fire it"
+        raise RefusedError(message, about=[kind])
+    carrier = CARRYING.get()
+    if carrier is None:
+        message = (
+            f"`{kind}` is told to the parts hearing it where lup runs a module's "
+            "code, which carries it to where each runs; nothing here does"
+        )
+        raise UncarriedError(message, about=[kind])
+    return await carrier.heeded(event)
 
 
 class ServiceDoor(Door):

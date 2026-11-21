@@ -534,6 +534,15 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
         return await self.answered(found[0], given, by)
 
     @override
+    async def heeded(self, event: Event) -> Heeded:
+        """Tell `event` to every part hearing it made here, then, where none refused, to those made elsewhere, through `beyond`, and return what they answered."""
+        here = await self.heard(event)
+        if here.refused is not None or self.beyond is None:
+            return here
+        there = await self.beyond.heeded(event)
+        return Heeded(told=[*here.told, *there.told], refused=there.refused)
+
+    @override
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:
         """Carry a service's call made in this project's code to the class serving it, here, as the project's code.
 

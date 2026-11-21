@@ -22,6 +22,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from lup.declaration.errors import ProjectError
 from lup.declaration.layout import MachineLayout
 from lup.doors.door import Accepted, Answer, Method, RefusedError
+from lup.doors.events import Event, Heeded
 from lup.doors.parties import Machine
 from lup.doors.service import Carrier
 from lup.environment.declaration import load, resolve
@@ -155,6 +156,12 @@ class Inward(MutableModel, Carrier, arbitrary_types_allowed=True):
     the machine's parts have started."""
     limit: int = 16 * 2**20
     """The longest answer read, in bytes."""
+
+    @override
+    async def heeded(self, event: Event) -> Heeded:
+        """Tell nobody beyond the machine: an event the machine's own parts fire is heard by its own parts alone, which `Running` told already."""
+        del event
+        return Heeded()
 
     @override
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:

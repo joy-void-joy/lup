@@ -47,9 +47,12 @@ dashboard = [
 ]
 
 # `lup`, the command line for developing with lup, over the declaration of the
-# worktree it runs in (`lup/command_line/README.md`).
+# worktree it runs in (`lup/command_line/README.md`); and `git-remote-lup`,
+# git's remote helper in a room, which pushes and fetches through the project's
+# `remote` part with the operator's credentials (`lup/remote/README.md`).
 [project.scripts]
 lup = "lup.environment.command_line:main"
+git-remote-lup = "lup.environment.remote:main"
 
 # pytest runs lup's plugin wherever the core is installed, checking the promises
 # of the modules a project's declaration resolves to (`lup/testing/README.md`).
