@@ -486,6 +486,17 @@ Read-only, on the operator's machine, logged in as the operator, for `forge/` (`
 - **Commands that need no checkout:** `gh issue view --repo` runs no git; `gh pr create --repo <r> --head <b> --dry-run` ran from a directory outside any repository and printed the pull request it would make, and run in the bare git directory it ran `git remote -v` and read `branch.<head>.*`. `--head` takes `<owner>:<branch>` for a fork's branch, so a branch's name is checked on GitHub before a pull request opens: GraphQL's `repository(owner:, name:) { ref(qualifiedName: "refs/heads/<b>") }` answers null for a branch that isn't there, `a:b` and `../x` included, its name a variable rather than a URL's path.
 - **Read, not run:** `gh issue comment <n>` on a pull request's number, which lup's `comment` relies on, since `gh issue view` reads either and GitHub's `addComment` takes either's id. Owed live with the first comment a launched session makes.
 
+## ssh through the operator's agent (OpenSSH 10.5p1, measured in a room 2026-11-21)
+
+What `lup/hosting/README.md`, *Lending*, rests on: a part signing through the operator's SSH agent with their configuration read and none of their keys there. Measured with a throwaway, unprivileged `sshd` on `127.0.0.1`, a fresh ed25519 key added to a fresh `ssh-agent`, and a configuration `Host alias` / `HostName 127.0.0.1` / `IdentityFile <dir>/id_probe` / `IdentitiesOnly yes`, run with `ssh -F <config> -o BatchMode=yes alias`:
+- **The private key's file gone, its `.pub` beside where it was:** signed in through the agent.
+- **Both gone:** "no such identity: … No such file or directory", then "Permission denied (publickey)": with `IdentitiesOnly`, ssh offers the agent only the keys its configuration names, and finds them by their files.
+- **`IdentityFile` naming the `.pub` itself:** signed in through the agent.
+
+- **`~` is the passwd entry's home, not `HOME`:** with `HOME` naming a directory holding `.ssh/config`, `ssh -G` read none of it.
+
+Not measured yet: the home of the passwd entry podman writes under `--userns=keep-id`, and whether it takes the `HOME` the container is given. Where it doesn't, ssh in a part's container reads no configuration of the operator's.
+
 ## Rooms
 
 ### podman 6.1.3, rootless: the CLIs in a container (measured 2026-10-12)

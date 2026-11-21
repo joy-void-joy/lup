@@ -42,7 +42,7 @@ from lup.doors.door import (
 from lup.doors.events import Event, Heeded, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Codebase, Machine, Party, said
-from lup.doors.parts import Given, Part, Parts, Runs
+from lup.doors.parts import Given, Part, Parts, Runs, SshAgent
 from lup.doors.service import CARRYING, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
@@ -216,6 +216,8 @@ class Doors(Model):
         runtime: Path | None = None,
         runs: Runs | None = None,
         machine: bool = False,
+        git: Path | None = None,
+        ssh: SshAgent | None = None,
     ) -> Running:
         """Make each part once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
 
@@ -228,6 +230,9 @@ class Doors(Model):
         keeping what lasts while it runs one under `runtime`, named so too, and
         a program a part declares is run by `runs`. Where `machine`, these are
         the machine's own parts, and a service their code calls is by `Machine`.
+        A part holding the project's git directory is given `git`, and one
+        holding the operator's SSH agent `ssh`; their GitHub login is among
+        `secrets`, under its field's name.
 
         Where `runs` is given, each program a part declares is checked first
         (`Program.checked`): one that isn't there, or isn't at a version the
@@ -275,6 +280,8 @@ class Doors(Model):
                             runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
                             modules=self.modules,
+                            git=git,
+                            ssh=ssh,
                         ),
                     ),
                 )

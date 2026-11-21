@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.parties import Agent, Codebase, Machine, Operator
+from lup.doors.parts import SshAgent
 from lup.errors import LupError
 from lup.running.plan import Plan
 from lup.types import Model
@@ -254,6 +255,12 @@ class Start(Model):
     """The directory in memory each part keeping what lasts while it runs
     keeps it under, a directory named `module.Part` each; none where none
     keeps any."""
+    git: Path | None = None
+    """The project's common git directory, as mounted in it, where its part
+    holds it (`GitDirectory`); none otherwise."""
+    ssh: SshAgent | None = None
+    """The operator's SSH agent, its socket and their home as mounted in it,
+    where its part holds it (`SshAgent`); none otherwise."""
 
 
 class Host(Model):

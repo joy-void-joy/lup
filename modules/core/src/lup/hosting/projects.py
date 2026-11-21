@@ -17,6 +17,7 @@ what it synced and kept before, and code running in one container never writes
 what another imports or reads what another keeps.
 """
 
+import os
 from pathlib import Path
 
 from pydantic import Field, TypeAdapter, ValidationError
@@ -25,7 +26,7 @@ import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Machine, Operator
-from lup.doors.parts import Data, Part, Program, Runtime
+from lup.doors.parts import Data, Part, Program, Runtime, SshAgent
 from lup.errors import LupError
 from lup.hosting.approvals import Approvals, Asking
 from lup.hosting.carrying import Carrying, Naming, Placement, Placing
@@ -39,7 +40,9 @@ from lup.hosting.containers import (
     Once,
     Spec,
 )
+from lup.hosting.logins import Borrowing, Logins
 from lup.hosting.secrets import Holding, Secrets
+from lup.hosting.settings import Lending
 from lup.hosting.trees import Commit, Exporting, Trees
 from lup.running.plan import Name, PartPlan, Plan
 from lup.running.wire import Planning, Rendering, Start, read
@@ -85,6 +88,21 @@ class Opened(Model):
     waiting: list[str] = []
     """Parts holding a secret nothing's kept yet, by `module.Part`, not
     started until the operator gives it."""
+    unlent: dict[str, str] = {}
+    """Parts holding what the machine couldn't lend them of the operator's (their
+    GitHub login, their SSH agent), by `module.Part`, with why: not started
+    until the project opens again."""
+
+
+class Lent(Model):
+    """What the machine lends one part of a project as its container starts: the secrets it holds and the operator's GitHub login, by their fields' names, the operator's SSH agent, and the project's git directory, each on the machine."""
+
+    secrets: dict[str, str] = Field(default={}, repr=False)
+    ssh: SshAgent | None = None
+    git: Path | None = None
+    unlent: str | None = None
+    """Why the machine couldn't lend it what it holds of the operator's, which
+    keeps it waiting; none where it lends it all."""
 
 
 OPENINGS = TypeAdapter(dict[str, Opening])
@@ -163,12 +181,17 @@ class Base(Model):
     archive: str = "https://archive.archlinux.org/repos/2026/08/15/$repo/os/$arch"
     packages: list[str] = ["git", "uv"]
 
-    def definition(self) -> str:
-        """Return its Containerfile."""
+    def definition(self, added: list[str] | None = None) -> str:
+        """Return its Containerfile, with the packages in `added` beside its own: those the programs of the parts a container runs are in."""
+        extra: list[str] = [] if added is None else added
+        packages = [
+            *self.packages,
+            *dict.fromkeys(each for each in extra if each not in self.packages),
+        ]
         steps = [
             f"echo 'Server = {self.archive}' > /etc/pacman.d/mirrorlist",
             "pacman -Syu --noconfirm --needed --disable-download-timeout -- "
-            + " ".join(self.packages),
+            + " ".join(packages),
             "rm -rf /var/cache/pacman/pkg/*",
         ]
         return f"FROM {self.image}\nRUN " + " \\\n    && ".join(steps) + "\n"
@@ -216,10 +239,12 @@ class Projects(Part, machine=True, shared=True):
             return f"lup-{repository}-project"
         return f"lup-{repository}-{part.module}-{part.part}"
 
-    def image(self, repository: str) -> Image:
-        """Return the image a project's containers run."""
+    def image(self, repository: str, added: list[str] | None = None) -> Image:
+        """Return the image a project's containers run, with the packages in `added`, those of the parts one runs: an image of its own for each list, built once."""
         return Image(
-            base=self.base.image, definition=self.base.definition(), project=repository
+            base=self.base.image,
+            definition=self.base.definition(added),
+            project=repository,
         )
 
     def spec(self, source: Source, name: str, role: str, sockets: Path | None) -> Spec:
@@ -345,6 +370,7 @@ class Projects(Part, machine=True, shared=True):
                 file = kept / each
                 file.touch(mode=0o600)
                 file.write_text(value)
+        await Containers.built(self.image(sharing.repository, part.packages))
         spec = self.shared_spec(sharing, part, name, interpreters, directory.path)
         spec = spec.model_copy(
             update={"env": {**spec.env, "LUP_ASKED": start.model_dump_json()}}
@@ -370,7 +396,7 @@ class Projects(Part, machine=True, shared=True):
         data.mkdir(parents=True, exist_ok=True)
         return Spec(
             name=name,
-            image=self.image(sharing.repository),
+            image=self.image(sharing.repository, part.packages),
             command=[
                 str(sharing.environment / "bin" / "python"),
                 "-m",
@@ -482,7 +508,12 @@ class Projects(Part, machine=True, shared=True):
             if not opened.waiting
             else f"; waiting on secrets for {', '.join(opened.waiting)}"
         )
-        return f"{opened.repository}: {len(opened.containers)} containers{waiting}"
+        unlent = "".join(
+            f"; {name} waits on {why}" for name, why in opened.unlent.items()
+        )
+        return (
+            f"{opened.repository}: {len(opened.containers)} containers{waiting}{unlent}"
+        )
 
     @lup.service
     async def resumed(self, resuming: Resuming, by: Machine) -> Resumed:
@@ -545,6 +576,7 @@ class Projects(Part, machine=True, shared=True):
                         else ""
                     ),
                     *(container(name) for name in each.containers),
+                    *(f"  {name} waits on {why}" for name, why in each.unlent.items()),
                 ]
             )
             for each in self.projects.values()
@@ -661,8 +693,20 @@ class Projects(Part, machine=True, shared=True):
             for each in apart
         }
         waiting = [name for name, values in held.items() if values.missing]
+        lent = {
+            each.named(): await self.lent(opening, each, held[each.named()].values)
+            for each in apart
+            if each.named() not in waiting
+        }
+        unlent = {
+            name: each.unlent for name, each in lent.items() if each.unlent is not None
+        }
         together = [each.named() for each in plan.together()]
-        running = [each for each in apart if each.named() not in waiting]
+        running = [
+            each
+            for each in apart
+            if each.named() in lent and each.named() not in unlent
+        ]
         self.generation += 1
         named = [
             *([self.container(source, None)] if together else []),
@@ -670,10 +714,14 @@ class Projects(Part, machine=True, shared=True):
         ]
         try:
             placements = [
-                *([await self.placed(source, None, together)] if together else []),
+                *(
+                    [await self.placed(source, None, together, plan.together())]
+                    if together
+                    else []
+                ),
                 *[
                     await self.placed(
-                        source, each, [each.named()], held[each.named()].values
+                        source, each, [each.named()], [each], lent[each.named()]
                     )
                     for each in running
                 ],
@@ -695,6 +743,7 @@ class Projects(Part, machine=True, shared=True):
             root=source.root,
             containers=[each.container for each in placements],
             waiting=waiting,
+            unlent=unlent,
         )
         self.projects = {**self.projects, opening.repository: opened}
         self.kept_with(opening)
@@ -741,17 +790,96 @@ class Projects(Part, machine=True, shared=True):
             raise RefusedError(message)
         return plan
 
+    async def lent(
+        self, opening: Opening, part: PartPlan, secrets: dict[str, str]
+    ) -> Lent:
+        """Return what the machine lends `part` of the operator's as its container starts, beside `secrets`, those it holds: the operator's GitHub login, read with `gh auth token`, their SSH agent, as the machine's `SSH_AUTH_SOCK` names it, and the project's git directory; or why it can't, which keeps the part waiting."""
+        logins: dict[str, str] = {}
+        if part.holds.github:
+            try:
+                login = await Logins.github(Borrowing())
+            except RefusedError as refused:
+                return Lent(unlent=f"your GitHub login: {refused}")
+            logins = dict.fromkeys(part.holds.github, login.token)
+        ssh = None
+        if part.holds.ssh:
+            socket = Lending().ssh_auth_sock
+            if socket is None:
+                return Lent(
+                    unlent=(
+                        "your SSH agent: the machine has no `SSH_AUTH_SOCK`, so start "
+                        "your agent and open the project again from a terminal "
+                        "where it's set"
+                    )
+                )
+            ssh = SshAgent(socket=socket, home=Path.home())
+        return Lent(
+            secrets={**secrets, **logins},
+            ssh=ssh,
+            git=opening.common if part.holds.git else None,
+        )
+
     async def placed(
         self,
         source: Source,
         part: PartPlan | None,
         parts: list[str],
-        secrets: dict[str, str] | None = None,
+        plans: list[PartPlan],
+        lent: Lent | None = None,
+        *,
+        header: int = 80,
     ) -> Placement:
-        """Start one container of the project running `parts`, its sockets' directory from `Carrying`, in memory, given the secrets in `secrets` as files there, which it reads and removes as it starts, and return where it runs."""
+        """Start one container of the project running `parts`, whose plans are `plans`, its sockets' directory from `Carrying`, in memory, given the secrets `lent` holds as files there, which it reads and removes as it starts, and what else it lends bound in; its image with the packages its parts' programs are in; and return where it runs.
+
+        A file in the operator's `~/.ssh` is taken for a private key by its
+        first `header` bytes, the line a key begins with.
+        """
+
+        def lending(lent: Lent | None) -> list[Bind]:
+            """Return what binds into the container what `lent` lends: the project's git directory, read-write but its `config` and `hooks/`, as a room has it; and the SSH agent's socket, with the operator's `~/.ssh` read-only, each file in it holding a private key hidden behind an empty one, listed after what they hide, as podman mounts them in order."""
+
+            def keyed(path: Path) -> bool:
+                """Say whether `path` is a file holding a private key, by its first line alone, as OpenSSH, PEM and PuTTY begin one: the key itself is never read."""
+                if path.is_symlink() or not path.is_file():
+                    return False
+                with path.open("rb") as file:
+                    first = file.readline(header)
+                return b"PRIVATE KEY-----" in first or first.startswith(
+                    b"PuTTY-User-Key-File-"
+                )
+
+            binds: list[Bind] = []
+            if lent is not None and lent.git is not None:
+                hooks = lent.git / "hooks"
+                hooks.mkdir(exist_ok=True)
+                binds += [
+                    Bind(source=lent.git.resolve(), target=lent.git, read_only=False),
+                    Bind(
+                        source=(lent.git / "config").resolve(),
+                        target=lent.git / "config",
+                    ),
+                    Bind(source=hooks.resolve(), target=hooks),
+                ]
+            if lent is not None and lent.ssh is not None:
+                ssh = lent.ssh.home / ".ssh"
+                binds += [
+                    Bind(source=lent.ssh.socket.resolve(), target=lent.ssh.socket)
+                ]
+                if ssh.is_dir():
+                    binds += [
+                        Bind(source=ssh.resolve(), target=ssh),
+                        *(
+                            Bind(source=Path(os.devnull), target=each)
+                            for each in sorted(ssh.rglob("*"))
+                            if keyed(each)
+                        ),
+                    ]
+            return binds
+
         opening = source.opening
         name = self.container(source, part)
         directory = await Carrying.directory(Naming(container=name))
+        secrets = {} if lent is None else lent.secrets
         start = Start(
             root=source.root,
             declaration=opening.declaration,
@@ -762,6 +890,8 @@ class Projects(Part, machine=True, shared=True):
             secrets=None if not secrets else Path("/run/lup/secrets"),
             data=Path("/var/lup/data"),
             runtime=Path("/run/lup/runtime"),
+            git=None if lent is None else lent.git,
+            ssh=None if lent is None else lent.ssh,
         )
         if secrets:
             kept = directory.path / "secrets"
@@ -770,10 +900,25 @@ class Projects(Part, machine=True, shared=True):
                 file = kept / each
                 file.touch(mode=0o600)
                 file.write_text(value)
+        image = self.image(
+            opening.repository,
+            [package for each in plans for package in each.packages],
+        )
+        await Containers.built(image)
         spec = self.spec(source, name, self.role(source, part), directory.path)
         spec = spec.model_copy(
             update={
-                "env": {**spec.env, "LUP_ASKED": start.model_dump_json()},
+                "image": image,
+                "binds": [*spec.binds, *lending(lent)],
+                "env": {
+                    **spec.env,
+                    **(
+                        {}
+                        if lent is None or lent.ssh is None
+                        else {"HOME": str(lent.ssh.home)}
+                    ),
+                    "LUP_ASKED": start.model_dump_json(),
+                },
                 "output": self.output(name),
             }
         )

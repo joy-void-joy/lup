@@ -468,13 +468,18 @@ class Testing(Party, ABC):
         programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
+        git: Path | None = None,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
 
-        `secrets` holds the value of each secret a class holds, by its name;
-        left out, each is drawn. Raise `ProjectError` where it doesn't load or
-        resolve, or where a secret a class holds isn't given, as lup's start
-        does. What it started is stopped once the promise ends.
+        `secrets` holds the value of each secret a class holds, and of the
+        operator's GitHub login, by its field's name; left out, each is drawn.
+        A class holding the project's git directory is given `git`, a scratch
+        repository the promise made, and one holding the operator's SSH agent
+        a socket nothing answers on, as ssh never runs in a promise. Raise
+        `ProjectError` where it doesn't load or resolve, or where a secret a
+        class holds isn't given, as lup's start does. What it started is
+        stopped once the promise ends.
         """
 
     @abstractmethod

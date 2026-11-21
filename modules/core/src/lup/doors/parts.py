@@ -6,10 +6,12 @@ it holds between calls: a connection, a cache, a count (`README.md` here,
 store.
 
 Where it runs follows from what it holds. A part holding nothing runs in its
-project's container. One holding a secret (a field typed `Secret`), the
-operator's machine (`machine=True`) or anything else only approved code may
-hold (`approved=True`) runs in a container of its own, from a commit the
-operator approved, with what it holds alone, or on the machine.
+project's container. One holding a secret (a field typed `Secret`), what the
+operator's machine lends it (the project's `GitDirectory`, their `SshAgent`,
+their `GitHubLogin`), the operator's machine itself (`machine=True`) or anything
+else only approved code may hold (`approved=True`) runs in a container of its
+own, from a commit the operator approved, with what it holds alone, or on the
+machine.
 """
 
 from abc import ABC, abstractmethod
@@ -73,6 +75,58 @@ class Runtime(Model):
 
     path: Path
     """The directory: it's there, and the part's alone to write."""
+
+
+class GitDirectory(Model):
+    """The project's common git directory: a field typed `GitDirectory`, given where the part runs, read-write at its own path but for its `config` and `hooks/`, as a room has it, for a part pushing and fetching for the project's rooms.
+
+    A room writes the rest of it, so git runs there pinned to it
+    (`lup.programs.git`, `Git.pinned`), never found from a worktree.
+
+    >>> GitDirectory(path=Path("/srv/harmon.git")).path.name
+    'harmon.git'
+    """
+
+    path: Path
+
+
+class SshAgent(Model):
+    """The operator's SSH agent: a field typed `SshAgent`, given where the part runs, so ssh signs with their keys without a key ever being read there.
+
+    The agent's socket is bound where the part runs, and the operator's
+    `~/.ssh` read-only at its own path, every file holding a private key
+    hidden behind an empty one: ssh reads their configuration, resolving their
+    aliases, and finds the key it asks the agent to sign with by the `.pub`
+    beside where the private key was (`docs/field-notes.md`, *ssh through the
+    operator's agent*).
+
+    >>> SshAgent(socket=Path("/run/user/1000/ssh-agent.socket"), home=Path("/home/op")).variables()
+    {'SSH_AUTH_SOCK': '/run/user/1000/ssh-agent.socket', 'HOME': '/home/op'}
+    """
+
+    socket: Path
+    """The agent's socket, as `SSH_AUTH_SOCK` names it."""
+    home: Path
+    """The operator's home, whose `.ssh` ssh reads."""
+
+    def variables(self) -> dict[str, str]:
+        """Return the variables ssh, and git running it, find the agent and the operator's home by."""
+        return {"SSH_AUTH_SOCK": str(self.socket), "HOME": str(self.home)}
+
+
+class GitHubLogin(Model):
+    """The operator's GitHub login: a field typed `GitHubLogin`, filled where the part runs with the token `gh auth token` printed on their machine as the part started, never shown or written out with the part.
+
+    It's read at each start, so a login the operator renews or changes with
+    `gh auth login` is the one a part started after uses, with nothing to give
+    lup again.
+
+    >>> login = GitHubLogin(token="gho_x")
+    >>> login, login.model_dump()
+    (GitHubLogin(), {})
+    """
+
+    token: str = Field(repr=False, exclude=True)
 
 
 class Declared(Model):
@@ -178,6 +232,11 @@ class Program(Model, arbitrary_types_allowed=True):
     """What the part runs it for, said where it's missing."""
     install: str = ""
     """How to install it, said where it's missing."""
+    package: str | None = None
+    """The package holding it, as the package manager of lup's containers
+    names it (`github-cli` for `gh`), installed in the image of a container
+    running its part; none where every container has it already, or its part
+    runs on the operator's machine."""
     runs: Runs | None = Field(default=None, exclude=True, repr=False)
     """What runs it where the part runs, given as the part is made."""
 
@@ -267,6 +326,12 @@ class Given(Model, arbitrary_types_allowed=True):
     modules: list[Module] = []
     """The project's modules, every layer applied, in order, which each field
     typed `Declared` holds."""
+    git: Path | None = None
+    """The project's common git directory, which each field typed
+    `GitDirectory` holds; none where nothing gives it."""
+    ssh: SshAgent | None = None
+    """The operator's SSH agent, which each field typed `SshAgent` holds; none
+    where nothing gives it."""
 
 
 class Holds(Model):
@@ -286,10 +351,26 @@ class Holds(Model):
     """Whether it runs in each session's own room, made from the worktree's
     own code, so it sees the worktree as it stands: it holds nothing, the room
     being the wall already."""
+    git: bool = False
+    """Whether it holds the project's git directory: a field typed
+    `GitDirectory`."""
+    ssh: bool = False
+    """Whether it holds the operator's SSH agent: a field typed `SshAgent`."""
+    github: list[str] = []
+    """The fields the operator's GitHub login fills, by their names: its
+    fields typed `GitHubLogin`."""
 
     def anything(self) -> bool:
         """Say whether it holds anything, and so runs apart, from approved code."""
-        return bool(self.secrets) or self.machine or self.approved or self.shared
+        return (
+            bool(self.secrets)
+            or self.machine
+            or self.approved
+            or self.shared
+            or self.git
+            or self.ssh
+            or bool(self.github)
+        )
 
 
 class Part(MutableModel, arbitrary_types_allowed=True):
@@ -298,10 +379,11 @@ class Part(MutableModel, arbitrary_types_allowed=True):
     A subclass that reads its module's settings declares `module`, typed as its
     module's class (`module: Echo`), and lup hands it the module, every layer
     applied. Its other fields are what it keeps while it runs, each with a
-    default, but a `Secret`, which lup fills; what it holds says where it runs
-    (`holds`).
+    default, but what lup fills: a `Secret`, and what it holds of the
+    operator's, the project's `GitDirectory`, their `SshAgent` and their
+    `GitHubLogin`. What it holds says where it runs (`holds`).
 
-    It says in its header what it holds beyond its secrets:
+    It says in its header what it holds beyond its fields:
     `class Notices(Part, machine=True)` runs on the operator's machine,
     `class Store(Part, approved=True)` holds what only approved code may.
     `class Findings(Part, room=True)` holds nothing and runs in each session's
@@ -340,7 +422,7 @@ class Part(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
-        """Refuse a field of the class's own with no default, but a `Secret`, which lup fills, and a method named as a field, which the field would hide: lup makes the class with its module and its secrets alone."""
+        """Refuse a field of the class's own with no default, but those lup fills, and a method named as a field, which the field would hide: lup makes the class with its module and what it holds alone."""
         super().__pydantic_init_subclass__(**kwargs)
         hidden = [
             f"`{field}`"
@@ -358,7 +440,16 @@ class Part(MutableModel, arbitrary_types_allowed=True):
             for field, info in cls.model_fields.items()
             if field != "module"
             and info.is_required()
-            and info.annotation not in (Secret, Data, Runtime, Declared)
+            and info.annotation
+            not in (
+                Secret,
+                Data,
+                Runtime,
+                Declared,
+                GitDirectory,
+                SshAgent,
+                GitHubLogin,
+            )
         ]
         if bare:
             message = (
@@ -370,35 +461,57 @@ class Part(MutableModel, arbitrary_types_allowed=True):
 
     @classmethod
     def holds(cls) -> Holds:
-        """Return what the class holds: its secrets, and what its header says."""
+        """Return what the class holds: its secrets, what it holds of the operator's, and what its header says."""
         return Holds(
-            secrets=[
-                field
-                for field, info in cls.model_fields.items()
-                if info.annotation is Secret
-            ],
+            secrets=cls.fields_typed(Secret),
             machine=cls.machine,
             approved=cls.approved,
             shared=cls.shared,
             room=cls.room,
+            git=bool(cls.fields_typed(GitDirectory)),
+            ssh=bool(cls.fields_typed(SshAgent)),
+            github=cls.fields_typed(GitHubLogin),
         )
 
     @classmethod
-    def made(cls, module: Module, given: Given) -> Part:
-        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data` or `Runtime`, made where it isn't there, what runs each program it declares, and the project's modules for each field typed `Declared`.
+    def fields_typed(cls, kind: type[Model]) -> list[str]:
+        """Return the names of the class's fields typed `kind`, in the order it declares them."""
+        return [
+            field for field, info in cls.model_fields.items() if info.annotation is kind
+        ]
 
-        Raise `ProjectError` where a secret it holds isn't given, or it keeps
-        data, or what lasts while it runs, and no directory is given.
+    @classmethod
+    def made(cls, module: Module, given: Given) -> Part:
+        """Make the part where it runs, with its module and what lup gives it: the value of each secret it holds, a directory for each field typed `Data` or `Runtime`, made where it isn't there, what runs each program it declares, the project's modules for each field typed `Declared`, and what it holds of the operator's: the project's git directory, their SSH agent, and their GitHub login, handed over as a secret is, under its field's name.
+
+        Raise `ProjectError` where a secret or a login it holds isn't given, it
+        keeps data, or what lasts while it runs, and no directory is given, or
+        it holds the git directory or the SSH agent and neither is given.
         """
         secrets, data, runtime = given.secrets, given.data, given.runtime
-        kept = [
-            field for field, info in cls.model_fields.items() if info.annotation is Data
-        ]
-        lasting = [
-            field
-            for field, info in cls.model_fields.items()
-            if info.annotation is Runtime
-        ]
+        kept = cls.fields_typed(Data)
+        lasting = cls.fields_typed(Runtime)
+        holds = cls.holds()
+        if holds.git and given.git is None:
+            message = (
+                f"`{cls.__name__}` holds the project's git directory, and nothing "
+                "gives it one"
+            )
+            raise ProjectError(message, about=[cls.__name__])
+        if holds.ssh and given.ssh is None:
+            message = (
+                f"`{cls.__name__}` holds the operator's SSH agent, and nothing "
+                "gives it one: the machine reads it from `SSH_AUTH_SOCK`"
+            )
+            raise ProjectError(message, about=[cls.__name__])
+        unlogged = [name for name in holds.github if name not in secrets]
+        if unlogged:
+            message = (
+                f"`{cls.__name__}` holds the operator's GitHub login in "
+                f"{', '.join(f'`{name}`' for name in unlogged)}, and nothing gave "
+                "it: the machine reads it with `gh auth token`"
+            )
+            raise ProjectError(message, about=[cls.__name__])
         if kept and data is None:
             message = (
                 f"`{cls.__name__}` keeps data in {', '.join(f'`{name}`' for name in kept)}, "
@@ -412,19 +525,26 @@ class Part(MutableModel, arbitrary_types_allowed=True):
                 "a directory in memory to keep it in"
             )
             raise ProjectError(message, about=[cls.__name__])
-        missing = [name for name in cls.holds().secrets if name not in secrets]
+        missing = [name for name in holds.secrets if name not in secrets]
         if missing:
             message = (
                 f"`{cls.__name__}` holds {', '.join(f'`{name}`' for name in missing)}, "
                 "which nothing stored: the operator stores each under its name"
             )
             raise ProjectError(message, about=[cls.__name__])
-        fields: dict[str, Module | Secret | Data | Runtime | Program | Declared] = {
-            name: Secret(value=secrets[name]) for name in cls.holds().secrets
+        fields: dict[str, Model | Module] = {
+            name: Secret(value=secrets[name]) for name in holds.secrets
         }
-        for name, info in cls.model_fields.items():
-            if info.annotation is Declared:
-                fields[name] = Declared(modules=given.modules)
+        for name in holds.github:
+            fields[name] = GitHubLogin(token=secrets[name])
+        for name in cls.fields_typed(Declared):
+            fields[name] = Declared(modules=given.modules)
+        for name in cls.fields_typed(GitDirectory):
+            if given.git is not None:
+                fields[name] = GitDirectory(path=given.git)
+        for name in cls.fields_typed(SshAgent):
+            if given.ssh is not None:
+                fields[name] = given.ssh
         for name in kept:
             if data is not None:
                 directory = data / name

@@ -25,7 +25,7 @@ from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.parties import Agent, Party
-from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
+from lup.doors.parts import Finished, Parts, Program, Runs, SshAgent, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
@@ -543,6 +543,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
+        git: Path | None = None,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class made once and started.
 
@@ -554,7 +555,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         heard = Heard()
         stand = StandIn(scripts=dict(programs or {}), heard=heard)
         reached = await self.reached(
-            project, secrets, repository, stand, machine=machine
+            project, secrets, repository, stand, machine=machine, git=git
         )
         return Started(
             modules=reached.modules,
@@ -586,15 +587,21 @@ class Harness(Testing, arbitrary_types_allowed=True):
         runs: Runs | None = None,
         *,
         machine: bool = False,
+        git: Path | None = None,
     ) -> Reached:
         """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
 
-        Each secret a class holds is `secrets`'s, or drawn where they're left
-        out.
+        Each secret a class holds, and each field the operator's GitHub login
+        fills, is `secrets`'s, or drawn where they're left out. A class
+        holding the project's git directory is given `git`, or an empty
+        directory where it's left out, as a law's runs give none; one holding
+        the operator's SSH agent, a socket nothing answers on.
         """
         resolved = resolve(project)
         held = [
-            name for each in resolved.doors.served for name in each.part.holds().secrets
+            name
+            for each in resolved.doors.served
+            for name in [*each.part.holds().secrets, *each.part.holds().github]
         ]
         given = (
             dict(secrets)
@@ -603,7 +610,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
         )
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
         lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
-        self.run.kept.extend([kept, lasting])
+        lent = tempfile.TemporaryDirectory(prefix="lup-lent-")
+        self.run.kept.extend([kept, lasting, lent])
         running = await resolved.doors.started(
             repository,
             given,
@@ -611,6 +619,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
             runtime=Path(lasting.name),
             runs=runs or StandIn(heard=Heard()),
             machine=machine,
+            git=git or Path(lent.name),
+            ssh=SshAgent(socket=Path(lent.name) / "agent.sock", home=Path(lent.name)),
         )
         self.run.started.append(running)
         return Reached(

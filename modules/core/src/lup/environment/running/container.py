@@ -225,6 +225,8 @@ async def started(start: Start, resolved: Resolved) -> Running:
         data=start.data,
         runtime=start.runtime,
         runs=Local(),
+        git=start.git,
+        ssh=start.ssh,
     )
 
 
