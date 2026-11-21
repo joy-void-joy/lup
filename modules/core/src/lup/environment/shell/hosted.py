@@ -23,12 +23,15 @@ import logging
 import secrets
 import socket
 import webbrowser
+from datetime import timedelta
 from urllib.parse import urldefrag
 lazy from pathlib import Path
 
+from tenacity import AsyncRetrying, RetryCallState, retry_if_result, wait_exponential
+
 from lup.core import Core
 from lup.declaration.grammar import applied, set_fields
-from lup.doors.door import Accepted
+from lup.doors.door import Accepted, Refused
 from lup.doors.parties import Machine
 from lup.environment.declaration import Resolved, load, resolve
 from lup.environment.running.calling import Calling
@@ -101,17 +104,55 @@ def declared(host: Host, machine: MachineLayout) -> Resolved:
     return resolve(project)
 
 
-async def built(running: Running, serving: Serving) -> None:
-    """Have `Pages` build the page from the source of the commit the machine runs, and serve it once it's there, or say why it isn't."""
-    asked = PageSource(source=ShellLayout().source, described=described())
-    answer = await running.serve("page", asked.model_dump(mode="json"), Machine())
+async def built(
+    running: Running,
+    serving: Serving,
+    *,
+    first: timedelta = timedelta(seconds=30),
+    longest: timedelta = timedelta(minutes=30),
+) -> None:
+    """Have `Pages` build the page from the source of the commit the machine runs, and serve it once it's there.
+
+    Where it isn't built, the server says why in its place, and it's asked
+    again after a while, since what a build fetches, the archive's packages
+    and the page's, may be out of reach for a time: `first` after the first
+    failure, twice as long after each one since, `longest` at most. Where the
+    machine runs from no page's source, as the installed `lup` ships none,
+    nothing is asked, and the server says so.
+    """
+    source = ShellLayout().source
+    if not (source / "package.json").is_file():
+        serving.building = False
+        serving.why = (
+            "the lup the machine runs ships no page's source: the machine builds "
+            "the page when it runs from a home repository (`Core.home`)"
+        )
+        return
+    asked = PageSource(source=source, described=described())
+
+    def told(state: RetryCallState) -> None:
+        refused = state.outcome.result() if state.outcome is not None else None
+        reason = (
+            refused.rejection.reason if isinstance(refused, Refused) else "it failed"
+        )
+        waiting = timedelta(seconds=round(state.upcoming_sleep))
+        serving.why = f"{reason} (trying again in {waiting})"
+        log.warning("lup's dashboard has no page: %s", serving.why)
+
+    retrying = AsyncRetrying(
+        wait=wait_exponential(
+            multiplier=first.total_seconds(), max=longest.total_seconds()
+        ),
+        retry=retry_if_result(lambda answer: not isinstance(answer, Accepted)),
+        before_sleep=told,
+    )
+    answer: Accepted | Refused = await retrying(
+        running.serve, "page", asked.model_dump(mode="json"), Machine()
+    )
     serving.building = False
     if isinstance(answer, Accepted):
         serving.page = BuiltPage.model_validate(answer.output).path
         serving.why = ""
-        return
-    serving.why = answer.rejection.reason
-    log.warning("lup's dashboard has no page: %s", serving.why)
 
 
 async def started(
