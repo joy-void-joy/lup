@@ -335,9 +335,15 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
     isn't at a version it takes, the program being optional."""
 
     def instance(self, entry: Entry) -> Part | None:
-        """Return the part `entry` belongs to, as it was made here; none where it runs elsewhere."""
+        """Return the part `entry` belongs to, as it was made here; none where it runs elsewhere.
+
+        A part is found by its name in the plan, its module's and its class's:
+        a run finds one for every method at every event, and comparing the
+        modules whole each time would be most of a scenario's time.
+        """
+        named = entry.serves.named()
         return next(
-            (each.made for each in self.made if each.serves == entry.serves), None
+            (each.made for each in self.made if each.serves.named() == named), None
         )
 
     def part(self, entry: Entry) -> Part:
