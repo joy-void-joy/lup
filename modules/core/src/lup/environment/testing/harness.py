@@ -20,6 +20,7 @@ from typing import get_args, get_origin, override
 
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic.fields import FieldInfo
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
@@ -296,7 +297,7 @@ def stating(entry: Entry, doors: Doors) -> Stating | None:
         for serves in doors.served
         if serves.module.name == module
         for name, info in serves.part.model_fields.items()
-        if stated(info.annotation) is state
+        if stated(info) is state
     ]
     answered: list[Stating] = [
         Answered(entry=each)
@@ -315,11 +316,11 @@ def stating(entry: Entry, doors: Doors) -> Stating | None:
     return found[0]
 
 
-def stated(annotation: type | None) -> type | None:
-    """Return the state a field's annotation says a part holds, `Tally` in `State[Tally]`; none where it's no `State`."""
-    if get_origin(annotation) is not State:
+def stated(field: FieldInfo) -> type | None:
+    """Return the state a part's field says it holds, `Tally` for one typed `State[Tally]`; none where it's no `State`."""
+    if get_origin(field.annotation) is not State:
         return None
-    [state] = get_args(annotation)
+    [state] = get_args(field.annotation)
     return state if isinstance(state, type) else None
 
 
