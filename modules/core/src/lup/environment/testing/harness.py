@@ -23,6 +23,7 @@ from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
+from lup.doors.events import Event, Heeded
 from lup.doors.parties import Agent, Party
 from lup.doors.parts import Finished, Parts, Program, Runs, UnrunError
 from lup.doors.tool import ToolDoor, ToolSpec
@@ -42,6 +43,7 @@ from lup.testing.harness import (
     BrokenLawError,
     Call,
     Crossing,
+    Happening,
     Heard,
     Kept,
     Opening,
@@ -453,6 +455,16 @@ class Teller(Model, Telling, arbitrary_types_allowed=True):
         return await rendered(self.running, by)
 
 
+class Happen(Model, Happening, arbitrary_types_allowed=True):
+    """A started lup's methods run at an event, run on its parts as made in this process, a session's room's among them."""
+
+    running: Running
+
+    async def happened(self, event: Event) -> Heeded:
+        """Run every method run at `event` of the parts started, and say what they answered."""
+        return await self.running.heard(event)
+
+
 class Dashboards(Model, Opening, arbitrary_types_allowed=True):
     """A started lup's one dashboard, as the harness opens its pages: every page on the same draft."""
 
@@ -560,6 +572,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
             crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
             telling=Teller(running=reached.running),
+            happening=Happen(running=reached.running),
             dashboards=Dashboards(
                 dashboard=Dashboard(
                     answerer=Over(

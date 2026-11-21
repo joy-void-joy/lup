@@ -34,6 +34,19 @@ pyright's and ruff's findings are design's.
 
 Its report says lup's findings first, since they're about design, each line `path:line:column - lup tuple-shape: what it saw`, the rule's mistake and steer under its first finding and the line alone after; then pyright's and ruff's; then what `fix` fixes (ruff's safe fixes, and each `ignore` keeping nothing); then the heuristic's guesses. `lup code-rules show <rule>` shows one rule whole, with its examples.
 
+## Told after a write
+
+`Findings`, a part run in each session's own room on the worktree as it stands (`room=True`), hears each file tool's call (`lup/sessions/`): before it, it keeps the text of each file it's about to write; after it, it checks those files with the engine kept running for the worktree, on a socket, so a check costs what pyright's re-check of them does, a third of a second rather than the project's load. What it tells beside the call's result (`telling.py`):
+- **what the write introduced** on the lines it changed: lup's design rules' findings, pyright's and ruff's, each once in a conversation, by its file, rule and the text of its line, so an edit above it doesn't make it new; lup's first, each rule's reason and steer with its first finding and a line after;
+- **counted in a line,** what stands elsewhere in those files that the conversation wasn't told, with how to list it;
+- **at the next call that writes nothing,** what a half-finished edit left, if it still stands: a name used before its import is written, an import before its use, and pyright's unknown types following them, counted under them. In the second lup's records, none of 2,400 such was still there at a turn's end;
+- **at the next call,** the type errors the write caused in the files importing what it wrote, which the engine re-checks a step at a time between checks, so no write waits on them;
+- **never,** what the gate's `--fix` fixes, a spelling rule's findings and a heuristic's, which the gate lists.
+
+**Quiet.** During a refactor an agent knows leaves the code broken for a while, `lup code-rules quiet` holds back what's told after their writes, as DESIGN.md's *Quiet* has it; `--lift` tells once, beside their next call, what still stands in the files they wrote meanwhile, and nothing of the states in between. It's kept as a file in the room's temporary directory, by lup's id for the agent, which the room's part reads at each call.
+
+A report past 2,000 characters says how many findings each file has and how to list them, rather than going out at a length Claude Code puts behind a preview. Each finding told is recorded, and whether a later check found it gone or kept by an `ignore`, in the repository's git directory; `lup code-rules outcomes` sums it up rule by rule, what a review of the rules reads.
+
 ## `# lup:` comments
 
 How code speaks to its next reader, read into models (`directives.py`) with Python's own tokenizer and parser (`reading.py`), so a check, a landing and a review read them alike, with no engine or project loaded. A TypeScript file's `// lup:` comments are found with TypeScript's own parser, through the engine, so a `//` inside a string or a regular expression is never one, and what each says is read with the same grammar. A comment starting `# lup:` is a call:
