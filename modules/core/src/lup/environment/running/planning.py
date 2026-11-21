@@ -6,10 +6,14 @@ session is told of, and the files loading the declaration imported, relative
 to the project's root (`lup/running/README.md`, *The plan*).
 """
 
+import functools
 import inspect
+import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, TypeAdapter
 
 from lup.doors.command import CommandDoor
 from lup.doors.door import is_model
@@ -18,6 +22,7 @@ from lup.doors.tool import ToolDoor
 from lup.environment.declaration import Resolved, load, resolve
 from lup.running.plan import Doorway, ModulePlan, PartPlan, Plan
 from lup.shell.view import ViewDoor
+from lup.types import JsonObject
 
 if TYPE_CHECKING:
     from lup.environment.doors import Entry, Serves
@@ -75,6 +80,20 @@ def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPl
     )
 
 
+SCHEMAS = TypeAdapter[JsonObject](JsonObject)
+
+
+@functools.cache
+def schema_text(model: type[BaseModel]) -> str:
+    """Return the JSON Schema of `model`, as text, made once for each model: pydantic makes it anew at each call, which a plan made for every promise's run did thousands of times."""
+    return json.dumps(model.model_json_schema())
+
+
+def schema_of(model: type[BaseModel]) -> JsonObject:
+    """Return the JSON Schema of `model`, a copy of its own for each caller."""
+    return SCHEMAS.validate_json(schema_text(model))
+
+
 def doorway(entry: Entry) -> Doorway | None:
     """Return how calls to the method behind `entry` are routed; none behind a door no party calls, a hook's or a promise's."""
     here = False
@@ -97,7 +116,7 @@ def doorway(entry: Entry) -> Doorway | None:
         name=entry.name,
         parties=[each.__name__ for each in entry.method.parties()],
         description=taken.description,
-        input_schema=model.model_json_schema() if is_model(model) else {},
+        input_schema=schema_of(model) if is_model(model) else {},
         here=here,
     )
 

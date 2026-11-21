@@ -142,6 +142,9 @@ class Projects(Part, machine=True, shared=True):
     base: Base = Field(default_factory=Base)
     projects: dict[str, Opened] = {}
     """Each project running, by its repository."""
+    unopened: dict[str, str] = {}
+    """Why each project registered isn't open, by its repository, where
+    opening it was refused, as the operator's `status` says."""
     generation: int = 0
     """How many times a project was opened since the machine's parts started:
     each opening's containers are named with it, so they start beside those
@@ -269,6 +272,7 @@ class Projects(Part, machine=True, shared=True):
                 refused = {**refused, repository: str(unopened)}
             else:
                 opened = [*opened, repository]
+        self.unopened = {**self.unopened, **refused}
         return Resumed(opened=opened, refused=refused)
 
     @lup.on(Stopping)
@@ -316,6 +320,11 @@ class Projects(Part, machine=True, shared=True):
         ]
         closed = [
             f"{repository} is registered, and not open"
+            + (
+                f": opening it was refused, {self.unopened[repository]}"
+                if repository in self.unopened
+                else ""
+            )
             for repository in self.kept()
             if repository not in self.projects
         ]
@@ -356,6 +365,23 @@ class Projects(Part, machine=True, shared=True):
         return await self.opening(opening)
 
     async def opening(self, opening: Opening) -> Opened:
+        """Open a project as `opened_at` does, keeping why where it's refused, for the operator's `status` to say.
+
+        Raise `RefusedError` where it's refused.
+        """
+        try:
+            opened = await self.opened_at(opening)
+        except RefusedError as unopened:
+            self.unopened = {**self.unopened, opening.repository: str(unopened)}
+            raise
+        self.unopened = {
+            repository: why
+            for repository, why in self.unopened.items()
+            if repository != opening.repository
+        }
+        return opened
+
+    async def opened_at(self, opening: Opening) -> Opened:
         """Run a project at the commit the operator approved last: plan it, and start one container for its parts holding nothing, and one for each part holding something that isn't the machine's, given only the secrets it holds, unless one isn't kept.
 
         A restart cuts no call: this opening's containers start beside those
