@@ -362,9 +362,12 @@ class Holds(Model):
 
     def anything(self) -> bool:
         """Say whether it holds anything, and so runs apart, from approved code."""
+        return bool(self.secrets) or self.beyond_secrets()
+
+    def beyond_secrets(self) -> bool:
+        """Say whether it holds anything but secrets: the machine, what only approved code may, what the operator's machine lends, or one for the whole machine, none of which a command line started where it's typed gives."""
         return (
-            bool(self.secrets)
-            or self.machine
+            self.machine
             or self.approved
             or self.shared
             or self.git
