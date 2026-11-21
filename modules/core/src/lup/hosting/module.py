@@ -18,6 +18,7 @@ from lup.hosting.promises import (
     ClearingPromises,
     HerePromises,
     HostingPromises,
+    MachinewidePromises,
     ProjectsPromises,
     TreesPromises,
     WithoutPromises,
@@ -45,4 +46,5 @@ class Hosting(Module):
         WithoutPromises,
         HerePromises,
         BuildingPromises,
+        MachinewidePromises,
     )
