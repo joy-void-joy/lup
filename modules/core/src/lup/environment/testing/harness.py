@@ -65,6 +65,19 @@ from lup.types import Model, MutableModel
 lazy from lup.shell.blocks import Viewing
 lazy from lup.told.guidance import Guidance
 
+JSON = st.recursive(
+    st.none()
+    | st.booleans()
+    | st.integers()
+    | st.floats(allow_nan=False, allow_infinity=False)
+    | st.text(),
+    lambda inner: st.lists(inner) | st.dictionaries(st.text(), inner),
+)
+"""Every JSON value, as a run draws one where a door or a promise takes pydantic's `JsonValue`: hypothesis can't draw that type itself, which names its own members by a string it doesn't resolve."""
+
+# lup: ignore("reportArgumentType", why="pydantic types `JsonValue` as a union for a type checker, and makes it the type alias hypothesis registers at run time")
+st.register_type_strategy(JsonValue, JSON)
+
 
 class Run(MutableModel, arbitrary_types_allowed=True):
     """What one run of a promise did: the values it drew, the calls it made and the order their slices ran in, kept to say what broke it."""

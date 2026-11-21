@@ -11,6 +11,8 @@ from typing import Annotated, ClassVar, Literal
 
 from annotated_types import Ge, Lt
 
+from lup.doors.parties import Agent
+from lup.shell.blocks import Offer, Viewing
 from lup.store.records import Edge, Kinds, Name, Node
 from lup.types import Model
 
@@ -55,6 +57,10 @@ class AgentRecord(PartyRecord):
     session: str
     """lup's id for the session they're in (`lup.Agent.session`)."""
 
+    def caller(self) -> Agent:
+        """Return the agent as the doors hand them to a method: `by: Agent`."""
+        return Agent(id=self.id, session=self.session)
+
 
 class PileRecord(PartyRecord):
     """A party that holds concerns and does nothing else: made by the operator as they think, or by a friction sent to a path not there yet."""
@@ -90,11 +96,28 @@ class Friction(Concern):
 # Items
 
 
+class Laid(Model):
+    """How the operator's views lay out an item of a module's own kind beyond its words: a fold under them, opening on one of the module's views, and what the item's blocks offer beside a comment."""
+
+    fold: str
+    """The fold's kind, by its name: one its module declares, or the shell's."""
+    summary: str
+    """The fold's summary line."""
+    opens: Viewing
+    """The module's view the fold reads as it opens, its `module` named, since
+    the inbox's view lays it out."""
+    offers: list[Offer] = []
+    """What the item's blocks offer the operator, each the module's command
+    under its verb's key, its `module` named."""
+
+
 class Item(Node):
     """One thing a party said, to one or more others: numbered, kept whole, never cut.
 
     Who it's from is `by`; who it's for is `to`, by their keys. Whether it
-    waits on whom it's for until they answer is its kind's (`waits`).
+    waits on whom it's for until they answer is its kind's (`waits`), and so is
+    how it's laid out beyond its words (`laid`): a module declaring its own kind
+    of item, in its `Recorded`, says both, and posts one through `Inboxes.post`.
     """
 
     kind: str = "inbox:item"
@@ -107,6 +130,10 @@ class Item(Node):
     def waits(self) -> bool:
         """Say whether it waits on whom it's for until they answer it. The base never waits."""
         return False
+
+    def laid(self) -> Laid | None:
+        """Return how the operator's views lay it out beyond its words; none for its words alone, as every kind of the inbox's own is."""
+        return None
 
 
 type Tone = Literal["note", "problem", "disagreement", "question"]
@@ -187,6 +214,12 @@ class TurnEnd(Item):
     """An agent's last words of a turn: their answer to what the operator said since their last turn's end."""
 
     kind: str = "inbox:turn-end"
+
+
+class Outcome(Item):
+    """What came of an item of a module's own kind, said for the operator's act, as the module says it: told to whoever wrote the item, and answering it."""
+
+    kind: str = "inbox:outcome"
 
 
 class Comment(Item):
@@ -322,6 +355,7 @@ NODES: list[type[Node]] = [
     Blocked,
     Stopped,
     TurnEnd,
+    Outcome,
     Comment,
 ]
 """The inbox's kinds of node."""
