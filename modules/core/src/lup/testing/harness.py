@@ -294,6 +294,14 @@ class Opening(ABC):
         """Open a page of the dashboard, its socket open, nothing said yet."""
 
 
+class Planning(ABC):
+    """A started lup's plan, made where it's first asked for: making it writes every door's JSON Schema, which most promises never read."""
+
+    @abstractmethod
+    def plan(self) -> Plan:
+        """Return the declaration's plan, as the program on the operator's machine reads it."""
+
+
 class Started(Model, arbitrary_types_allowed=True):
     """lup started on a declaration: its modules, and its doors, called as a party calls them.
 
@@ -306,9 +314,14 @@ class Started(Model, arbitrary_types_allowed=True):
     """The modules it's made of, every layer applied, in order."""
     specs: list[ToolSpec]
     """What a session is told of each tool its modules serve."""
-    plan: Plan
-    """Its declaration's plan, as the program on the operator's machine reads
-    it."""
+    planning: Planning
+    """Its declaration's plan, made where it's first read."""
+
+    @property
+    def plan(self) -> Plan:
+        """Its declaration's plan, as the program on the operator's machine reads it."""
+        return self.planning.plan()
+
     doors: Reaching
     """Its doors, as the harness reaches them."""
     dashboards: Opening

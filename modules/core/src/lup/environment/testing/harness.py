@@ -33,6 +33,7 @@ from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
 from lup.environment.shell.server import Dashboard, Over, Session, Socket
 from lup.environment.told import rendered
+from lup.running.plan import Plan
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
@@ -46,6 +47,7 @@ from lup.testing.harness import (
     Kept,
     Opening,
     Page,
+    Planning,
     ProgramRun,
     Ran,
     Reaching,
@@ -440,21 +442,55 @@ class Teller(Model, Telling, arbitrary_types_allowed=True):
         return await rendered(self.running, by)
 
 
-class Dashboards(Model, Opening, arbitrary_types_allowed=True):
-    """A started lup's one dashboard, as the harness opens its pages: every page on the same draft."""
+class Planner(MutableModel, Planning, arbitrary_types_allowed=True):
+    """A started lup's plan, made once, where it's first asked for."""
 
-    dashboard: Dashboard
+    project: Project
+    made: Plan | None = None
+
+    @override
+    def plan(self) -> Plan:
+        """Return the project's plan, making it the first time."""
+        if self.made is None:
+            self.made = plan_of(resolve(self.project), [])
+        return self.made
+
+
+class Dashboards(MutableModel, Opening, arbitrary_types_allowed=True):
+    """A started lup's one dashboard, as the harness opens its pages: made as the first opens, every page on the same draft."""
+
+    running: Running
+    looks: Looks
+    planner: Planner
+    root: Viewing | None
+    """The document's root view, as the core module names it."""
+    repository: str
+    made: Dashboard | None = None
+
+    def dashboard(self) -> Dashboard:
+        """Return the dashboard, making it the first time."""
+        if self.made is None:
+            self.made = Dashboard(
+                answerer=Over(
+                    running=self.running, looks=self.looks, plan=self.planner.plan()
+                ),
+                looks=self.looks,
+                root=self.root,
+                repository=self.repository,
+            )
+        return self.made
 
     @override
     async def page(self) -> Page:
         """Open a page of the dashboard, its socket in memory, served as the server serves one."""
+        dashboard = self.dashboard()
         inbound: asyncio.Queue[str | None] = asyncio.Queue()
         outbound: asyncio.Queue[str | None] = asyncio.Queue()
         socket = Queued(inbound=inbound, outbound=outbound)
-        session = Session(dashboard=self.dashboard, socket=socket)
+        session = Session(dashboard=dashboard, socket=socket)
         serving = asyncio.get_running_loop().create_task(session.run())
         return Paged(
-            token=self.dashboard.token,
+            token=dashboard.token,
             inbound=inbound,
             outbound=outbound,
             serving=serving,
@@ -539,25 +575,21 @@ class Harness(Testing, arbitrary_types_allowed=True):
         reached = await self.reached(
             project, secrets, repository, stand, machine=machine
         )
+        planner = Planner(project=project)
         return Started(
             modules=reached.modules,
             specs=reached.tools(),
-            plan=plan_of(resolve(project), []),
+            planning=planner,
             doors=reached,
             crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
             telling=Teller(running=reached.running),
             dashboards=Dashboards(
-                dashboard=Dashboard(
-                    answerer=Over(
-                        running=reached.running,
-                        looks=reached.looks,
-                        plan=plan_of(resolve(project), []),
-                    ),
-                    looks=reached.looks,
-                    root=document_of(reached.modules),
-                    repository=repository,
-                )
+                running=reached.running,
+                looks=reached.looks,
+                planner=planner,
+                root=document_of(reached.modules),
+                repository=repository,
             ),
         )
 
