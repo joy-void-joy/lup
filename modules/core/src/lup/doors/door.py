@@ -490,6 +490,10 @@ class Rejection(Model):
 
     submitted: JsonValue
     reason: str
+    about: list[str] = []
+    """What it's about, by name, as an error's `about` names it: the method or
+    door a call couldn't reach, or what the method refusing named; none where
+    it names nothing. A caller reads these rather than the reason's words."""
 
 
 class Accepted(Model):
