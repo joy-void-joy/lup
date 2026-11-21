@@ -39,7 +39,7 @@ from lup.doors.door import (
     Rejection,
     served,
 )
-from lup.doors.events import Event, Starting, Stopping
+from lup.doors.events import Event, Heeded, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Codebase, Machine, Party, said
 from lup.doors.parts import Given, Part, Parts, Runs
@@ -376,6 +376,21 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
                 self.started.append(asyncio.create_task(hook))
             else:
                 await hook
+
+    async def heard(self, event: Event) -> Heeded:
+        """Run every method run at `event`'s class made here, one after another, and return what they answered: each one's words, and the first refusal, after which none runs."""
+        told: list[str] = []
+        for entry in self.here():
+            door = entry.method.door
+            if not (isinstance(door, OnDoor) and isinstance(event, door.event)):
+                continue
+            try:
+                said = await entry.method.function(self.part(entry), event)
+            except RefusedError as refusing:
+                return Heeded(told=told, refused=str(refusing))
+            if isinstance(said, str) and said.strip():
+                told = [*told, said]
+        return Heeded(told=told)
 
     async def hooked(self, entry: Entry, event: Event) -> None:
         """Run the method behind `entry` at `event`, on its part: nobody calls it, so it's handed no caller."""

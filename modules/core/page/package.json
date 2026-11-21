@@ -4,7 +4,9 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "types": "mkdir -p src/generated && uv run --quiet python described.py schema > schema.json && uv run --quiet python described.py looks > src/generated/core-looks.json && json2ts --input schema.json --output src/generated/read.ts --additionalProperties false --unreachableDefinitions",
+        "types": "pnpm run --silent described && pnpm run --silent generated",
+        "described": "mkdir -p src/generated && uv run --quiet python described.py schema > schema.json && uv run --quiet python described.py looks > src/generated/core-looks.json",
+        "generated": "mkdir -p src/generated && json2ts --input schema.json --output src/generated/read.ts --additionalProperties false --unreachableDefinitions",
         "check": "tsc --noEmit",
         "test": "vitest run",
         "build": "vite build",
