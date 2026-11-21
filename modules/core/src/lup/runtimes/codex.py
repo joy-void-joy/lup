@@ -107,11 +107,13 @@ class CodexRooming(Rooming):
 
     requirements: Path = Path("/etc/codex/requirements.toml")
     """Where Codex reads managed requirements on Linux."""
-    hook_timeout: timedelta = timedelta(hours=25)
+    hook_timeout: timedelta = timedelta(days=24)
     """How long a hook may hold its call: past any wait on the operator."""
-    tool_timeout: timedelta = timedelta(hours=25)
+    tool_timeout: timedelta = timedelta(days=24)
     """How long a call to lup's tools may run, `wait_inbox` and `ask` among
-    them: Codex's own default is 300 s."""
+    them: Codex's own default is 300 s, and it sets no cap, so the same as
+    Claude Code's, since a call held on the operator's answer waits as long as
+    they take."""
     settings: dict[str, JsonValue] = {
         "features.memories": False,
         "features.apps": False,

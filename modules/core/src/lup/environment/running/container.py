@@ -18,6 +18,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.doors.door import Answer, Method, Refused, RefusedError, Rejection
+from lup.doors.on import OnDoor
 from lup.doors.service import Carrier
 from lup.environment.declaration import Resolved, load, resolve
 from lup.environment.running.programs import Local
@@ -25,9 +26,10 @@ from lup.environment.shell.viewing import viewed
 from lup.errors import LupError
 from lup.running.wire import (
     Answered,
-    Call,
     CommandCalled,
+    Crossed,
     Declined,
+    EventCalled,
     FormatError,
     Reply,
     ServiceCalled,
@@ -44,8 +46,26 @@ if TYPE_CHECKING:
     from lup.environment.doors import Running
     from lup.shell.looks import Looks
 
-CALLS = TypeAdapter[Call](Call)
+CALLS = TypeAdapter[Crossed](Crossed)
 REPLIES = TypeAdapter[Reply](Reply)
+
+
+async def heeded(running: Running, named: str, given: JsonValue) -> bytes:
+    """Run the methods made here run at the event of the class named `named`, `given` as its facts, and answer what they answered (`Heeded`); refused where no method here hears an event of that name, or `given` isn't one."""
+    kinds = [
+        entry.method.door.event
+        for entry in running.here()
+        if isinstance(entry.method.door, OnDoor)
+        and entry.method.door.event.__name__ == named
+    ]
+    if not kinds:
+        return declined(f"no part here hears an event named `{named}`")
+    try:
+        event = kinds[0].model_validate(given)
+    except ValidationError as wrong:
+        return declined(f"what crossed isn't a `{named}`: {wrong}")
+    heard = await running.heard(event)
+    return REPLIES.dump_json(Answered(output=heard.model_dump(mode="json")))
 
 
 async def answered(
@@ -72,6 +92,8 @@ async def answered(
             "vouched for it, saying who it's by: this one says no one"
         )
     match call:
+        case EventCalled(event=named, given=given):
+            return await heeded(running, named, given)
         case ToolCalled(tool=tool, given=given):
             outcome = await running.call(tool, given, call.by)
         case ServiceCalled(service=service, given=given):
