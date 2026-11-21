@@ -1,9 +1,10 @@
 """Setting a repository up's promises: what the operator typing `lup init` or `lup new` can count on.
 
 Each runs the command through the harness, as the operator, in a temporary
-directory, git and uv stood in for as each promise scripts them (`git` answering
-as a repository there would), and reads what it answered and the files it
-wrote, never its words (`README.md` here, *Promises*).
+directory, a git repository where it sets one up, git run for real
+(`lup.testing.RealGit`) and uv stood in for as each promise scripts it, and reads
+what it answered and the files it wrote, never its words (`README.md` here,
+*Promises*).
 """
 
 import sys
@@ -18,9 +19,9 @@ from lup import Model, Operator, Part, Project
 from lup.testing import (
     Accepted,
     Answering,
+    RealGit,
     Refused,
     Repository,
-    Responding,
     Scripted,
     Testing,
 )
@@ -28,34 +29,8 @@ from lup.testing import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-COMMIT = "0123456789abcdef0123456789abcdef01234567"
-"""The commit git says lup's own checkout is at."""
-
-
-class Git(Model, Responding):
-    """git, stood in for: answering what lup asks of a repository whose worktree is `root`, or of none where it's none, and making one where asked."""
-
-    root: Path | None = None
-
-    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
-        """Answer what lup asks: a worktree's root, its shared directory, whether it's bare, a checkout's `HEAD`, or a repository made."""
-        del given
-        root = self.root
-        match arguments:
-            case ["-C", _, "rev-parse", "--show-toplevel"]:
-                if root is None:
-                    return Answering(status=128, error="fatal: not a git repository")
-                return Answering(output=f"{root}\n")
-            case ["-C", _, "rev-parse", "--path-format=absolute", "--git-common-dir"]:
-                return Answering(output=f"{root}/.git\n")
-            case ["-C", _, "config", "--bool", "core.bare"]:
-                return Answering(output="false\n")
-            case ["-C", _, "rev-parse", "HEAD"]:
-                return Answering(output=f"{COMMIT}\n")
-            case ["-C", _, "init"]:
-                return Answering()
-            case _:
-                return None
+GIT = RealGit()
+"""git, run for real, for the command and for the promises' own repositories."""
 
 
 class Missing(Model):
@@ -81,15 +56,25 @@ class Taken(Model):
     name: Literal["core", "init", "new", "json"]
 
 
-def standing(
-    root: Path | None, lacking: str | None = None
-) -> dict[str, Git | Scripted]:
-    """Return git and uv stood in for, git answering for a repository at `root`, and uv doing whatever it's asked; without the one named `lacking`."""
-    programs: dict[str, Git | Scripted] = {
-        "git": Git(root=root),
+def standing(lacking: str | None = None) -> dict[str, RealGit | Scripted]:
+    """Return git, run for real, and uv stood in for, doing whatever it's asked; without the one named `lacking`."""
+    programs: dict[str, RealGit | Scripted] = {
+        "git": GIT,
         "uv": Scripted(answers=[Answering()]),
     }
     return {name: each for name, each in programs.items() if name != lacking}
+
+
+@contextmanager
+def repository() -> Generator[Path]:
+    """Hold a git repository of its own, made in a temporary directory, for as long as the block runs, and give its root, its links resolved, as git names it."""
+    with tempfile.TemporaryDirectory() as made:
+        yield GIT.made(Path(made).resolve())
+
+
+def head() -> str:
+    """Return the commit lup's own checkout is at, as git says: the one `lup init` pins lup's core at, where it's installed from that checkout."""
+    return GIT.git("rev-parse", "HEAD", cwd=Path(lup.__file__).parent)
 
 
 def adding(run: list[str]) -> list[str]:
@@ -107,8 +92,8 @@ def added(runs: list[list[str]]) -> list[str]:
 
 
 def entries(directory: Path) -> list[Path]:
-    """List what `directory` holds."""
-    return list(directory.iterdir())
+    """List what `directory` holds, beside its git directory."""
+    return [each for each in directory.iterdir() if each.name != ".git"]
 
 
 @contextmanager
@@ -135,9 +120,8 @@ class SetupPromises(Part):
     @lup.promise
     async def init_declares_lups_defaults(self, by: Testing) -> None:
         """`lup init` in a repository writes a declaration that loads and resolves to lup's default modules, and adds lup's core to the project through uv, pinned to a commit."""
-        with tempfile.TemporaryDirectory() as made:
-            root = Path(made)
-            started = await by.started(Project(), programs=standing(root))
+        with repository() as root:
+            started = await by.started(Project(), programs=standing())
             answered = await started.run(
                 "core", "init", {"directory": str(root)}, Operator()
             )
@@ -152,17 +136,16 @@ class SetupPromises(Part):
                 each.name for each in defaults.modules
             ]
             assert added(started.ran("uv")) == [done.dependency]
-            assert COMMIT in done.dependency
+            assert head() in done.dependency
 
     @lup.promise
     async def init_never_overwrites_a_declaration(self, by: Testing) -> None:
         """`lup init` where a declaration is there already refuses, and leaves it, and everything else, as it was."""
         written = by.any(str).encode(errors="surrogatepass")
-        with tempfile.TemporaryDirectory() as made:
-            root = Path(made)
+        with repository() as root:
             declaration = root / "lup_project.py"
             declaration.write_bytes(written)
-            started = await by.started(Project(), programs=standing(root))
+            started = await by.started(Project(), programs=standing())
             answered = await started.run(
                 "core", "init", {"directory": str(root)}, Operator()
             )
@@ -178,10 +161,9 @@ class SetupPromises(Part):
         ended = by.any(bool)
         ignoring = "/lup_project.local.py"
         before = "build/" + (f"\n{ignoring}" if had else "") + ("\n" if ended else "")
-        with tempfile.TemporaryDirectory() as made:
-            root = Path(made)
+        with repository() as root:
             (root / ".gitignore").write_text(before)
-            started = await by.started(Project(), programs=standing(root))
+            started = await by.started(Project(), programs=standing())
             answered = await started.run(
                 "core", "init", {"directory": str(root)}, Operator()
             )
@@ -195,15 +177,14 @@ class SetupPromises(Part):
     @lup.promise
     async def init_writes_nothing_where_uv_refuses_the_core(self, by: Testing) -> None:
         """`lup init` where uv can't add lup's core to the project refuses, writing neither its declaration nor its gitignore line."""
-        with tempfile.TemporaryDirectory() as made:
-            root = Path(made)
+        with repository() as root:
             refusing = Scripted(
                 answers=[
                     Answering(when=["--directory", str(root), "add"], status=1),
                     Answering(),
                 ]
             )
-            programs = {**standing(root), "uv": refusing}
+            programs = {**standing(), "uv": refusing}
             started = await by.started(Project(), programs=programs)
             answered = await started.run(
                 "core", "init", {"directory": str(root)}, Operator()
@@ -216,9 +197,8 @@ class SetupPromises(Part):
         """`lup init` and `lup new`, where git or uv isn't there, refuse before anything runs or is written."""
         lacking = "git" if by.any(bool) else "uv"
         new = by.any(bool)
-        with tempfile.TemporaryDirectory() as made:
-            root = Path(made)
-            started = await by.started(Project(), programs=standing(root, lacking))
+        with repository() as root:
+            started = await by.started(Project(), programs=standing(lacking))
             if new:
                 given = {"name": "orchard", "directory": str(root)}
                 answered = await started.run("core", "new", given, Operator())
@@ -234,11 +214,10 @@ class SetupPromises(Part):
     async def init_says_which_optional_programs_are_missing(self, by: Testing) -> None:
         """`lup init` says which programs lup's other parts run aren't there, podman among them, and none that is, at a version its part takes."""
         there = by.any(bool)
-        with tempfile.TemporaryDirectory() as made:
-            root = Path(made)
+        with repository() as root:
             fitting = Scripted(answers=[Answering(output="5.4.2\n")])
             podman = {"podman": fitting} if there else {}
-            programs = {**standing(root), **podman}
+            programs = {**standing(), **podman}
             started = await by.started(Project(), programs=programs)
             answered = await started.run(
                 "core", "init", {"directory": str(root)}, Operator()
@@ -253,7 +232,7 @@ class SetupPromises(Part):
     async def new_makes_a_project_selecting_its_own_module(self, by: Testing) -> None:
         """`lup new <name>` makes a project in a directory of that name, whose every Python file compiles and every TOML file reads, whose declaration loads and selects a module of its own, which is a member of its uv workspace."""
         with tempfile.TemporaryDirectory() as made:
-            started = await by.started(Project(), programs=standing(None))
+            started = await by.started(Project(), programs=standing())
             given = {"name": "orchard", "directory": made}
             answered = await started.run("core", "new", given, Operator())
             assert isinstance(answered, Accepted)
@@ -271,7 +250,9 @@ class SetupPromises(Part):
                     Repository(declaration=done.declaration.read_text())
                 )
             assert "orchard" in [each.name for each in declared.modules]
-            assert ["-C", str(project), "init"] in started.ran("git")
+            assert GIT.git("rev-parse", "--show-toplevel", cwd=project) == str(
+                project.resolve()
+            )
             member = f"./{done.module.relative_to(project)}"
             assert member in added(started.ran("uv"))
 
@@ -280,7 +261,7 @@ class SetupPromises(Part):
         """`lup new` refuses, with nothing run or written, a name that would shadow the core, one of `lup`'s commands, or a package Python has."""
         name = by.any(Taken).name
         with tempfile.TemporaryDirectory() as made:
-            started = await by.started(Project(), programs=standing(None))
+            started = await by.started(Project(), programs=standing())
             given = {"name": name, "directory": made}
             answered = await started.run("core", "new", given, Operator())
             assert isinstance(answered, Refused)

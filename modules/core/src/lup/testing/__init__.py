@@ -29,6 +29,7 @@ from lup.shell.wire import (
     Watch,
     Write,
 )
+from lup.testing.git import RealGit
 from lup.testing.harness import (
     Acting,
     Answering,
@@ -77,6 +78,7 @@ __all__ = [
     "Quote",
     "Raised",
     "Ran",
+    "RealGit",
     "Refused",
     "Rejection",
     "Repository",

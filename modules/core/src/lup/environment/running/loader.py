@@ -48,8 +48,9 @@ from lup.environment.running.programs import Local
 from lup.errors import LupError
 from lup.hosting.approvals import Approved, Question
 from lup.hosting.projects import Opening
-from lup.hosting.trees import Diffed, Exported, pinned
-from lup.programs import awaited, detached, run
+from lup.hosting.trees import Diffed, Exported
+from lup.programs import awaited, detached
+from lup.programs.git import Git
 from lup.running.wire import Answered, CommandCalled, Declined, Host
 from lup.types import Model
 lazy from lup.environment.doors import Running
@@ -117,33 +118,19 @@ class Repository(Model):
     tip: str
 
     @classmethod
-    def of(cls, home: Path) -> Repository:
+    async def located(cls, home: Path) -> Repository:
         """Read the repository holding `home`, git pinned to its own git directory where it reads the tip, since a room writes it.
 
-        Raise `lup.programs.ProgramFailedError` where `home` is in no
-        repository, or it has no `dev`.
+        Raise `LoaderError` where `home` is in no worktree, or
+        `lup.programs.git.GitError` where it has no `dev`.
         """
-        common = Path(
-            run(
-                "git",
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-common-dir",
-                cwd=home,
-            ).text()
-        )
-        bare = run("git", "config", "--bool", "core.bare", cwd=common, checked=False)
-        main = common if bare.text() == "true" else common.parent
+        worktree = await Git.located(home)
+        if worktree is None:
+            message = f"{home} is in no git worktree, so lup has no repository to run"
+            raise LoaderError(message)
         # lup: defer(issue=10, why="the running commit computed from `dev` and the branches the operator picked to run, rather than `dev`'s tip")
-        tip = run(
-            "env",
-            *[f"{name}={value}" for name, value in pinned(common).items()],
-            "git",
-            "rev-parse",
-            "--verify",
-            "dev^{commit}",
-        ).text()
-        return cls(name=main.name, common=common, tip=tip)
+        tip = await Git.pinned(worktree.common).branch("dev")
+        return cls(name=worktree.main.name, common=worktree.common, tip=tip)
 
 
 async def answering(socket: Path) -> bool:
@@ -229,7 +216,7 @@ class Loader(Model):
 
         Raise `LoaderError` where nothing of it is approved.
         """
-        repository = Repository.of(home)
+        repository = await Repository.located(home)
         running = await self.asking()
         try:
             commit = await self.answered(running, repository)
@@ -267,7 +254,7 @@ class Loader(Model):
         """
         if not self.interactive or not layout.declaration.is_file():
             return None
-        repository = Repository.of(layout.root)
+        repository = await Repository.located(layout.root)
         running = await self.asking()
         try:
             approval = await running.serve(

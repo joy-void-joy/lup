@@ -43,7 +43,8 @@ from lup.environment.running.programs import Local
 from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import opened
 from lup.environment.shell.layout import DashboardPlaces
-from lup.programs import ProgramFailedError, run
+from lup.programs import ProgramFailedError
+from lup.programs.git import Git, GitError
 from lup.running.plan import CORE, typed
 from lup.running.wire import (
     Call,
@@ -239,8 +240,18 @@ def main() -> None:
         )
         ran(lups, "lup", words, CORE)
     calling = LupSettings().lup_calling
+
+    def here() -> RepositoryLayout:
+        found = asyncio.run(RepositoryLayout.found(Path.cwd()))
+        if found is None:
+            message = (
+                f"{Path.cwd()} is in no git worktree, so lup has no declaration to read"
+            )
+            raise GitError(message)
+        return found
+
     try:
-        layout = RepositoryLayout.found(Path.cwd())
+        layout = here()
         if calling is None and shutil.which("podman") is not None:
             places = Places.found()
             loader = Loader(
@@ -284,7 +295,7 @@ def main() -> None:
             "process, over this worktree's declaration\n"
         )
         resolved = resolve(read(layout, machine()).project)
-    except (ProgramFailedError, ProjectError, LoaderError) as failure:
+    except (ProgramFailedError, GitError, ProjectError, LoaderError) as failure:
         refused("lup", failure)
     answerer = InProcess(
         by=Operator(),
@@ -295,7 +306,7 @@ def main() -> None:
     ran(answerer, "lup", words, CORE)
 
 
-def developed(modules: list[Module]) -> Project | None:
+async def developed(modules: list[Module]) -> Project | None:
     """Return the declaration, with its layers, of the worktree tracking the code of one of `modules`, where it holds one: a project's command in development; none where none does, as installed.
 
     Where the code lives says it, not where the command runs, so an installed
@@ -304,20 +315,11 @@ def developed(modules: list[Module]) -> Project | None:
     """
     for module in modules:
         source = Path(inspect.getfile(type(module)))
-        try:
-            layout = RepositoryLayout.found(source.parent)
-        except ProgramFailedError:
+        worktree = await Git.located(source.parent)
+        if worktree is None or not await worktree.tracks(source):
             continue
-        tracked = run(
-            "git",
-            "ls-files",
-            "--error-unmatch",
-            "--",
-            str(source),
-            cwd=layout.root,
-            checked=False,
-        )
-        if tracked.status == 0 and layout.declaration.is_file():
+        layout = RepositoryLayout.of(worktree)
+        if layout.declaration.is_file():
             return read(layout, machine()).project
     return None
 
@@ -352,7 +354,7 @@ def command_line(name: str, *modules: Module) -> Callable[[], None]:
 
     def main() -> None:
         try:
-            project = developed(list(modules)) or Project(
+            project = asyncio.run(developed(list(modules))) or Project(
                 modules=Modules.default().add(*modules)
             )
             resolved = resolve(project)
