@@ -20,7 +20,9 @@ from typing import override
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
+from lup.declaration.grammar import applied, set_fields
 from lup.declaration.layout import MachineLayout
+from lup.declaration.project import Project
 from lup.doors.door import Accepted, Answer, Method, RefusedError
 from lup.doors.events import Event, Heeded
 from lup.doors.parties import Machine
@@ -227,16 +229,30 @@ class Inward(MutableModel, Carrier, arbitrary_types_allowed=True):
                 raise RefusedError(rejection.reason, about=[name])
 
 
+def homed(host: Host) -> Project:
+    """Return the home repository's declaration with the machine's layer over it, as the operator's own settings say it (`~/.config/lup/lup_project.local.py`): what `Private.values` among them, which no room mounts, sets for every project.
+
+    The home repository's own local layer isn't read: it sits in the git
+    directory rooms write, and the machine runs what it loads.
+    """
+    project = load(host.root / host.declaration)
+    layer = MachineLayout(configuration=LupSettings().xdg_config_home).layer
+    if not layer.is_file():
+        return project
+    layered = load(layer)
+    return applied(layered, project, set_fields(layered))
+
+
 async def hosted_parts(
     host: Host, runs: Runs | None, inward: Inward, *, contained: bool
 ) -> Running:
-    """Start the home repository's parts holding the machine, as the machine's own, their data under `host.state`, their programs run by `runs`, a service of a part one for the whole machine in a container of its own carried by `inward`.
+    """Start the home repository's parts holding the machine, as the machine's own, the machine's layer over its declaration (`homed`), their data under `host.state`, their programs run by `runs`, a service of a part one for the whole machine in a container of its own carried by `inward`.
 
     Where nothing runs in a container (`contained` false: podman isn't
     there), the parts one for the whole machine run here too: no project's
     code runs anywhere, and the inbox still answers.
     """
-    resolved = resolve(load(host.root / host.declaration))
+    resolved = resolve(homed(host))
     machine = [
         each.named()
         for each in resolved.doors.served
@@ -281,7 +297,7 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         raise ProjectError(message)
     inward.running = running
     inward.carrying = carrying
-    resolved = resolve(load(host.root / host.declaration))
+    resolved = resolve(homed(host))
     binder = Binder(running=running, looks=resolved.looks, limit=limit)
     carrying.listens = binder
     carrying.forwards = Forwarder(limit=limit)
