@@ -44,6 +44,10 @@ class Rules(Named[str]):
     """lup's code rules a project runs, by name, a selection of the engine's table: `CodeRules(rules=Rules().drop("elif", why="…"))`."""
 
 
+class Tests(Named[str]):
+    """Where lup's rules for tests read, as patterns from the worktree's root, as `PurePath.full_match` takes them: a test's files and a module's promises."""
+
+
 class Exempt(Named[str]):
     """Where lup's rules don't read, as patterns from the worktree's root, as `PurePath.full_match` takes them: tests, whose shapes are a test's own. pyright and ruff still read them."""
 
@@ -232,7 +236,10 @@ class Reading(Part):
         ]
         settling = Settling(
             table=table,
-            exemptions=Exemptions(patterns=list(self.module.exempt.given())),
+            exemptions=Exemptions(
+                patterns=list(self.module.exempt.given()),
+                tests=list(self.module.tests.given()),
+            ),
         )
         checked = [
             settling.settled(
@@ -652,7 +659,10 @@ class Findings(Reading, room=True):
         ruffs = await ruff_findings(self.ruff, root, python)
         settling = Settling(
             table=self.known,
-            exemptions=Exemptions(patterns=list(self.module.exempt.given())),
+            exemptions=Exemptions(
+                patterns=list(self.module.exempt.given()),
+                tests=list(self.module.tests.given()),
+            ),
         )
         return [
             settling.settled(
@@ -723,6 +733,9 @@ class CodeRules(Module):
     """Every rule of the engine's table but `runtime-mention`, so a rule a later
     release adds runs unless a project drops it."""
     exempt: Exempt = Exempt.of("**/tests/**", "**/test_*.py", "**/conftest.py")
+    tests: Tests = Tests.of(
+        "**/tests/**", "**/test_*.py", "**/conftest.py", "**/promises.py"
+    )
     steps: Steps = Steps.of(RULES)
     parts: Parts = Parts.of(
         Checker, Findings, Guide, CodeRulesPromises, FindingsPromises
