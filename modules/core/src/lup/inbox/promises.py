@@ -18,7 +18,7 @@ from lup import (
     Part,
     Project,
 )
-from lup.inbox.said import (
+from lup.inbox import (
     Answering,
     AskSaid,
     Clearing,

@@ -220,32 +220,15 @@ forbidden_modules = ["lup.environment"]
 
 # A promise reaches lup through the harness and modules' public surface alone, so
 # a change inside a module leaves its promises alone (`lup/testing/README.md`):
-# a module's promises import `lup` and `lup.testing`, never the core's insides.
-# Only what they import themselves counts, since `lup` imports everything.
+# a module's promises import `lup`, `lup.testing` and modules' packages, never a
+# module inside one, nor the core's own modules beside them. Written as a
+# pattern, so a module added later is covered without naming it. Only what they
+# import themselves counts, since `lup` imports everything.
 [[tool.importlinter.contracts]]
 name = "a promise imports the harness and lup's front door alone"
 type = "forbidden"
 source_modules = ["lup.*.promises"]
-forbidden_modules = [
-    "lup.environment",
-    "lup.core",
-    "lup.types",
-    "lup.errors",
-    "lup.declaration.*",
-    "lup.doors.*",
-    "lup.shell.*",
-    "lup.testing.*",
-    "lup.programs.*",
-    "lup.running.*",
-    "lup.hosting.*",
-    "lup.told.*",
-    "lup.command_line.*",
-    "lup.setup.*",
-    "lup.gate.*",
-    "lup.landing.*",
-    "lup.rooms.*",
-    "lup.sessions.*",
-]
+forbidden_modules = ["lup.environment", "lup.core", "lup.types", "lup.errors", "lup.*.*"]
 allow_indirect_imports = true
 
 [tool.lup]
