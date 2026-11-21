@@ -9,6 +9,7 @@ running it (`README.md` here, *Promises*).
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -1319,7 +1320,7 @@ class ClearingPromises(Part):
 
     @lup.promise
     async def the_machine_opens_again_what_it_ran(self, by: Testing) -> None:
-        """As the machine's parts start, they open again each project they ran before they last stopped, at the commit approved last, every container left stopped first; with nothing run before, they stop nothing and open nothing."""
+        """As the machine's parts start, they open again each project they ran before they last stopped, at the commit approved last; with nothing run before, they open nothing."""
         ran = by.any(bool)
         started = await started_approved(by, OPENING_PODMAN)
         if ran:
@@ -1328,8 +1329,6 @@ class ClearingPromises(Part):
         assert isinstance(resumed, Accepted)
         answer = json.loads(resumed.answer())
         assert answer["opened"] == (["harmon"] if ran else [])
-        clearing = ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
-        assert (clearing in podman_ran(started, "stop")) == ran
 
     @lup.promise
     async def a_project_registered_is_opened_as_the_machine_starts(
@@ -1513,3 +1512,106 @@ class HerePromises(Part):
         assert isinstance(status, Accepted)
         said = status.answer()
         assert "harmon is registered, and not open: opening it was refused" in said
+
+
+class Flaky(lup.MutableModel, Responding):
+    """podman as a promise stands it in where building an image fails its first `failing` times, as fetching packages does when the network does."""
+
+    failing: int
+    built: int = 0
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer each run, failing a build the first `failing` times."""
+        del given
+        if arguments and arguments[0] == "version":
+            return VERSIONED
+        if arguments and arguments[0] == "image":
+            return Answering(status=1)
+        if arguments and arguments[0] == "build":
+            self.built += 1
+            return Answering(status=1 if self.built <= self.failing else 0)
+        return Answering()
+
+
+class Failures(Model):
+    """How many times a promise's podman fails to build before it builds."""
+
+    failing: int = Field(ge=0, le=4)
+
+
+class BuildingPromises(Part):
+    """What the operator can count on of an image built over a network that fails at times."""
+
+    @lup.promise
+    async def a_build_failing_for_a_moment_is_built_again(self, by: Testing) -> None:
+        """An image whose build fails is built again, three times at most: a failure that passes is built; one that doesn't is refused, saying podman's words."""
+        podman = Flaky(failing=by.any(Failures).failing)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": podman},
+            machine=True,
+        )
+        image = {"base": BASE, "definition": "FROM scratch", "project": "harness"}
+        built = await started.serve("built", image, Machine())
+        assert isinstance(built, Accepted) == (podman.failing < 3)
+        assert podman.built == min(podman.failing + 1, 3)
+
+
+class MachinewidePromises(Part):
+    """What the operator can count on of a part one for the whole machine that doesn't hold the machine: it runs in a container of its own, from the machine's own code, holding only what it declares."""
+
+    @lup.promise
+    async def a_part_one_for_the_machine_runs_in_a_container_of_its_own(
+        self, by: Testing
+    ) -> None:
+        """A part one for the whole machine that doesn't hold the machine runs in a container of its own, from the machine's own environment and tree read-only, its data the directory it kept on the machine; a part holding the machine starts no container; and a project's call to the former is carried there, never answered on the machine."""
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": OPENING_PODMAN, "uv": UV},
+            machine=True,
+        )
+        plan = plan_of(
+            Planned(module="chat", part="Desk", shared=True, tools=["note"]),
+            Planned(module="hosting", part="Keeper", shared=True),
+        )
+        keeper = json.loads(json.dumps(plan))
+        keeper["parts"][1]["holds"]["machine"] = True
+        with tempfile.TemporaryDirectory() as state:
+            data = Path(state) / "data"
+            sharing: JsonValue = {
+                "repository": "lup",
+                "root": "/srv/lup",
+                "declaration": "lup_project.py",
+                "environment": "/srv/environment",
+                "data": str(data),
+                "plan": keeper,
+            }
+            shared = await started.serve("machinewide", sharing, Machine())
+            kept = (data / "chat.Desk").is_dir()
+        assert kept
+        assert isinstance(shared, Accepted)
+        [container] = json.loads(shared.answer())["containers"]
+        assert container.startswith("lup-machine-chat-Desk-")
+        [command] = [
+            each for each in podman_ran(started, "run") if f"--name={container}" in each
+        ]
+        mounts = [each for each in command if each.startswith("--mount=")]
+        environment = [each for each in mounts if "/srv/environment" in each]
+        data = [each for each in mounts if "/data/chat.Desk" in each]
+        assert environment
+        assert all("ro=true" in each for each in environment)
+        assert data
+        assert not any("ro=true" in each for each in data)
+        assert not [each for each in mounts if "Keeper" in each]
+        project = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
+        await started.serve(
+            "placed",
+            {"repository": "lup", "plan": keeper, "placements": []},
+            Machine(),
+        )
+        call: JsonValue = {"format": 1, "kind": "tool", "tool": "note", "given": {}}
+        hosted = await started.serve(
+            "routed", {"directory": project, "call": call}, Machine()
+        )
+        assert isinstance(hosted, Accepted)
+        assert json.loads(hosted.answer())["to"] is not None

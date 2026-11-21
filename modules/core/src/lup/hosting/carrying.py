@@ -187,6 +187,9 @@ class Carrying(Part, machine=True, shared=True):
     """The machine's own parts' plan, which every caller is offered beside
     its project's: set where the machine's parts run."""
     placements: list[Placement] = []
+    machinewide: list[Placement] = []
+    """Each container running a part one for the whole machine that doesn't
+    hold the machine, from the home repository's approved commit."""
     rooms: list[SessionRoom] = []
     """Each session's room that's running."""
 
@@ -224,6 +227,33 @@ class Carrying(Part, machine=True, shared=True):
             ],
             *placing.placements,
         ]
+
+    @lup.service
+    async def sharing(self, placing: Placing, by: Machine) -> None:
+        """Keep where the parts one for the whole machine that don't hold the machine run, each in a container of its own, in place of where they ran before."""
+        del by
+        self.machinewide = list(placing.placements)
+
+    def machines(self, way: Way, call: Call) -> Route:
+        """Route a call the machine answers: to the container of a part one for the whole machine that doesn't hold it, where the home repository's plan says one serves it, else to the machine's own parts, which refuse what none of them serves.
+
+        Only the home repository's plan says which part is one for the whole
+        machine: a project's plan claiming one is never followed. Where its
+        container isn't running, as where podman isn't there and it runs in
+        the machine's process, the machine answers, or refuses saying it isn't
+        running.
+        """
+        serving = self.hosted.serving(way.door, way.name, way.module)
+        if serving is None or serving.holds.machine or not serving.holds.shared:
+            return Route(to=None, call=call)
+        sharing = self.holding(serving.named())
+        if sharing is None:
+            return Route(to=None, call=call)
+        return Route(to=sharing.listening(), call=call)
+
+    def holding(self, part: str) -> Placement | None:
+        """Return the container running the part named `part` (`module.Part`) one for the whole machine; none where none does."""
+        return next((each for each in self.machinewide if part in each.parts), None)
 
     @lup.service
     async def seated(self, room: SessionRoom, by: Machine) -> None:
@@ -290,10 +320,11 @@ class Carrying(Part, machine=True, shared=True):
         """Decide where a call come in on a socket goes, and who it's by: the operator on their own directory, a project's code on its container's.
 
         A call is answered by a part of the caller's project running in one
-        of its containers, the project the operator names for theirs, or else
-        by the machine's own parts, which refuse what none of them serves:
-        never by another project's part, and a part a plan says is the
-        machine's is only ever the machine's own. Raise
+        of its containers, the project the operator names for theirs; by a
+        part one for the whole machine that doesn't hold it, in its own
+        container; or else by the machine's own parts, which refuse what none
+        of them serves: never by another project's part, and a part a plan
+        says is the machine's is only ever the machine's own. Raise
         `RefusedError` where the directory is no container's, no session's
         room nor the operator's, where a conversation is named from anywhere
         but a room, where the call is to a command answered where `lup` is
@@ -321,7 +352,7 @@ class Carrying(Part, machine=True, shared=True):
             )
             raise RefusedError(message)
         if serving is None or serving.holds.machine or serving.holds.shared:
-            return Route(to=None, call=call)
+            return self.machines(way, call)
         placement = next(
             (
                 each
@@ -388,7 +419,12 @@ class Carrying(Part, machine=True, shared=True):
         if directory == self.operator():
             return Vouched(by=Operator(), repository=named)
         placement = next(
-            (each for each in self.placements if each.directory == directory), None
+            (
+                each
+                for each in [*self.placements, *self.machinewide]
+                if each.directory == directory
+            ),
+            None,
         )
         if placement is None:
             message = (
