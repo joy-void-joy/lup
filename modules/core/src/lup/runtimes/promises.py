@@ -242,7 +242,7 @@ class RecordsPromises(Part):
             ]:
                 whole = lined(*lines)
                 path = Path(made) / "record.jsonl"
-                record = Record(path=path, session=SESSION)
+                record = Record(path=path, home=path.parent, session=SESSION)
                 pieces = grown(records, record, whole, cuts)
                 path.write_bytes(whole)
                 assert pieces.steps == records.read(record).steps
@@ -252,7 +252,7 @@ class RecordsPromises(Part):
         """A record whose first line changed, or that shrank, since an earlier read is read from its start, and the read says so."""
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "record.jsonl"
-            record = Record(path=path, session=SESSION)
+            record = Record(path=path, home=path.parent, session=SESSION)
             records = ClaudeRecords()
             path.write_bytes(lined(*CLAUDE_LINES))
             before = records.read(record)
@@ -274,7 +274,7 @@ class RecordsPromises(Part):
         longest = 1000
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "record.jsonl"
-            record = Record(path=path, session=SESSION)
+            record = Record(path=path, home=path.parent, session=SESSION)
             records = ClaudeRecords(longest=longest)
             path.write_bytes(lined(typed("x" * (longest * 3), "u0"), *CLAUDE_LINES))
             read = records.read(record)
@@ -334,7 +334,9 @@ class RecordsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "record.jsonl"
             path.write_bytes(lined(*lines))
-            read = ClaudeRecords().read(Record(path=path, session=SESSION))
+            read = ClaudeRecords().read(
+                Record(path=path, home=path.parent, session=SESSION)
+            )
         heard = {
             each.text: (each.by, each.queued)
             for each in read.steps
@@ -379,7 +381,9 @@ class RecordsPromises(Part):
                     )
                 )
             )
-            read = ClaudeRecords().read(Record(path=path, session=SESSION))
+            read = ClaudeRecords().read(
+                Record(path=path, home=path.parent, session=SESSION)
+            )
         outputs = [each.output for each in read.steps if isinstance(each, Returned)]
         assert outputs == [
             "<persisted-output>a preview</persisted-output>" if linked else whole
@@ -391,7 +395,9 @@ class RecordsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "rollout.jsonl"
             path.write_bytes(lined(*CODEX_LINES))
-            read = CodexRecords().read(Record(path=path, session=SESSION))
+            read = CodexRecords().read(
+                Record(path=path, home=path.parent, session=SESSION)
+            )
         calls = {
             each.call: (each.tool, each.within)
             for each in read.steps
@@ -471,7 +477,9 @@ class RecordsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "record.jsonl"
             path.write_bytes(lined(*lines))
-            read = ClaudeRecords().read(Record(path=path, session=SESSION))
+            read = ClaudeRecords().read(
+                Record(path=path, home=path.parent, session=SESSION)
+            )
         counted = [each.used for each in read.steps if isinstance(each, Counted)]
         assert counted == [15, 15]
 
@@ -512,7 +520,9 @@ class RecordsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "record.jsonl"
             path.write_bytes(lined(*lines))
-            read = ClaudeRecords().read(Record(path=path, session=SESSION))
+            read = ClaudeRecords().read(
+                Record(path=path, home=path.parent, session=SESSION)
+            )
         lists = [
             [(task.id, task.subject, task.status) for task in each.tasks]
             for each in read.steps
@@ -544,7 +554,9 @@ class RecordsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             path = Path(made) / "record.jsonl"
             path.write_bytes(lined(*lines))
-            read = ClaudeRecords().read(Record(path=path, session=SESSION))
+            read = ClaudeRecords().read(
+                Record(path=path, home=path.parent, session=SESSION)
+            )
         refused = [each.call for each in read.steps if isinstance(each, Refused)]
         assert refused == ["toolu_1"]
 
@@ -569,10 +581,31 @@ class RecordsPromises(Part):
             if grows:
                 record.write_bytes(lined(*CLAUDE_LINES))
                 copied(records, home, into)
-            original = records.read(Record(path=record, session=SESSION))
+            original = records.read(Record(path=record, home=home, session=SESSION))
             copy = into / record.relative_to(home)
-            kept = records.read(Record(path=copy, session=SESSION))
+            kept = records.read(Record(path=copy, home=into, session=SESSION))
             assert kept.steps == original.steps
             copied_saved = into / saved.relative_to(home)
             assert (copied_saved / "call.txt").read_text() == "the whole output"
             assert not (copied_saved / "linked.txt").exists()
+
+    @lup.promise
+    async def nothing_is_read_through_a_link_out_of_its_home(self, by: Testing) -> None:
+        """A record, or a whole folder of them, reached through a link pointing out of the home it's found in isn't read, so a room can't have the reader read a file of the operator's by linking to it."""
+        whole_folder = by.any(bool)
+        with tempfile.TemporaryDirectory() as made:
+            home = Path(made) / "home"
+            outside = Path(made) / "outside"
+            elsewhere = outside / "-work"
+            elsewhere.mkdir(parents=True)
+            (elsewhere / f"{SESSION}.jsonl").write_bytes(lined(*CLAUDE_LINES))
+            projects = home / "projects"
+            projects.mkdir(parents=True)
+            if whole_folder:
+                (projects / "-work").symlink_to(elsewhere)
+            else:
+                (projects / "-work").mkdir()
+                (projects / "-work" / f"{SESSION}.jsonl").symlink_to(
+                    elsewhere / f"{SESSION}.jsonl"
+                )
+            assert ClaudeRecords().found(home) == []

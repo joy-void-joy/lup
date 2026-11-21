@@ -209,7 +209,9 @@ class CodexRecords(Records):
             sorted(sessions.glob("*/*/*/rollout-*.jsonl")) if sessions.is_dir() else []
         )
         records = [
-            record for path in paths if (record := self.recorded(path)) is not None
+            record
+            for path in paths
+            if (record := self.recorded(path, home)) is not None
         ]
         return [
             record
@@ -221,25 +223,26 @@ class CodexRecords(Records):
             )
         ]
 
-    def recorded(self, path: Path) -> Record | None:
+    def recorded(self, path: Path, home: Path) -> Record | None:
         """Return what the rollout at `path` is, read from its first line; none where that isn't a `session_meta` saying its thread and directory."""
-        meta = self.meta(path)
+        meta = self.meta(path, home)
         if meta is None or meta.id is None or meta.cwd is None:
             return None
         session = meta.session_id or meta.id
         subagent = meta.id != session or meta.parent_thread_id is not None
         return Record(
             path=path,
+            home=home,
             session=session,
             conversation=meta.id if subagent else None,
             spawner=meta.parent_thread_id if meta.parent_thread_id != session else None,
             directory=Path(meta.cwd),
         )
 
-    def meta(self, path: Path) -> Payload | None:
+    def meta(self, path: Path, home: Path) -> Payload | None:
         """Return what the rollout at `path` says of its thread on its first line; none where its first line isn't a `session_meta`."""
         try:
-            first = next(head(path), None)
+            first = next(head(path, home), None)
         except OSError:
             return None
         line = parsed(Line, first) if first is not None else None
@@ -249,8 +252,8 @@ class CodexRecords(Records):
 
     @override
     def read(self, record: Record, since: Reading | None = None) -> Read:
-        read = lined(record.path, since, longest=self.longest)
-        meta = self.meta(record.path) or Payload()
+        read = lined(record.path, record.home, since, longest=self.longest)
+        meta = self.meta(record.path, record.home) or Payload()
         legacy = meta.history_mode is None or meta.history_mode == "legacy"
         heard: Speaker = (
             "conversation" if record.conversation is not None else "operator"

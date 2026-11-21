@@ -195,6 +195,9 @@ class Record(Model):
     """A record a runtime keeps of one conversation: where it is, whose conversation it is, and where it ran."""
 
     path: Path
+    home: Path
+    """The home it was found in, which nothing read for it may lie outside:
+    a record is the room's to write, and a link in it could reach anything."""
     session: str
     """The runtime's id for the session: the conversation its operator, or
     lup, started, which a subagent's is part of."""
@@ -287,12 +290,20 @@ class Lined(Model):
     stopped further on: it shrank, or its first line changed."""
 
 
-def opened(path: Path) -> BinaryIO:
-    """Open the record at `path` to read: a regular file, reached without following a link at its last step and without waiting on a pipe.
+def confined(path: Path, within: Path) -> bool:
+    """Say whether `path`, every link in it followed, lies inside `within`: a link at any step pointing outside leaves it outside."""
+    return path.resolve().is_relative_to(within.resolve())
+
+
+def opened(path: Path, within: Path) -> BinaryIO:
+    """Open the file at `path` to read: a regular file, inside `within` once every link in its path is followed, reached without following a link at its last step and without waiting on a pipe.
 
     Raise `OSError` for anything else, which a room may have put in a record's
     place.
     """
+    if not confined(path, within):
+        message = f"{path} lies outside {within}"
+        raise OSError(message)
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     if not stat.S_ISREG(os.fstat(descriptor).st_mode):
         os.close(descriptor)
@@ -303,11 +314,12 @@ def opened(path: Path) -> BinaryIO:
 
 def lined(
     path: Path,
+    within: Path,
     since: Reading | None = None,
     longest: int = 64 * 2**20,
     chunk: int = 2**20,
 ) -> Lined:
-    """Read the whole lines the record at `path` added since the read that stopped at `since`, or from its start.
+    """Read the whole lines the record at `path`, inside `within`, added since the read that stopped at `since`, or from its start.
 
     A line longer than `longest` bytes is skipped as it's read, `chunk` bytes at
     a time, never held whole, and the line still being written, which has no
@@ -315,7 +327,7 @@ def lined(
     `since` read, or its first line reads otherwise, it's read from its start,
     and `again` says so.
     """
-    with opened(path) as record:
+    with opened(path, within) as record:
         first = record.readline(longest + 1)
         begins = hashlib.sha256(first).hexdigest() if first.endswith(b"\n") else None
         size = os.fstat(record.fileno()).st_size
@@ -351,13 +363,13 @@ def lined(
     return Lined(lines=lines, end=end, begins=begins, again=again)
 
 
-def head(path: Path, reach: int = 4 * 2**20) -> Iterator[bytes]:
-    """Yield each whole line of the record at `path` within its first `reach` bytes, where what it is and where it ran is said.
+def head(path: Path, within: Path, reach: int = 4 * 2**20) -> Iterator[bytes]:
+    """Yield each whole line of the record at `path`, inside `within`, within its first `reach` bytes, where what it is and where it ran is said.
 
     A line reaching past `reach` ends it, so a record that's one long line
     costs no more than `reach` to look at.
     """
-    with opened(path) as record:
+    with opened(path, within) as record:
         while (left := reach - record.tell()) > 0 and (
             text := record.readline(left)
         ).endswith(b"\n"):
@@ -386,14 +398,14 @@ def copied(records: Records, home: Path, into: Path) -> Copied:
             path
             for record in found
             for path in [record.path, *records.beside(record)]
-            if path.is_relative_to(home)
+            if confined(path, home)
         )
 
     def one(path: Path) -> Literal["whole", "grown", "same"]:
         """Copy one file of `home`'s into its place under `into`: say how."""
         target = into / path.relative_to(home)
         try:
-            source = opened(path)
+            source = opened(path, home)
         except OSError:
             return "same"
         with source:

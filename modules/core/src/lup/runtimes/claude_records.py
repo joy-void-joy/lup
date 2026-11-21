@@ -61,6 +61,7 @@ from lup.runtimes.records import (
     Stepped,
     Task,
     Titled,
+    confined,
     head,
     lined,
     opened,
@@ -256,10 +257,12 @@ class ClaudeRecords(Records):
         if record.conversation is not None:
             return [record.path.with_suffix(".meta.json")]
         saved = record.path.with_suffix("") / "tool-results"
-        if not saved.is_dir() or saved.is_symlink():
+        if not saved.is_dir() or not confined(saved, record.home):
             return []
         return sorted(
-            each for each in saved.iterdir() if each.is_file() and not each.is_symlink()
+            each
+            for each in saved.iterdir()
+            if each.is_file() and not each.is_symlink() and confined(each, record.home)
         )
 
     @override
@@ -281,7 +284,7 @@ class ClaudeRecords(Records):
                 *sorted(folder.glob("*.jsonl")),
                 *sorted(folder.glob("*/subagents/agent-*.jsonl")),
             ]
-            if (record := self.recorded(path)) is not None
+            if (record := self.recorded(path, home)) is not None
         ]
         return [
             record
@@ -293,13 +296,13 @@ class ClaudeRecords(Records):
             )
         ]
 
-    def recorded(self, path: Path) -> Record | None:
+    def recorded(self, path: Path, home: Path) -> Record | None:
         """Return what the record at `path` is, read from its first lines and, for a subagent's, the spawn's record beside it; none where it says neither its session nor its directory."""
         try:
             first = next(
                 (
                     line
-                    for text in head(path)
+                    for text in head(path, home)
                     if (line := parsed(Line, text)) is not None
                     and line.session_id is not None
                     and line.cwd is not None
@@ -312,11 +315,15 @@ class ClaudeRecords(Records):
             return None
         if path.parent.name != "subagents":
             return Record(
-                path=path, session=first.session_id, directory=Path(first.cwd)
+                path=path,
+                home=home,
+                session=first.session_id,
+                directory=Path(first.cwd),
             )
-        meta = self.spawn(path.with_suffix(".meta.json"))
+        meta = self.spawn(path.with_suffix(".meta.json"), home)
         return Record(
             path=path,
+            home=home,
             session=first.session_id,
             conversation=first.agent_id,
             spawner=meta.parent_agent_id,
@@ -324,19 +331,18 @@ class ClaudeRecords(Records):
             directory=Path(first.cwd),
         )
 
-    def spawn(self, path: Path) -> Meta:
+    def spawn(self, path: Path, home: Path) -> Meta:
         """Return what Claude Code wrote of a subagent's spawn at `path`; nothing said where it wrote nothing readable."""
         try:
-            with opened(path) as meta:
+            with opened(path, home) as meta:
                 return parsed(Meta, meta.read()) or Meta()
         except OSError:
             return Meta()
 
     @override
     def read(self, record: Record, since: Reading | None = None) -> Read:
-        read = lined(record.path, since, longest=self.longest)
+        read = lined(record.path, record.home, since, longest=self.longest)
         subagent = record.conversation is not None
-        folder = record.path.parent.parent if subagent else record.path.with_suffix("")
         carried = (
             Carried.model_validate(since.carried)
             if since is not None and not read.again
@@ -352,7 +358,7 @@ class ClaudeRecords(Records):
                     continue
                 after = self.carried(line, carried)
                 yield from self.stepped(
-                    line, each.start, folder, before=carried, after=after
+                    line, each.start, record, before=carried, after=after
                 )
                 carried = after
 
@@ -363,11 +369,11 @@ class ClaudeRecords(Records):
         return Read(steps=steps, reading=reading, again=read.again)
 
     def stepped(
-        self, line: Line, start: int, folder: Path, *, before: Carried, after: Carried
+        self, line: Line, start: int, record: Record, *, before: Carried, after: Carried
     ) -> list[Stepped]:
         """Return the steps one line holds, each placed at the byte `start` its line starts at and its index among them: what it says, then the context counted and the task list as it changed, where they did.
 
-        `folder` is the session's own, where its saved outputs are; `before` and
+        `record` is the line's, beside which its saved outputs are; `before` and
         `after` are what's carried to the line and past it.
         """
         here = Place(line=start)
@@ -392,7 +398,7 @@ class ClaudeRecords(Records):
             for _ in [after.tasks]
             if after.tasks != before.tasks
         ]
-        steps = [*self.held(line, here, folder), *counted, *planned]
+        steps = [*self.held(line, here, record), *counted, *planned]
         return [
             step.model_copy(update={"place": Place(line=start, index=index)})
             for index, step in enumerate(steps)
@@ -489,13 +495,13 @@ class ClaudeRecords(Records):
         except ValidationError:
             return carried
 
-    def held(self, line: Line, here: Place, folder: Path) -> Iterator[Stepped]:
+    def held(self, line: Line, here: Place, record: Record) -> Iterator[Stepped]:
         """Yield each step `line` holds, each at `here` until it's given its index."""
         match line:
             case Line(type="user", message=Message(content=list() as parts)) if any(
                 each.type == "tool_result" for each in parts
             ):
-                whole = self.saved(line, folder) if len(parts) == 1 else None
+                whole = self.saved(line, record) if len(parts) == 1 else None
                 yield from (
                     Returned(
                         place=here,
@@ -648,15 +654,20 @@ class ClaudeRecords(Records):
         """Return a message's parts as text: its text in order, each other part named where it stood."""
         return output([Content(type=each.type, text=each.text) for each in parts])
 
-    def saved(self, line: Line, folder: Path) -> str | None:
+    def saved(self, line: Line, record: Record) -> str | None:
         """Return a call's output whole from the file Claude Code saved it in, where its line names one: by its name, in the session's own `tool-results`, never elsewhere; none where there's none to read."""
+        session = (
+            record.path.parent.parent
+            if record.conversation is not None
+            else record.path.with_suffix("")
+        )
         match line.tool_use_result:
             case Persisted(persisted_output_path=str() as saved):
-                path = folder / "tool-results" / Path(saved).name
+                path = session / "tool-results" / Path(saved).name
             case _:
                 return None
         try:
-            with opened(path) as whole:
+            with opened(path, record.home) as whole:
                 return whole.read().decode(errors="replace")
         except OSError:
             return None
