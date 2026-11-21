@@ -5,11 +5,28 @@ where it runs, and `Stopping`, before it stops there. A session's events come
 with the piece that starts sessions (#5).
 """
 
+from typing import ClassVar
+
 from lup.types import Model
 
 
 class Event(Model):
-    """Something lup runs a module's methods at: each event a class of its own, which a method behind `@lup.on` takes."""
+    """Something lup runs a module's methods at: each event a class of its own, which a method behind `@lup.on` takes.
+
+    Where the event says it's `answered`, a method run at it may answer words,
+    told to whoever the event is about beside it, or refuse what it's about,
+    raising `RefusedError` with the words they read instead.
+    """
+
+    answered: ClassVar[bool] = False
+    """Whether a method run at it may answer words, or refuse it."""
+
+
+class Heeded(Model):
+    """What the methods run at an event answered: each one's words, in order, and the refusal, where one refused."""
+
+    told: list[str] = []
+    refused: str | None = None
 
 
 class Starting(Event):

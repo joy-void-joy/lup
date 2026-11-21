@@ -31,12 +31,13 @@ from lup.environment.doors import Doors, Entry, Running, Serves
 from lup.environment.running.container import answered
 from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
-from lup.environment.shell.server import Dashboard, Session, Socket
+from lup.environment.shell.server import Dashboard, Over, Session, Socket
 from lup.environment.told import rendered
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
 from lup.testing.harness import (
+    Acting,
     Broken,
     BrokenLawError,
     Call,
@@ -356,7 +357,7 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
 class StandIn(Model, Runs, arbitrary_types_allowed=True):
     """The programs a started lup's parts run, stood in for as a promise scripts them: each run heard, and answered by the first answer whose `when` its arguments start with, or by the code the promise wrote for it."""
 
-    scripts: dict[str, Scripted | Responding] = {}
+    scripts: dict[str, Scripted | Responding | Acting] = {}
     heard: Heard
 
     async def ran(
@@ -393,6 +394,8 @@ class StandIn(Model, Runs, arbitrary_types_allowed=True):
                 )
             case Responding() as responding:
                 answer = responding.answered(arguments, given)
+            case Acting() as acting:
+                answer = acting.ran(arguments, given, env, cwd)
         if answer is None:
             message = (
                 f"`{program.name} {' '.join(arguments)}` has no answer in the "
@@ -520,7 +523,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         declared: Project | Repository,
         secrets: Mapping[str, str] | None = None,
         repository: str = "harness",
-        programs: Mapping[str, Scripted | Responding] | None = None,
+        programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
     ) -> Started:
@@ -546,7 +549,11 @@ class Harness(Testing, arbitrary_types_allowed=True):
             telling=Teller(running=reached.running),
             dashboards=Dashboards(
                 dashboard=Dashboard(
-                    running=reached.running,
+                    answerer=Over(
+                        running=reached.running,
+                        looks=reached.looks,
+                        plan=plan_of(resolve(project), []),
+                    ),
                     looks=reached.looks,
                     root=document_of(reached.modules),
                     repository=repository,

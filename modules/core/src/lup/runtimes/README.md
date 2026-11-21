@@ -2,6 +2,15 @@
 
 The runtimes lup holds sessions on, Claude Code and Codex, behind one interface, so nothing outside `lup.runtimes` names one (`AGENTS.md`, *lup's code*).
 
+A runtime (`Runtime`, `runtime.py`) is five interfaces its own classes fill (`claude.py`, `codex.py`), and `Core.runtimes` holds each as an entry, which a project drops or replaces as it would any (`known.py` lists lup's own):
+- **`Rooming`:** what a session's room needs to run it: the files lup writes for it (its settings, its tool server's entry, its guidance at system level), the variables it runs with, and its command, held by lup over its input and output or in a terminal; the file its sign-in writes, which an account's login is mounted as; and what of its own directory is the history every room of a project shares.
+- **`Hooks`:** the hooks lup listens at, each read as one of lup's events (`lup.sessions.events`), and lup's answer spelled as the runtime reads one: words told beside it, a call refused, or lup's stamp on a subagent's call to lup's own tools naming their conversation.
+- **`Holder`:** how a session is held over its runtime's input and output (`Holding`): Claude Code's stream-json, named up front with `--session-id`; Codex's `app-server`, a thread opened by the holder and named by Codex.
+- **`Channel`:** where the newest CLI is fetched from, each checked against its vendor's checksum, the fetching its caller's (`Got`), so no code here reaches the network.
+- **`Records`:** how its records of each conversation are read (below).
+
+No SDK holds either runtime: both SDKs start the CLI on a pipe, which another process of the operator's can reopen through `/proc` and type into, so lup speaks both protocols itself, reading only what it needs and leaving what it doesn't know (`docs/field-notes.md`, *A session held with no terminal*). What each runtime's settings rest on is in its module's docstring.
+
 ## Records
 
 Each runtime writes a record of every conversation it holds, a line of JSON at a time, and only ever adds to it: Claude Code a `.jsonl` for a session and one for each subagent, Codex a rollout for each thread. `Records` (`records.py`) is the interface every runtime fills to read them, so the dashboard's conversation buffer and transcripts read every conversation in one shape:

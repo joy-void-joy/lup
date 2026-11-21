@@ -12,14 +12,18 @@ from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
 from lup.programs.promises import ProgramsPromises
+from lup.rooms.packages import Packages, standard
 from lup.running.plan import CORE
 from lup.running.promises import RunningPromises
+from lup.runtimes.known import known
 from lup.runtimes.promises import RecordsPromises
+from lup.runtimes.runtime import Runtimes
 from lup.setup.part import Setup
 from lup.setup.promises import SetupPromises
 from lup.shell.blocks import Viewing
 from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
-from lup.shell.promises import ShellPromises
+from lup.shell.pages import Dashboarding, Pages
+from lup.shell.promises import PagesPromises, ShellPromises
 from lup.store.promises import StorePromises
 from lup.store.records import Recorded
 from lup.testing.promises import TestingPromises
@@ -47,6 +51,8 @@ class Core(Module):
         RecordsPromises,
         TestingPromises,
         ShellPromises,
+        Pages,
+        PagesPromises,
         StorePromises,
         Inboxes,
         Speaking,
@@ -72,13 +78,17 @@ class Core(Module):
     )
     """The shell's fold kinds: a party's section, a file, a body, a run of
     unchanged lines; and the inbox's, a concern."""
+    dashboard: Dashboarding = Dashboarding()
+    """Whether the machine serves the dashboard, and on which port; read from
+    the home repository's declaration with the machine's layer over it."""
     kinds: Recorded = Recorded.of(*NODES, *EDGES)
     """The kinds of record the core's submodules keep in the store: the inbox's."""
     document: Viewing | None = None
     """The view the dashboard's document is, its root: a view listing the
     parties, each a fold of the `party` kind whose content reads what's shown of
     it, of the module named; none where the home repository's declaration names
-    none, and the dashboard shows nothing."""
+    none, and the machine's dashboard shows the inbox's parties of the home
+    repository (`lup.environment.shell.hosted`)."""
     # lup: defer(issue=5, why="a session's start reads the profile it runs on and its account (`lup.declaration.profiles.chosen`), which lup's sessions bring")
     profiles: Profiles = Profiles.of(Profile(name=DEFAULT))
     """The profiles the repository's sessions may run on: lup's `default`, and
@@ -86,6 +96,12 @@ class Core(Module):
     profile: DirectoryName = DEFAULT
     """The profile the repository's sessions run on, by its name, where a session
     is started naming none."""
+    runtimes: Runtimes = Runtimes.of(*known())
+    """The runtimes the repository's sessions may run on, each held by the
+    machine (`lup.runtimes`)."""
+    packages: Packages = Packages.of(*standard())
+    """The standard machine every session's room holds, which a module's own
+    packages add to (`lup.rooms`)."""
     home: Path | None = None
     """The home repository, a worktree of it, whose approved commit's machine
     parts run on this machine: lup's own checkout, for whoever works on lup.

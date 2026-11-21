@@ -12,7 +12,7 @@ import hashlib
 import inspect
 from typing import TYPE_CHECKING
 
-from hypothesis import HealthCheck, given, seed, settings
+from hypothesis import HealthCheck, Phase, given, seed, settings
 from hypothesis import strategies as st
 
 from lup.declaration.project import Project
@@ -83,10 +83,16 @@ class Check(Model, arbitrary_types_allowed=True):
         test = given(st.data())(once)
         if exploring.seeded:
             test = seed(self.seed())(test)
+        # Hypothesis's explain phase traces every line of every run once one
+        # fails, to say which parts of what it drew mattered: that makes a
+        # broken promise's check many times slower, and the run it replays
+        # last, which the report names, isn't the shrunk one. The report says
+        # what was drawn, called and interleaved itself.
         test = settings(
             database=None,
             deadline=None,
             max_examples=exploring.runs,
+            phases=[each for each in Phase if each is not Phase.explain],
             report_multiple_bugs=False,
             suppress_health_check=[HealthCheck.too_slow, HealthCheck.nested_given],
         )(test)

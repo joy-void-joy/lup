@@ -850,7 +850,7 @@ class TreesPromises(Part):
 
     @lup.promise
     async def git_reads_the_repository_alone(self, by: Testing) -> None:
-        """git, reading a commit's objects, is held to the repository's own git directory, reading no `commondir`, graft, replace ref, commit-graph or configuration but the repository's own, with nothing that could run code."""
+        """git, reading a commit's objects, is held to the repository's own git directory, reading no `commondir`, graft, shallow file, replace ref, commit-graph or configuration but the repository's own, with nothing that could run code."""
         committed = Committed.of(by.any(Files))
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
@@ -863,6 +863,7 @@ class TreesPromises(Part):
             "GIT_DIR": "/srv/harmon.git",
             "GIT_COMMON_DIR": "/srv/harmon.git",
             "GIT_GRAFT_FILE": os.devnull,
+            "GIT_SHALLOW_FILE": os.devnull,
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_NO_LAZY_FETCH": "1",
         }
@@ -1101,6 +1102,12 @@ the plan of a part holding nothing and one holding a secret, and every run and
 stop succeeding."""
 
 
+class Repository(Model):
+    """A project a caller may say they ask about."""
+
+    name: Literal["harmon", "story", "lup"]
+
+
 class ProjectsPromises(Part):
     """What the operator can count on of what runs of a project: the commit they approved last, and nothing before."""
 
@@ -1204,12 +1211,6 @@ class ProjectsPromises(Part):
             "offered", {"directory": "/srv/elsewhere"}, Machine()
         )
         assert isinstance(stranger, Refused)
-
-
-class Repository(Model):
-    """A project a caller may say they ask about."""
-
-    name: Literal["harmon", "story", "lup"]
 
     @lup.promise
     async def a_restart_cuts_no_call(self, by: Testing) -> None:
