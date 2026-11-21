@@ -21,6 +21,7 @@ from lup import (
     Codebase,
     Diff,
     Fold,
+    Line,
     Machine,
     Markdown,
     Model,
@@ -29,6 +30,7 @@ from lup import (
 )
 from lup.testing import (
     Accepted,
+    Acting,
     Answering,
     RealGit,
     Refused,
@@ -61,6 +63,31 @@ stand in for passing, saying `TOLD`: the gate as an agent runs it, on the files
 the promise committed."""
 TOLD = "historical-voice: main.py:3"
 """What the gate's step tells where it passes."""
+
+
+class Found(Model):
+    """What a gate step finds without failing, as it writes it to the file the gate gives it."""
+
+    about: str = "harness"
+    title: str = "a check that held on its second run"
+    text: str = "it failed once, then held"
+
+
+class Checked(Model, Acting):
+    """The gate's step `checked`, stood in for: it passes, saying `TOLD`, and writes one finding to the file the gate gives it."""
+
+    def ran(
+        self,
+        arguments: list[str],
+        given: bytes | None,
+        env: dict[str, str],
+        cwd: Path | None,
+    ) -> Answering:
+        """Write the finding, and pass."""
+        del arguments, given, cwd
+        for each in env.values():
+            Path(each).write_text(Found().model_dump_json() + "\n")
+        return Answering(output=TOLD)
 
 
 class Places(Model):
@@ -183,10 +210,17 @@ class Nothing(Model):
     """Nothing to give."""
 
 
+class Titled(Model):
+    """A concern of the project's inbox, by its title."""
+
+    title: str
+
+
 class Standing(Model):
-    """The numbers of what waits on the operator in the project's inbox."""
+    """What waits on the operator in the project's inbox, by number, and its concerns, frictions among them."""
 
     waiting: list[int] = []
+    concerns: list[Titled] = []
 
 
 class Ending(Model):
@@ -227,12 +261,17 @@ class LandedItem(Model):
     item: int | None = None
 
 
-async def waiting(started: Started) -> list[int]:
-    """Return the numbers of what waits on the operator in the project's inbox."""
+async def standing(started: Started) -> Standing:
+    """Return what the project's inbox holds, as its code reads it."""
     read = await started.serve("standing", Nothing(), Codebase(repository=PROJECT))
     assert isinstance(read, Accepted)
     assert isinstance(read.output, Model)
-    return Standing.model_validate(read.output.model_dump()).waiting
+    return Standing.model_validate(read.output.model_dump())
+
+
+async def waiting(started: Started) -> list[int]:
+    """Return the numbers of what waits on the operator in the project's inbox."""
+    return (await standing(started)).waiting
 
 
 async def told(started: Started, agent: Agent) -> list[str]:
@@ -265,7 +304,7 @@ async def machine(by: Testing, at: Places) -> Started:
         programs={
             "git": RealGit(),
             "uv": Scripted(answers=[Answering(output="/srv/python\n")]),
-            "checked": Scripted(answers=[Answering(output=TOLD)]),
+            "checked": Checked(),
         },
         machine=True,
     )
@@ -472,6 +511,32 @@ class LandingPromises(Part):
         assert Seen(path="new.py", how="adds") in seen
         assert Seen(path="gone.py", how="removes") in seen
         assert all(each.path != "kept.py" for each in seen)
+
+    @lup.promise
+    async def what_the_gate_found_is_filed_as_the_branch_lands(
+        self, by: Testing
+    ) -> None:
+        """What the gate's steps found without failing on the landing's tip shows in its review, and is filed as a friction of the agent landing it, under its subject."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed("feature", "feature.txt", "feature\n")
+            await gated(started, at)
+            answered = await landed(started, "feature", agent)
+            reviewed = await started.view(
+                "landing", "review", Naming(branch="feature"), Operator()
+            )
+            filed = (await standing(started)).concerns
+        assert isinstance(answered, Accepted)
+        assert isinstance(reviewed, Accepted)
+        assert isinstance(reviewed.output, Blocks)
+        assert any(
+            Found().title in each.said()
+            for each in reviewed.output.blocks
+            if isinstance(each, Line)
+        )
+        assert Titled(title=Found().title) in filed
 
     @lup.promise
     async def a_yes_is_to_the_tip_whose_review_was_read(self, by: Testing) -> None:

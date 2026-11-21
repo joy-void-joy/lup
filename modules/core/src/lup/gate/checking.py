@@ -8,6 +8,7 @@ the commit the operator approved (`README.md` here, *Where it runs*).
 
 import asyncio
 import hashlib
+import tempfile
 from itertools import groupby
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Operator
 from lup.doors.parts import Declared, Part, Program, UnrunError
+from lup.gate.findings import Finding, read, variable
 from lup.gate.layout import GateLayout
 from lup.gate.settings import GateSettings
 from lup.gate.steps import Step, Steps
@@ -44,6 +46,9 @@ class Ran(Model):
     said: str = ""
     """What it printed, then what it said on its standard error; or why it
     couldn't be run."""
+    findings: list[Finding] = []
+    """What it found without failing, as it wrote them to the file the gate
+    gave it (`lup.gate.findings`)."""
 
     def passed(self) -> bool:
         """Say whether it passed: its program ran and ended with status 0."""
@@ -68,6 +73,8 @@ class Stepped(Model):
     said: str = ""
     """What it printed and said, where it failed or tells what it prints;
     nothing otherwise."""
+    findings: list[Finding] = []
+    """What it found without failing, to be filed."""
 
 
 class Run(Model):
@@ -90,6 +97,7 @@ class Run(Model):
                     passed=each.passed(),
                     seconds=each.seconds,
                     said=each.said if not each.passed() or each.step.tells else "",
+                    findings=each.findings,
                 )
                 for each in ran
             ],
@@ -159,7 +167,7 @@ class Gating(Part):
         )
 
     async def ran(self, step: Step, words: list[str], root: Path) -> Ran:
-        """Run `words`, `step`'s check or its fix, from `root`, and say how it ended, however it did."""
+        """Run `words`, `step`'s check or its fix, from `root`, and say how it ended, however it did, with what it found, written to a file of its own the gate names in its environment (`lup.gate.findings`)."""
         loop = asyncio.get_running_loop()
         start = loop.time()
         [name, *arguments] = words
@@ -172,15 +180,24 @@ class Gating(Part):
                 "install": "",
             }
         )
-        try:
-            finished = await program.ran(*arguments, cwd=root)
-        except UnrunError as unrun:
-            return Ran(
-                step=step, status=None, seconds=loop.time() - start, said=str(unrun)
-            )
+        with tempfile.TemporaryDirectory(prefix="lup-findings-") as scratch:
+            file = Path(scratch) / "findings"
+            try:
+                finished = await program.ran(
+                    *arguments, cwd=root, env={variable(): str(file)}
+                )
+            except UnrunError as unrun:
+                return Ran(
+                    step=step, status=None, seconds=loop.time() - start, said=str(unrun)
+                )
+            found = read(file)
         said = finished.text() + finished.error.decode(errors="replace")
         return Ran(
-            step=step, status=finished.status, seconds=loop.time() - start, said=said
+            step=step,
+            status=finished.status,
+            seconds=loop.time() - start,
+            said=said,
+            findings=found,
         )
 
 
@@ -261,6 +278,11 @@ def reported(fixed: list[Ran], ran: list[Ran], took: float) -> str:
             if not each.passed() or each.step.tells
             else each.line(width)
             for each in ran
+        ),
+        *(
+            f"found by {each.step.name}, about {finding.about}: {finding.title}"
+            for each in ran
+            for finding in each.findings
         ),
     ]
     failed = [each.step.name for each in ran if not each.passed()]

@@ -72,6 +72,7 @@ class Landers(Part):
             "answer reaches you as a message: a yes puts it on trial, a comment "
             "is theirs to you. A commit you add from here lands with your next "
             f"`land`.{changed}{deferrals}"
+            + "".join(f"\n\n{each}" for each in landed.filed)
         )
 
     @lup.tool

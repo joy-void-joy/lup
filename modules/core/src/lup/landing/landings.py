@@ -24,13 +24,14 @@ from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part, Program
 from lup.gate.checking import Run, keyed, last, passed
+from lup.gate.findings import Finding
 from lup.gate.layout import GateLayout
 from lup.hosting.approvals import Approvals, Approving, Asking
 from lup.hosting.projects import Opening, Projects
 from lup.hosting.trees import Commit
 from lup.inbox.part import Inboxes
 from lup.inbox.records import Item, Laid
-from lup.inbox.said import Posting, Settling
+from lup.inbox.said import FrictionSaid, Posting, Settling, Spoken
 from lup.landing.merging import Composed, Unmerged, apart
 from lup.programs.git import Entry, Git, Store
 from lup.running.plan import Name
@@ -122,6 +123,12 @@ class Landed(Model):
     deferrals: list[Deferred] = []
     """The `# lup: defer` comments its tip adds, removes and rewords against
     the integration branch's tip it holds, in its Python files."""
+    findings: list[Finding] = []
+    """What the gate's steps found without failing on its tip, which its
+    landing files as frictions."""
+    filed: list[str] = []
+    """What came of filing each of `findings` as its landing came, a line
+    each: kept with nothing, said to the agent landing it."""
 
     def waiting(self) -> bool:
         """Say whether it waits on the operator's review: landed at a tip they haven't said yes to."""
@@ -326,7 +333,8 @@ class Landings(Part, machine=True, shared=True):
             tree = await git.tree(tip)
             main = opening.common if await git.bare() else opening.common.parent
             local = local_layer(main, opening.declaration)
-            if passed(GateLayout(common=opening.common), keyed(tree, local)) is None:
+            run = passed(GateLayout(common=opening.common), keyed(tree, local))
+            if run is None:
                 message = (
                     f"the gate hasn't passed on {landing.branch}'s files at {tip}: commit "
                     "everything, run `lup gate check` in its worktree, and land again"
@@ -348,6 +356,7 @@ class Landings(Part, machine=True, shared=True):
                 message=landing.message,
                 at=datetime.now(UTC),
                 deferrals=await deferred(git, onto, tip),
+                findings=[found for step in run.steps for found in step.findings],
                 reviewed=None if before is None else before.reviewed,
                 picked=True if before is None else before.picked,
                 wanted=[] if before is None else before.wanted,
@@ -365,7 +374,10 @@ class Landings(Part, machine=True, shared=True):
             )
             landed = landed.model_copy(update={"item": posted.number})
             self.keep(project, trial.with_landing(landed))
-            return landed
+            filed = [
+                await filed_as(project, each, landing.agent) for each in landed.findings
+            ]
+            return landed.model_copy(update={"filed": filed})
 
     @lup.service
     async def wants(self, wanting: Wanting, by: Codebase) -> str:
@@ -727,6 +739,23 @@ class Landings(Part, machine=True, shared=True):
         )
 
 
+async def filed_as(project: str, finding: Finding, by: Agent) -> str:
+    """File what the gate found on a landing's tip as a friction of the agent landing it, in `project`, under `frictions/` and the finding's subject, and say what came of it in a line; where it can't be filed, why, the landing standing."""
+    said = FrictionSaid(
+        text=finding.text,
+        title=finding.title,
+        under=f"frictions/{finding.about}",
+        repository=project,
+    )
+    try:
+        await Inboxes.friction(Spoken(agent=by, said=said))
+    except RefusedError as unfiled:
+        return f"What the gate found, {finding.title}, isn't filed: {unfiled}"
+    return (
+        f"What the gate found is filed under frictions/{finding.about}: {finding.title}"
+    )
+
+
 async def deferred(git: Store, onto: Commit, tip: Commit) -> list[Deferred]:
     """Return the `# lup: defer` comments `tip` adds, removes and rewords against `onto`, in each Python file it changes, read from each object's own bytes; a deferral moved to another line is neither."""
     before = {str(each.path): each for each in await git.held(onto)}
@@ -783,6 +812,15 @@ def gate_lines(run: Run | None) -> list[Line | Markdown]:
     outcome = "passed" if run.passed else "failed"
     return [
         Line.of("gate", f"The gate {outcome} on these files.", "strong"),
+        *(
+            Line.of(
+                f"gate-found-{index}",
+                f"found, about {each.about}: {each.title}. {each.text}",
+            )
+            for index, each in enumerate(
+                found for step in run.steps for found in step.findings
+            )
+        ),
         *(
             block
             for each in run.steps

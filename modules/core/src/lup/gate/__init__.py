@@ -5,6 +5,7 @@ A module's declaration imports its steps' kind from here (`Step`, `Steps`), as
 lup's default modules. Its reasons are in `README.md` here.
 """
 
+from lup.gate.findings import Finding, tell
 from lup.gate.steps import Step, Steps
 
-__all__ = ["Step", "Steps"]
+__all__ = ["Finding", "Step", "Steps", "tell"]

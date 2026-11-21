@@ -28,6 +28,10 @@ Any module declares its own as a field of `Steps`, and the gate runs every modul
 - `imports`: the project's import contracts, through import-linter;
 - `declaration`: loading the declaration, which every hook does, imports nothing beyond the standard library, lup and what it needs, and the project's own code (`lup.environment.weighing`). A module counts by where its file is: a heavy one is among the files of an installed distribution lup's core doesn't need, its extras left out, outside the worktree. Each is named with the chain of imports from the declaration to it, so it's imported where it's used instead (`lazy from`).
 
+## Findings
+
+What a step finds without failing anyone, a flaky check, a slow one, a line no promise notices, it tells the gate to file: the gate gives each step a file of its own, named in `LUP_GATE_FINDINGS` (`FindingsFile`), and a step writes one JSON line to it for each `Finding` (what it's about, a module or the harness; a title; the text), which Python code writes with `lup.gate.tell`. The gate keeps them with the run it records and names each in its report; a landing shows them in its review, and files each as a friction of the agent landing it, under `frictions/` and its subject, so a flake met at every run an agent makes is filed once, as the branch lands (`lup/landing/README.md`).
+
 ## `lup gate check`
 
 It runs where it's typed (`@lup.command(here=True)`, `lup/command_line/README.md`): a branch's own checks, its tests among them, run in the room it's typed in, over that worktree's declaration and environment. Carried to where the project runs, it would check the commit the operator approved, never the worktree. `--directory` checks another worktree than the one it's typed in.
