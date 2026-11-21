@@ -18,18 +18,18 @@ from lup import (
     Step,
     Steps,
 )
+from lup.code_rules.checking import Checked, Exemptions, Settling, Table
+from lup.code_rules.engine import Engine, EngineLayout, Source, Written
+from lup.code_rules.errors import CodeRulesError
+from lup.code_rules.examples import Examples
+from lup.code_rules.guidance import told
+from lup.code_rules.promises import CodeRulesPromises
+from lup.code_rules.reading import read_directives, typescript_directives
+from lup.code_rules.reporting import Report
+from lup.code_rules.reports import FileReport, RuleInfo
+from lup.code_rules.ruff import ruff_findings
 from lup.declaration.layout import RepositoryLayout
 from lup.hosting.git import nul_separated
-from lup_code_rules.checking import Checked, Exemptions, Settling, Table
-from lup_code_rules.engine import Engine, EngineLayout, Source, Written
-from lup_code_rules.errors import LupCodeRulesError
-from lup_code_rules.examples import Examples
-from lup_code_rules.guidance import told
-from lup_code_rules.promises import CodeRulesPromises
-from lup_code_rules.reading import read_directives, typescript_directives
-from lup_code_rules.reporting import Report
-from lup_code_rules.reports import FileReport, RuleInfo
-from lup_code_rules.ruff import ruff_findings
 
 
 class Rules(Named[str]):
@@ -169,7 +169,7 @@ class Checker(Part):
                 config=layout.pyproject,
             )
             unmet = await checking.unmet(rules)
-        except LupCodeRulesError as failed:
+        except CodeRulesError as failed:
             raise RefusedError(str(failed)) from failed
         if unmet:
             raise RefusedError("\n".join(each.said() for each in unmet))
@@ -215,7 +215,7 @@ class Checker(Part):
         engine = await self.engine(layout)
         try:
             return Table.of(await engine.rules())
-        except LupCodeRulesError as failed:
+        except CodeRulesError as failed:
             raise RefusedError(str(failed)) from failed
 
     def running(self, table: Table) -> list[str]:
@@ -267,7 +267,7 @@ class Checker(Part):
                 [Source(path=each) for each in files],
             )
             ruffs = await ruff_findings(self.ruff, layout.root, files)
-        except LupCodeRulesError as failed:
+        except CodeRulesError as failed:
             raise RefusedError(str(failed)) from failed
         written = [
             Written(path=each, content=(layout.root / each).read_text())
@@ -275,7 +275,7 @@ class Checker(Part):
         ]
         try:
             commented = await engine.comments(written) if written else []
-        except LupCodeRulesError as failed:
+        except CodeRulesError as failed:
             raise RefusedError(str(failed)) from failed
         typescript = [
             FileReport(path=each.path, directives=typescript_directives(found))

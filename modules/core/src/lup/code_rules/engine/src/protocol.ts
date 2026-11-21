@@ -1,8 +1,8 @@
 // What travels between the engine and its Python client
-// (`lup_code_rules/environment/engine.py`), one JSON object per line.
+// (`lup/code_rules/engine.py`), one JSON object per line.
 //
 // The reports mirror the client's models field for field
-// (`lup_code_rules/reports.py`, `lup_code_rules/engine.py`): the
+// (`lup/code_rules/reports.py`, `lup/code_rules/engine.py`): the
 // client validates every answer into them, so a field renamed here fails there at
 // once.
 

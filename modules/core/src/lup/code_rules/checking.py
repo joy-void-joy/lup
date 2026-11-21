@@ -9,9 +9,8 @@ keeps.
 
 from pathlib import PurePosixPath
 
-from lup.types import Model
-from lup_code_rules.directives import Directive, Ignore, Malformed
-from lup_code_rules.reports import (
+from lup.code_rules.directives import Directive, Ignore, Malformed
+from lup.code_rules.reports import (
     Category,
     Examples,
     FileReport,
@@ -20,6 +19,7 @@ from lup_code_rules.reports import (
     RuleInfo,
     Span,
 )
+from lup.types import Model
 
 
 class Kept(Model):

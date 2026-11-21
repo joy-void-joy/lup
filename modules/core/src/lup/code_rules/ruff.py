@@ -12,9 +12,9 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 
 from lup import Program
+from lup.code_rules.errors import CodeRulesError
+from lup.code_rules.reports import Finding, Position, Span
 from lup.types import Model
-from lup_code_rules.errors import LupCodeRulesError
-from lup_code_rules.reports import Finding, Position, Span
 
 
 class Located(Model):
@@ -70,7 +70,7 @@ async def ruff_findings(
 
     ruff reads its settings where it finds them from `root`, or from `config`
     where it's given, run from the directory `config` is in, which its
-    relative settings (`src`) are read from. Raise `LupCodeRulesError` where
+    relative settings (`src`) are read from. Raise `CodeRulesError` where
     ruff fails rather than reporting.
     """
     if not paths:
@@ -93,10 +93,10 @@ async def ruff_findings(
     )
     if ran.status != 0:
         message = f"ruff failed, ending with status {ran.status}: {ran.said()}"
-        raise LupCodeRulesError(message)
+        raise CodeRulesError(message)
     try:
         reported = TypeAdapter(list[Reported]).validate_json(ran.output)
     except ValidationError as unread:
         message = f"ruff answered what lup can't read: {unread}"
-        raise LupCodeRulesError(message) from unread
+        raise CodeRulesError(message) from unread
     return [each.finding(root) for each in reported]

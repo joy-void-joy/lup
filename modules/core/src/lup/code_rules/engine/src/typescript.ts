@@ -1,7 +1,7 @@
 // A TypeScript file's `// lup:` comments, found with TypeScript's own parser, so a
 // `//` inside a string, a template or a regular expression is never one. What each
 // says after `lup:` is read by the client as a Python file's is, with the same
-// grammar (`lup_code_rules/reading.py`).
+// grammar (`lup/code_rules/reading.py`).
 
 import * as ts from 'typescript';
 

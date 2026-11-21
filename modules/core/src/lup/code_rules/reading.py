@@ -13,9 +13,9 @@ import io
 import tokenize
 from typing import TYPE_CHECKING
 
+from lup.code_rules.directives import Defer, Directive, Ignore, Malformed, Note
+from lup.code_rules.engine import LupComment
 from lup.types import Model
-from lup_code_rules.directives import Defer, Directive, Ignore, Malformed, Note
-from lup_code_rules.engine import LupComment
 
 if TYPE_CHECKING:
     from collections.abc import Generator

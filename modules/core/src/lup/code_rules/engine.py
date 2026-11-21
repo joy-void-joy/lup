@@ -24,8 +24,8 @@ from typing import TYPE_CHECKING
 from pydantic import Field, TypeAdapter, ValidationError
 
 from lup import Finished, Model, Program
-from lup_code_rules.errors import LupCodeRulesError
-from lup_code_rules.reports import FileReport, RuleInfo
+from lup.code_rules.errors import CodeRulesError
+from lup.code_rules.reports import FileReport, RuleInfo
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -110,12 +110,12 @@ def held(lock: Path) -> Generator[None]:
 
 
 def succeeded(finished: Finished, what: str) -> Finished:
-    """Return `finished` where its program succeeded; raise `LupCodeRulesError`, saying `what` failed and what it said, otherwise."""
+    """Return `finished` where its program succeeded; raise `CodeRulesError`, saying `what` failed and what it said, otherwise."""
     if finished.status == 0:
         return finished
     said = finished.said() or finished.text().strip()
     message = f"{what} failed, ending with status {finished.status}: {said}"
-    raise LupCodeRulesError(message)
+    raise CodeRulesError(message)
 
 
 class Engine(Model):
@@ -138,7 +138,7 @@ class Engine(Model):
     async def built(self) -> Path:
         """Return the engine's bundle, building it where it isn't there yet.
 
-        Raise `LupCodeRulesError` where fetching pyright's source or building
+        Raise `CodeRulesError` where fetching pyright's source or building
         fails, saying which step and what it said.
         """
         digest = self.sources.digest()
@@ -305,9 +305,9 @@ class Asked(Model):
 
 
 def answered[T](finished: Finished, kind: type[T]) -> T:
-    """Read what the engine printed as `kind`; raise `LupCodeRulesError` where it isn't, the engine being from another build than this package expects."""
+    """Read what the engine printed as `kind`; raise `CodeRulesError` where it isn't, the engine being from another build than this package expects."""
     try:
         return TypeAdapter(kind).validate_json(finished.output)
     except ValidationError as unread:
         message = f"the engine answered what this package can't read: {unread}"
-        raise LupCodeRulesError(message) from unread
+        raise CodeRulesError(message) from unread

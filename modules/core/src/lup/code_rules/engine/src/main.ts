@@ -1,5 +1,5 @@
 // lup's typed engine: pyright's own program, with lup's rules reading its tree and
-// types (`lup_code_rules/README.md`, *The engine*).
+// types (`lup/code_rules/README.md`, *The engine*).
 //
 //   start --root R --socket S --idle-seconds N --venv V --environment-files F --log L
 //       Make sure an engine serves the worktree R on socket S: return at once if one

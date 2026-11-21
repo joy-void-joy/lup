@@ -1,6 +1,6 @@
 {
     // `pyright` links to pyright's source at the release the engine is built from,
-    // kept outside the repository, beside the build (`lup_code_rules/environment/build.py`).
+    // kept outside the repository, beside the build (`lup/code_rules/engine.py`).
     // The build hands this file to the bundler explicitly.
     "extends": "./pyright/tsconfig.json",
     "compilerOptions": {

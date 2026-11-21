@@ -8,9 +8,9 @@ what's new (`README.md` here, *What a check says*).
 
 from typing import TYPE_CHECKING
 
+from lup.code_rules.checking import Checked, Table
+from lup.code_rules.reports import Finding
 from lup.types import Model
-from lup_code_rules.checking import Checked, Table
-from lup_code_rules.reports import Finding
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def line(finding: Finding) -> str:
     """Return a finding's line: where it is, who found it, its rule, and what it saw.
 
-    >>> from lup_code_rules.reports import Position, Span
+    >>> from lup.code_rules.reports import Position, Span
     >>> at = Span(start=Position(line=3, column=12), end=Position(line=3, column=27))
     >>> line(
     ...     Finding(

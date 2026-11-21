@@ -19,15 +19,7 @@ from pydantic import Field, TypeAdapter
 
 import lup
 from lup import Agent, Model, Modules, Operator, Part, Project
-from lup.testing import (
-    Accepted,
-    Answering,
-    ProgramRun,
-    Refused,
-    Responding,
-    Testing,
-)
-from lup_code_rules import (
+from lup.code_rules import (
     Examples,
     FileReport,
     Finding,
@@ -36,10 +28,18 @@ from lup_code_rules import (
     RuleInfo,
     Span,
 )
+from lup.testing import (
+    Accepted,
+    Answering,
+    ProgramRun,
+    Refused,
+    Responding,
+    Testing,
+)
 
 # Imported as they're first used, as a promise runs: the module imports these
 # promises as it's defined, and would be found half made.
-lazy from lup_code_rules import CodeRules, Rules
+lazy from lup.code_rules import CodeRules, Rules
 
 if TYPE_CHECKING:
     from collections.abc import Generator

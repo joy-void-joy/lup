@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Literal
 
 from lup import Program
+from lup.code_rules.engine import Engine, Source
+from lup.code_rules.reports import FileReport, Finding, RuleInfo
+from lup.code_rules.ruff import ruff_findings
 from lup.types import Model
-from lup_code_rules.engine import Engine, Source
-from lup_code_rules.reports import FileReport, Finding, RuleInfo
-from lup_code_rules.ruff import ruff_findings
 
 
 class Example(Model):

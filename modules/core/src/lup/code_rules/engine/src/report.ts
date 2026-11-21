@@ -14,7 +14,7 @@ import { surfaceOf } from './surface';
 
 // The file's full report: pyright's errors and warnings, the selected rules' findings,
 // its public surface and its imports. Its `# lup:` comments are read by the client
-// with Python's own parser (`lup_code_rules/reading.py`).
+// with Python's own parser (`lup/code_rules/reading.py`).
 export function fullReport(warm: WarmProgram, uri: Uri, reportedPath: string, rules: [string, Rule][]): FileReport {
     const diagnostics = warm.check(uri);
     const parse = warm.parseResults(uri);

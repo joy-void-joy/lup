@@ -668,8 +668,8 @@ export class File {
         });
     }
 
-    // The root error of the file's package, named for it: `LupCodeRulesError` for
-    // `lup_code_rules`. None for a file in no package (`packageName`).
+    // The root error of the file's package, named for it: `LupError` for `lup`,
+    // `HarmonError` for `harmon`. None for a file in no package (`packageName`).
     get packageRootError(): string | undefined {
         const top = this.packageName;
         if (top === undefined) {
@@ -681,8 +681,8 @@ export class File {
 
     // The file's top-level package, as Python imports it: along pyright's import name
     // for the file, the outermost directory holding `__init__.py`, walking up from the
-    // file's own until one doesn't. `lup_code_rules` for `lup_code_rules.errors`; `lup`
-    // for `modules.core.src.lup.errors`, the name pyright gives from the project's root
+    // file's own until one doesn't. `lup` for `lup.code_rules.errors`, and for
+    // `modules.core.src.lup.errors`, the name pyright gives from the project's root
     // a file its environment doesn't import. None for a file in no package: a script
     // at the root, a `conftest.py`.
     get packageName(): string | undefined {

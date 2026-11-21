@@ -3,5 +3,5 @@
 from lup import LupError
 
 
-class LupCodeRulesError(LupError):
+class CodeRulesError(LupError):
     """Something the code rules couldn't do: build their engine, run it, or read what it answered."""

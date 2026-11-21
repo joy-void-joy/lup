@@ -4,10 +4,14 @@ The second lup judges this repository's sessions and builds their rooms until
 the third lup runs its own (#13), and it reads this file as its declaration, in
 its own grammar. The third lup's declaration is `lup_declaration.py`, which
 takes this file's name at the switch.
+
+Its gate's `rules` step is this lup's own code rules, so what lands here is
+judged by the rules this repository keeps; the second lup still tells its own
+findings after each write until the switch.
 """
 
 # lup: defer(issue=13, why="the second lup's declaration, in its grammar, until the third lup runs this repository's sessions and its own declaration takes this name")
-from lup_dev import Gate, Module, Modules, Package, Packages, Project, Step
+from lup_dev import Gate, Module, Modules, Package, Packages, Project, Python, Step
 
 
 class ShellRoom(Module):
@@ -53,4 +57,24 @@ class ShellRoom(Module):
     )
 
 
-project = Project(modules=Modules.default().add(ShellRoom()))
+project = Project(
+    modules=Modules.default()
+    .edit(
+        Python(
+            gate=Gate().replace(
+                "rules",
+                Step(
+                    name="rules",
+                    command=["lup", "code-rules", "check", "."],
+                    together=True,
+                ),
+                why=(
+                    "this repository's own code rules judge what lands here, the "
+                    "misfires it fixed no longer costing a rewrite at the gate"
+                ),
+            )
+        ),
+        why="the gate runs this lup's code rules rather than the second lup's",
+    )
+    .add(ShellRoom())
+)

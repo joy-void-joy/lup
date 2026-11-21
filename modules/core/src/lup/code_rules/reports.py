@@ -3,7 +3,7 @@
 from typing import Literal
 
 from lup import Model
-from lup_code_rules.directives import Directive
+from lup.code_rules.directives import Directive
 
 type Category = Literal["design", "spelling", "heuristic"]
 """When a finding is told, and whether the gate fails on it:

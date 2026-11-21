@@ -1,10 +1,10 @@
 # The code rules
 
-Patterns that are rarely the right choice (a regex, a tuple as a record, `Any`, a second library for a job), caught where they're written, since other code gets built on the choice (`DESIGN.md`, *Keeping the operator in the loop*). Each rule says the mistake it prevents and where it steers instead, and reads pyright's own typed tree, so `tuple-shape` sees through an alias and `string-split` tells `str.split` from `shlex.split`. `CodeRules` is a module of its own, which a playground room leaves out. Its package is `lup_code_rules`.
+Patterns that are rarely the right choice (a regex, a tuple as a record, `Any`, a second library for a job), caught where they're written, since other code gets built on the choice (`DESIGN.md`, *Keeping the operator in the loop*). Each rule says the mistake it prevents and where it steers instead, and reads pyright's own typed tree, so `tuple-shape` sees through an alias and `string-split` tells `str.split` from `shlex.split`. `CodeRules` is a module of its own, which a playground room leaves out. Its package is `lup.code_rules`, in the core's distribution, though it isn't among lup's default modules: a project adds it.
 
 ```python
 from lup import Modules, Project
-from lup_code_rules import CodeRules, Rules
+from lup.code_rules import CodeRules, Rules
 
 project = Project(
     modules=Modules.default().add(

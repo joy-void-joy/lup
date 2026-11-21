@@ -4,7 +4,7 @@ version = "0.0.0"
 requires-python = ">=3.15"
 # Each module of lup's own is a member of the workspace, installed here so the
 # gate checks them together, with what checking their promises needs.
-dependencies = ["lup-core[environment,dashboard]", "lup-code-rules"]
+dependencies = ["lup-core[environment,dashboard]"]
 
 [dependency-groups]
 dev = [
@@ -31,7 +31,6 @@ members = ["modules/*"]
 
 [tool.uv.sources]
 lup-core = { workspace = true }
-lup-code-rules = { workspace = true }
 lup-dev = { git = "https://github.com/joy-void-joy/lup-legacy-2", subdirectory = "packages/lup-dev", rev = "7ce587e702bbec873ad1047fde4ee5be39c7c0d3" }
 
 [tool.ruff]
@@ -188,7 +187,7 @@ faulthandler_timeout = "30"
 faulthandler_exit_on_timeout = true
 
 [tool.importlinter]
-root_packages = ["lup", "lup_code_rules"]
+root_packages = ["lup"]
 
 # A library side never imports an environment side (`AGENTS.md`, *lup's code*).
 # The core's library side is every package of `lup` but `lup.environment`, each
@@ -214,6 +213,7 @@ source_modules = [
     "lup.setup",
     "lup.gate",
     "lup.landing",
+    "lup.code_rules",
 ]
 forbidden_modules = ["lup.environment"]
 
@@ -242,25 +242,7 @@ forbidden_modules = [
     "lup.setup.*",
     "lup.gate.*",
     "lup.landing.*",
-]
-allow_indirect_imports = true
-
-# The code rules' promises reach them through the harness and their front door
-# alone, as the core's do.
-[[tool.importlinter.contracts]]
-name = "the code rules' promises import the harness and their front door alone"
-type = "forbidden"
-source_modules = ["lup_code_rules.promises"]
-forbidden_modules = [
-    "lup.environment",
-    "lup_code_rules.checking",
-    "lup_code_rules.directives",
-    "lup_code_rules.engine",
-    "lup_code_rules.errors",
-    "lup_code_rules.module",
-    "lup_code_rules.reporting",
-    "lup_code_rules.reports",
-    "lup_code_rules.ruff",
+    "lup.code_rules.*",
 ]
 allow_indirect_imports = true
 
