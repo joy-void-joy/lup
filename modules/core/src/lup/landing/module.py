@@ -6,9 +6,10 @@ from lup.declaration.module import Module
 from lup.doors.parts import Parts
 from lup.gate.module import Gate
 from lup.landing.landers import Landers
-from lup.landing.landings import Landings
+from lup.landing.landings import Landings, WaitsOnReview
 from lup.landing.promises import LandingPromises
 from lup.shell.kinds import FoldKind, Folds
+from lup.store.records import Recorded
 
 
 class Landing(Module):
@@ -40,4 +41,6 @@ class Landing(Module):
         )
     )
     """A landing in what's on trial, its review under it."""
+    kinds: Recorded = Recorded.of(WaitsOnReview)
+    """A landing's item, waiting on the operator in the agent's conversation."""
     parts: Parts = Parts.of(Landings, Landers, LandingPromises)

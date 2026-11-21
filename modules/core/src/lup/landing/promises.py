@@ -197,6 +197,66 @@ class TrialOf(Model):
     project: str = PROJECT
 
 
+class Nothing(Model):
+    """Nothing to give."""
+
+
+class Standing(Model):
+    """The numbers of what waits on the operator in the project's inbox."""
+
+    waiting: list[int] = []
+
+
+class Ending(Model):
+    """An agent whose untold items to tell, in the project's inbox."""
+
+    repository: str = PROJECT
+    agent: Agent
+
+
+class ToldItem(Model):
+    """An item told to an agent: its words."""
+
+    text: str
+
+
+class Told(Model):
+    """What's told to an agent at their next call."""
+
+    items: list[ToldItem] = []
+
+
+class LandedItem(Model):
+    """The item a landing posted, by its number."""
+
+    item: int | None = None
+
+
+async def waiting(started: Started) -> list[int]:
+    """Return the numbers of what waits on the operator in the project's inbox."""
+    read = await started.serve("standing", Nothing(), Codebase(repository=PROJECT))
+    assert isinstance(read, Accepted)
+    assert isinstance(read.output, Model)
+    return Standing.model_validate(read.output.model_dump()).waiting
+
+
+async def told(started: Started, agent: Agent) -> list[str]:
+    """Return the words of what's told `agent` at their next call."""
+    read = await started.serve("told", Ending(agent=agent), Machine())
+    assert isinstance(read, Accepted)
+    assert isinstance(read.output, Model)
+    return [each.text for each in Told.model_validate(read.output.model_dump()).items]
+
+
+def item_of(answered: Accepted | Refused) -> int:
+    """Return the number of the item a landing posted, which it must have."""
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Model)
+    number = LandedItem.model_validate(answered.output.model_dump()).item
+    assert number is not None
+    return number
+
+
 class Approved(Model):
     """The commit of a project approved to run last; none before."""
 
@@ -366,6 +426,33 @@ class LandingPromises(Part):
             each.text for each in reviewed.output.blocks if isinstance(each, Markdown)
         ]
         assert any(TOLD in each for each in told)
+
+    @lup.promise
+    async def a_landing_waits_on_the_operator_until_they_answer_it(
+        self, by: Testing
+    ) -> None:
+        """A landing waits on the operator in the agent's conversation until they answer it, their yes told to the agent; landing the branch again answers the one before, the tip it landed at since waiting in its place."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed("feature", "feature.txt", "feature\n")
+            await gated(started, at)
+            first = item_of(await landed(started, "feature", agent))
+            before = await waiting(started)
+            at.committed("feature", "more.txt", "more\n")
+            await gated(started, at)
+            second = item_of(await landed(started, "feature", agent))
+            again = await waiting(started)
+            await told(started, agent)
+            await started.run("landing", "yes", reviewing(at, "feature"), Operator())
+            after = await waiting(started)
+            heard = await told(started, agent)
+        assert first in before
+        assert first not in again
+        assert second in again
+        assert second not in after
+        assert heard
 
     @lup.promise
     async def a_yes_is_to_the_tip_whose_review_was_read(self, by: Testing) -> None:

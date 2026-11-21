@@ -8,10 +8,10 @@ operator's commands take what they do (`Answering`, `Clearing`…).
 from typing import Annotated, Literal
 
 from annotated_types import Ge, Lt
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, BaseModel, JsonValue
 
 from lup.doors.parties import Agent, Party
-from lup.inbox.records import FRICTIONS, Decision, Ruling, Tone
+from lup.inbox.records import FRICTIONS, Decision, Item, Ruling, Tone
 from lup.types import Model
 
 type Cited = Annotated[int, Ge(1), Lt(2**63)]
@@ -187,17 +187,95 @@ class Piling(Model):
 
 
 class Naming(Model):
-    """An agent named, as their session says its name, under the agent who spawned them where one did."""
+    """An agent of a repository named, as their session says its name, under the agent who spawned them where one did."""
 
+    repository: str
     agent: Agent
     name: str
     spawner: Agent | None = None
 
 
 class Ending(Model):
-    """An agent whose session ended, or started again."""
+    """An agent of a repository: one whose session ended or started again, or who's told what's for them."""
 
+    repository: str
     agent: Agent
+
+
+class Ended(Model):
+    """An agent's last words of a turn, in a repository."""
+
+    repository: str
+    agent: Agent
+    text: str
+
+
+class Untelling(Model):
+    """A repository whose agents to list, by what's untold for them."""
+
+    repository: str
+
+
+class Untold(Model):
+    """Each agent with something for them not yet told them: whom a session wakes, or starts again."""
+
+    agents: list[Agent] = []
+
+
+# What modules say, in their own kinds of item
+
+
+class Posting(Model):
+    """An item of a module's own kind, said by an agent to the operator in the concern the agent works in: a branch that waits on the operator's review, as a landing says it."""
+
+    by: Agent
+    """The agent it's said by, in whose conversation it shows: the one whose
+    call it came from."""
+    repository: str
+    """The repository whose inbox keeps it."""
+    kind: str
+    """Its kind, one a module declares in its `Recorded`, never the inbox's
+    own."""
+    text: str
+    """Its words, as the operator reads them above what its kind lays out."""
+    fields: dict[str, JsonValue] = {}
+    """Its kind's own fields, as JSON; who it's by and for, when, and its
+    number are the inbox's to say."""
+
+    @classmethod
+    def of(
+        cls,
+        kind: type[Item],
+        said: BaseModel | None = None,
+        *,
+        by: Agent,
+        repository: str,
+        text: str,
+    ) -> Posting:
+        """Return an item of `kind`, its own fields `said`'s, said by `by` in `repository`'s inbox in `text`."""
+        return cls(
+            by=by,
+            repository=repository,
+            kind=kind.declared() or "",
+            text=text,
+            fields={} if said is None else said.model_dump(mode="json"),
+        )
+
+
+class Posted(Model):
+    """The number an item of a module's own kind is kept under: what the module settles it by."""
+
+    number: Cited
+
+
+class Settling(Model):
+    """What came of an item of a module's own kind, said for the operator's act: told to whoever wrote it, and answering it, so it waits no more."""
+
+    repository: str
+    item: Cited
+    """The item, by its number."""
+    text: str
+    """What came of it, in words: `on trial at 4f2a1c0`, or the operator's own."""
 
 
 # What stands, as data

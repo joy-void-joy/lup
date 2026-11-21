@@ -9,7 +9,6 @@ whoever wrote an item, whoever holds a concern, the party a buffer is
 """
 
 from lup.doors.door import Method
-from lup.doors.parties import Agent, Party
 from lup.inbox.records import AgentRecord, Concern, Item, PartyRecord, PileRecord
 from lup.inbox.said import (
     Clearing,
@@ -22,6 +21,7 @@ from lup.inbox.said import (
 )
 from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Offer, Span, Viewing
 from lup.types import Model
+lazy from lup.doors.parties import Party
 lazy from lup.inbox.inbox import Inbox
 
 
@@ -40,7 +40,7 @@ def reached(inbox: Inbox, party: PartyRecord) -> Party | None:
     """Return the party a comment on `party`'s blocks reaches: the agent, or the pile, which keeps it; none for the operator, whose own they are."""
     match party:
         case AgentRecord():
-            return Agent(id=party.id, session=party.session)
+            return party.caller()
         case PileRecord():
             return Pile(repository=inbox.repository, path=party.name or "")
         case _:
@@ -111,11 +111,32 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
 
 
 def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
-    """Return `item` as its heading, who wrote it, of what kind, its number, whether it's new or waits, then its words."""
+    """Return `item` as its heading, who wrote it, of what kind, its number, whether it's new or waits, then its words; then, for a module's own kind of item, the fold its kind lays out, opening on the module's view.
+
+    Each of its blocks offers a comment on it, and what its kind offers beside.
+    """
     new = item in inbox.new_to_operator()
     waits = item in inbox.waits_on_operator()
     writer = inbox.by(item)
     number = item.number or 0
+    laid = item.laid()
+    offers = [
+        Offer.of(shows.comment, OnItem(item=number)),
+        *([] if laid is None else laid.offers),
+    ]
+    folded: list[Block] = (
+        []
+        if laid is None
+        else [
+            Fold(
+                id=f"item-{item.number}-laid",
+                kind=laid.fold,
+                summary=[Span(text=laid.summary)],
+                content=laid.opens,
+                offers=offers,
+            )
+        ]
+    )
     return [
         Line(
             id=f"item-{item.number}",
@@ -127,15 +148,16 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
                 ),
             ],
             standing="waiting" if waits else "new" if new else None,
-            offers=[Offer.of(shows.comment, OnItem(item=number))],
+            offers=offers,
             sighted=Offer.of(shows.seen, Showing(items=[number])),
         ),
         Markdown(
             id=f"item-{item.number}-text",
             text=item.text,
             tone="operator" if writer.key == inbox.operator().key else "plain",
-            offers=[Offer.of(shows.comment, OnItem(item=number))],
+            offers=offers,
         ),
+        *folded,
     ]
 
 

@@ -69,7 +69,12 @@ class Check(Model, arbitrary_types_allowed=True):
         return self.entry.method.taken.qualified
 
     def checked(self, exploring: Exploring) -> Kept | Broken:
-        """Check the promise over as many runs as `exploring` says, and say how it fared: kept, or broken by the smallest run hypothesis found."""
+        """Check the promise over as many runs as `exploring` says, and say how it fared: kept, or broken by the smallest run hypothesis found.
+
+        Hypothesis's explain phase is left out: a broken promise is told by its
+        own run, its calls and their slices, and explaining which of its values
+        matter runs it again hundreds of times.
+        """
         runs: list[Run] = []
 
         def once(data: st.DataObject) -> None:
