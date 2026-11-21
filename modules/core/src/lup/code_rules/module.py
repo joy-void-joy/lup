@@ -1,8 +1,14 @@
 """`CodeRules`, the module: which of lup's rules a project runs, where they don't read, the gate's `rules` step, and the commands checking a worktree's files (`README.md` here)."""
 
+import asyncio
+import hashlib
 import sys
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from string.templatelib import Template
+
+from pydantic import Field
 
 import lup
 from lup import (
@@ -19,21 +25,27 @@ from lup import (
     Steps,
 )
 from lup.code_rules.checking import Checked, Exemptions, Settling, Table
-from lup.code_rules.engine import Engine, EngineLayout, Source, Written
+from lup.code_rules.engine import Engine, EngineLayout, Source, WarmEngine, Written
 from lup.code_rules.errors import CodeRulesError
 from lup.code_rules.examples import Examples
 from lup.code_rules.guidance import told
-from lup.code_rules.promises import CodeRulesPromises
+from lup.code_rules.promises import CodeRulesPromises, FindingsPromises
 from lup.code_rules.reading import read_directives, typescript_directives
 from lup.code_rules.reporting import Report
 from lup.code_rules.reports import FileReport, RuleInfo
 from lup.code_rules.ruff import ruff_findings
+from lup.code_rules.telling import Conversation, Ended, Outcome, Telling, key
 from lup.declaration.layout import RepositoryLayout
 from lup.programs.git.answers import nul_separated
+from lup.sessions import CallFinished, CallStarting
 
 
 class Rules(Named[str]):
     """lup's code rules a project runs, by name, a selection of the engine's table: `CodeRules(rules=Rules().drop("elif", why="…"))`."""
+
+
+class Tests(Named[str]):
+    """Where lup's rules for tests read, as patterns from the worktree's root, as `PurePath.full_match` takes them: a test's files and a module's promises."""
 
 
 class Exempt(Named[str]):
@@ -59,8 +71,34 @@ class Listing(Model):
     """Every rule, a line each: nothing to give."""
 
 
-class Checker(Part):
-    """The code rules, run on the files of the worktree they're typed in: the gate's `rules` step, and an agent's or the operator's own check."""
+class Quieting(Model):
+    """Whether to hold back what's told after writes, or lift it."""
+
+    lift: bool = False
+    """Lift the quiet: what stands in the files written while it held is told
+    once, beside the next call."""
+
+
+class Quiet(Model):
+    """Where each agent's quiet is kept while it holds, in the session's room, which the room's part telling findings reads at each call: a file each, by lup's id for the agent."""
+
+    directory: Path = Field(
+        default_factory=lambda: Path(tempfile.gettempdir()) / "lup-code-rules" / "quiet"
+    )
+
+    def file(self, agent: str) -> Path:
+        """Return the file saying `agent` is quiet, where it's there."""
+        return (
+            self.directory / hashlib.blake2b(agent.encode(), digest_size=8).hexdigest()
+        )
+
+    def holds(self, agent: str) -> bool:
+        """Say whether `agent` asked to be quiet, and hasn't lifted it."""
+        return self.file(agent).is_file()
+
+
+class Reading(Part):
+    """What every part running the code rules has: the module's settings, the programs the engine and ruff run through, and reading the worktree's files with them."""
 
     module: CodeRules
     node: Program = Program(
@@ -92,91 +130,6 @@ class Checker(Part):
         why="finds ruff's findings, which an `ignore` keeps as it keeps lup's",
         install="https://docs.astral.sh/ruff/installation/",
     )
-
-    @lup.command(here=True)
-    async def check(self, checking: Checking, by: Agent | Operator) -> str:
-        """Check Python files with lup's rules, pyright and ruff, each finding kept only by an `ignore`; refused where one fails the gate.
-
-        Given `.`, it checks every Python file of the worktree it's typed in,
-        as the gate's `rules` step does. What `lup gate check --fix` fixes, and
-        guesses over prose, are said apart.
-        """
-        report = await self.reported(checking.paths)
-        if report.failing():
-            raise RefusedError(report.text())
-        return report.text()
-
-    @lup.command(here=True)
-    async def fix(self, checking: Checking, by: Agent | Operator) -> str:
-        """Apply ruff's safe fixes, and remove each `ignore` that keeps nothing, in Python files; what the gate's `rules` step runs under `--fix`.
-
-        Given `.`, it fixes every Python file of the worktree it's typed in.
-        """
-        layout = await self.located(checking.paths)
-        paths = await self.files(layout.root, checking.paths)
-        fixed = await self.ruff.ran(
-            "check", "--fix", "--force-exclude", "--", *paths, cwd=layout.root
-        )
-        if fixed.status not in [0, 1]:
-            message = f"ruff failed, ending with status {fixed.status}: {fixed.said()}"
-            raise RefusedError(message)
-        report = await self.reported(checking.paths)
-        removed = [removing(layout.root, file) for file in report.checked]
-        count = sum(removed)
-        return f"Applied ruff's safe fixes, and removed {count} `ignore`{'' if count == 1 else 's'} keeping nothing."
-
-    @lup.command(here=True)
-    async def rules(self, listing: Listing, by: Agent | Operator) -> str:
-        """List lup's rules a line each, those this project runs: its name, its category, and the mistake it prevents."""
-        del listing
-        table = await self.table()
-        running = self.running(table)
-        return "\n".join(
-            f"{rule.id} ({rule.category}): {rule.mistake}"
-            for rule in table.rules.values()
-            if rule.id in running
-        )
-
-    @lup.command(here=True)
-    async def show(self, showing: Showing, by: Agent | Operator) -> str:
-        """Show one of lup's rules whole: the mistake it prevents, where it steers, when it's told, and its examples, each flagged one rewritten."""
-        table = await self.table()
-        rule = table.rules.get(showing.rule)
-        if rule is None:
-            message = (
-                f"No rule is named `{showing.rule}`: `lup code-rules rules` lists them."
-            )
-            raise RefusedError(message)
-        return shown(rule)
-
-    @lup.command(here=True)
-    async def examples(self, listing: Listing, by: Agent | Operator) -> str:
-        """Check every rule's examples, the rules' specification: each flagged one gets its rule's finding and no other of lup's, its rewrite passes every rule, pyright and ruff, and each near miss gets none of its rule's; refused, naming each that doesn't.
-
-        It runs in lup's own repository, whose gate checks its table, never a
-        project's.
-        """
-        del listing
-        layout = await self.located([])
-        engine = await self.engine(layout)
-        try:
-            table = Table.of(await engine.rules())
-            rules = [table.rules[each] for each in table.engines()]
-            checking = Examples(
-                engine=engine,
-                ruff=self.ruff,
-                venv=Path(sys.prefix),
-                config=layout.pyproject,
-            )
-            unmet = await checking.unmet(rules)
-        except CodeRulesError as failed:
-            raise RefusedError(str(failed)) from failed
-        if unmet:
-            raise RefusedError("\n".join(each.said() for each in unmet))
-        count = sum(
-            len(rule.examples.flags) * 2 + len(rule.examples.passes) for rule in rules
-        )
-        return f"Every example of the {len(rules)} rules does what it's written to: {count} in all."
 
     async def located(self, paths: list[Path]) -> RepositoryLayout:
         """Return the worktree holding the first of `paths`, or the one it's typed in where there are none; refused where that's in no worktree."""
@@ -283,7 +236,10 @@ class Checker(Part):
         ]
         settling = Settling(
             table=table,
-            exemptions=Exemptions(patterns=list(self.module.exempt.given())),
+            exemptions=Exemptions(
+                patterns=list(self.module.exempt.given()),
+                tests=list(self.module.tests.given()),
+            ),
         )
         checked = [
             settling.settled(
@@ -300,6 +256,143 @@ class Checker(Part):
         ]
         notes = [settling.settled(report, []) for report in typescript]
         return Report(checked=[*checked, *notes], table=table)
+
+
+class Checker(Reading):
+    """The code rules, run on the files of the worktree they're typed in: the gate's `rules` step, and an agent's or the operator's own check."""
+
+    @lup.command(here=True)
+    async def check(self, checking: Checking, by: Agent | Operator) -> str:
+        """Check Python files with lup's rules, pyright and ruff, each finding kept only by an `ignore`; refused where one fails the gate.
+
+        Given `.`, it checks every Python file of the worktree it's typed in,
+        as the gate's `rules` step does. What `lup gate check --fix` fixes, and
+        guesses over prose, are said apart.
+        """
+        report = await self.reported(checking.paths)
+        if report.failing():
+            raise RefusedError(report.text())
+        return report.text()
+
+    @lup.command(here=True)
+    async def fix(self, checking: Checking, by: Agent | Operator) -> str:
+        """Apply ruff's safe fixes, and remove each `ignore` that keeps nothing, in Python files; what the gate's `rules` step runs under `--fix`.
+
+        Given `.`, it fixes every Python file of the worktree it's typed in.
+        """
+        layout = await self.located(checking.paths)
+        paths = await self.files(layout.root, checking.paths)
+        fixed = await self.ruff.ran(
+            "check", "--fix", "--force-exclude", "--", *paths, cwd=layout.root
+        )
+        if fixed.status not in [0, 1]:
+            message = f"ruff failed, ending with status {fixed.status}: {fixed.said()}"
+            raise RefusedError(message)
+        report = await self.reported(checking.paths)
+        removed = [removing(layout.root, file) for file in report.checked]
+        count = sum(removed)
+        return f"Applied ruff's safe fixes, and removed {count} `ignore`{'' if count == 1 else 's'} keeping nothing."
+
+    @lup.command(here=True)
+    async def rules(self, listing: Listing, by: Agent | Operator) -> str:
+        """List lup's rules a line each, those this project runs: its name, its category, and the mistake it prevents."""
+        del listing
+        table = await self.table()
+        running = self.running(table)
+        return "\n".join(
+            f"{rule.id} ({rule.category}): {rule.mistake}"
+            for rule in table.rules.values()
+            if rule.id in running
+        )
+
+    @lup.command(here=True)
+    async def show(self, showing: Showing, by: Agent | Operator) -> str:
+        """Show one of lup's rules whole: the mistake it prevents, where it steers, when it's told, and its examples, each flagged one rewritten."""
+        table = await self.table()
+        rule = table.rules.get(showing.rule)
+        if rule is None:
+            message = (
+                f"No rule is named `{showing.rule}`: `lup code-rules rules` lists them."
+            )
+            raise RefusedError(message)
+        return shown(rule)
+
+    @lup.command(here=True)
+    async def quiet(self, quieting: Quieting, by: Agent) -> str:
+        """Hold back what's told after your writes, during a refactor you know leaves the code broken for a while; `--lift` tells once, beside your next call, what still stands in the files you wrote meanwhile."""
+        held = Quiet().file(by.id)
+        if quieting.lift:
+            held.unlink(missing_ok=True)
+            return "Lifted: what still stands in the files you wrote while quiet comes beside your next call."
+        held.parent.mkdir(parents=True, exist_ok=True)
+        held.write_text(by.id)
+        return (
+            "Quiet: nothing is told after your writes until you lift it with `--lift`."
+        )
+
+    @lup.command(here=True)
+    async def outcomes(self, listing: Listing, by: Agent | Operator) -> str:
+        """Say, rule by rule, what became of the findings told after writes in this repository: how many were told, then fixed, kept with an `ignore`, or left standing, most told first; what a review of the rules reads."""
+        del listing
+        layout = await self.located([])
+        engine = await self.engine(layout)
+        record = engine.layout.outcomes
+        read = [
+            Outcome.model_validate_json(each)
+            for each in (record.read_text().splitlines() if record.is_file() else [])
+            if each.strip()
+        ]
+        if not read:
+            return "Nothing told after a write is recorded in this repository yet."
+        rules = list(dict.fromkeys(f"{each.owner} {each.rule}" for each in read))
+
+        def counted(rule: str, became: str) -> int:
+            return sum(
+                f"{each.owner} {each.rule}" == rule and each.became == became
+                for each in read
+            )
+
+        rows = sorted(rules, key=lambda rule: -counted(rule, "told"))
+        return "\n".join(
+            [
+                "rule: told, fixed, kept, left",
+                *(
+                    f"{rule}: {counted(rule, 'told')}, {counted(rule, 'fixed')}, "
+                    f"{counted(rule, 'kept')}, "
+                    f"{counted(rule, 'told') - counted(rule, 'fixed') - counted(rule, 'kept')}"
+                    for rule in rows
+                ),
+            ]
+        )
+
+    @lup.command(here=True)
+    async def examples(self, listing: Listing, by: Agent | Operator) -> str:
+        """Check every rule's examples, the rules' specification: each flagged one gets its rule's finding and no other of lup's, its rewrite passes every rule, pyright and ruff, and each near miss gets none of its rule's; refused, naming each that doesn't.
+
+        It runs in lup's own repository, whose gate checks its table, never a
+        project's.
+        """
+        del listing
+        layout = await self.located([])
+        engine = await self.engine(layout)
+        try:
+            table = Table.of(await engine.rules())
+            rules = [table.rules[each] for each in table.engines()]
+            checking = Examples(
+                engine=engine,
+                ruff=self.ruff,
+                venv=Path(sys.prefix),
+                config=layout.pyproject,
+            )
+            unmet = await checking.unmet(rules)
+        except CodeRulesError as failed:
+            raise RefusedError(str(failed)) from failed
+        if unmet:
+            raise RefusedError("\n".join(each.said() for each in unmet))
+        count = sum(
+            len(rule.examples.flags) * 2 + len(rule.examples.passes) for rule in rules
+        )
+        return f"Every example of the {len(rules)} rules does what it's written to: {count} in all."
 
 
 def removing(root: Path, checked: Checked) -> int:
@@ -348,6 +441,256 @@ def shown(rule: RuleInfo) -> str:
     )
 
 
+class Findings(Reading, room=True):
+    """What an agent is told of lup's rules, pyright and ruff right after each write, in their session's own room, on the worktree as it stands.
+
+    It keeps, in memory for as long as the session's room runs, each written
+    file's text before the write, and what each conversation was told, so
+    each finding is told once (`telling.py`).
+    """
+
+    before: dict[str, str] = {}
+    """Each file a write is about to change, by its path from the root: its
+    text before the write."""
+    conversations: dict[str, Conversation] = {}
+    """What each conversation was told, by lup's id for its agent."""
+    known: Table | None = None
+    """The engine's table, read once."""
+    warm: WarmEngine | None = None
+    """The engine kept running for the worktree, once a check has started it."""
+    passes: dict[str, asyncio.Task[list[FileReport]]] = {}
+    """Each conversation's importers pass under way since their last write."""
+
+    @lup.on(CallStarting)
+    async def remembered(self, starting: CallStarting) -> str | None:
+        """Keep the text of each file a write is about to change, so what it changes can be told apart from what was there."""
+        root = (await self.located([])).root
+        for path in written(root, starting.writes):
+            file = root / path
+            self.before[path] = file.read_text() if file.is_file() else ""
+        return None
+
+    @lup.on(CallFinished)
+    async def told(self, finished: CallFinished) -> str | None:
+        """Tell what the write introduced on the lines it changed, each finding once in the conversation; at a call that writes nothing, what a half-finished edit left that still stands."""
+        conversation = self.conversations.setdefault(finished.agent.id, Conversation())
+        layout = await self.located([])
+        root = layout.root
+        paths = written(root, finished.writes)
+        if Quiet().holds(finished.agent.id):
+            conversation.quietly = list(dict.fromkeys([*conversation.quietly, *paths]))
+            return None
+        lifted = await self.lifted(conversation, layout)
+        importing = self.imported(finished.agent.id, conversation, root)
+        said = await self.heard_write(finished, conversation, layout, paths)
+        return "\n\n".join(each for each in [lifted, said, importing] if each) or None
+
+    async def lifted(
+        self, conversation: Conversation, layout: RepositoryLayout
+    ) -> str | None:
+        """Return, once, what stands in the files the conversation wrote while quiet, which they weren't told, now that the quiet's lifted."""
+        quietly = [
+            each for each in conversation.quietly if (layout.root / each).is_file()
+        ]
+        conversation.quietly = []
+        if not quietly:
+            return None
+        try:
+            checked = await self.checked_now(layout, quietly)
+        except CodeRulesError as failed:
+            return f"lup couldn't check what you wrote while quiet: {failed}"
+        texted = {each.path: (layout.root / each.path).read_text() for each in checked}
+        standing = [
+            finding
+            for each in checked
+            for finding in each.failing()
+            if finding.category == "design"
+            and not finding.fixable
+            and key(finding, texted[each.path].splitlines()) not in conversation.told
+        ]
+        for each in checked:
+            self.before[each.path] = texted[each.path]
+        return self.telling().said(
+            conversation,
+            standing,
+            texted,
+            {},
+            title="What stands in the files you wrote while quiet",
+        )
+
+    def imported(
+        self, agent: str, conversation: Conversation, root: Path
+    ) -> str | None:
+        """Return what an importers pass that finished since `agent`'s last write found, the type errors in the files importing what they wrote, once."""
+        passing = self.passes.get(agent)
+        if passing is None or not passing.done():
+            return None
+        del self.passes[agent]
+        if passing.cancelled() or passing.exception() is not None:
+            return None
+        errors = [
+            finding
+            for report in passing.result()
+            for finding in report.findings
+            if finding.owner == "pyright"
+            and not finding.rule.startswith(self.telling().following)
+        ]
+        found = {
+            each.path: (root / each.path).read_text()
+            for each in errors
+            if (root / each.path).is_file()
+        }
+        return self.telling().said(
+            conversation,
+            errors,
+            found,
+            {},
+            title="Type errors in the files importing what you changed",
+        )
+
+    async def heard_write(
+        self,
+        finished: CallFinished,
+        conversation: Conversation,
+        layout: RepositoryLayout,
+        paths: list[str],
+    ) -> str | None:
+        """Return what the write `finished` reports introduced, or, where it wrote nothing, what a half-finished edit left that still stands; and start the pass over the files importing what it wrote."""
+        root = layout.root
+        if not paths:
+            standing = texts(root, conversation)
+            released = self.telling().released(conversation, standing)
+            return self.telling().said(
+                conversation,
+                released,
+                standing,
+                {},
+                title="Left by your last writes, and still standing",
+            )
+        try:
+            checked = await self.checked_now(layout, paths)
+        except CodeRulesError as failed:
+            return f"lup couldn't check what you wrote: {failed}"
+        telling = self.telling()
+        texted = {each.path: (root / each.path).read_text() for each in checked}
+        ended = [
+            ending
+            for each in checked
+            for ending in telling.became(conversation, each, texted[each.path])
+        ]
+        introduced = [
+            finding
+            for each in checked
+            for finding in telling.heard(
+                conversation, each, self.before.get(each.path, ""), texted[each.path]
+            )
+        ]
+        elsewhere = {
+            each.path: telling.elsewhere(
+                conversation, each, introduced, texted[each.path]
+            )
+            for each in checked
+        }
+        said = telling.said(conversation, introduced, texted, elsewhere)
+        told = [
+            Ended(key=key(each, texted[each.path].splitlines()), became="told")
+            for each in introduced
+        ]
+        self.recorded(finished.agent.id, [*ended, *told])
+        warm = self.warm
+        python = [each.path for each in checked]
+        if warm is not None and python:
+            before = self.passes.pop(finished.agent.id, None)
+            if before is not None:
+                before.cancel()
+            self.passes[finished.agent.id] = asyncio.create_task(warm.importers(python))
+        return said
+
+    def recorded(self, agent: str, ended: list[Ended]) -> None:
+        """Append what became of each finding to the record kept for the next review of the rules, in the repository's git directory."""
+        if not ended or self.warm is None:
+            return
+        record = self.warm.engine.layout.outcomes
+        now = datetime.now(UTC)
+        lines = [
+            Outcome(
+                at=now,
+                agent=agent,
+                path=each.key.path,
+                owner=each.key.owner,
+                rule=each.key.rule,
+                text=each.key.text,
+                became=each.became,
+            ).model_dump_json()
+            for each in ended
+        ]
+        record.parent.mkdir(parents=True, exist_ok=True)
+        with record.open("a") as appended:
+            appended.write("".join(f"{each}\n" for each in lines))
+
+    def telling(self) -> Telling:
+        """Return how findings are told, over the engine's table."""
+        return Telling(table=self.known or Table())
+
+    async def checked_now(
+        self, layout: RepositoryLayout, paths: list[str]
+    ) -> list[Checked]:
+        """Check the Python files of `paths` with the engine kept running for the worktree, and return them settled."""
+        root = layout.root
+        python = [each for each in paths if each.endswith(".py")]
+        if not python:
+            return []
+        engine = await self.engine(layout)
+        if self.known is None:
+            self.known = Table.of(await engine.rules())
+        if self.warm is None:
+            named = hashlib.blake2b(str(root).encode(), digest_size=8).hexdigest()
+            place = Path(tempfile.gettempdir()) / "lup-code-rules"
+            self.warm = WarmEngine(
+                engine=engine,
+                root=root,
+                venv=Path(sys.prefix),
+                socket=place / f"{named}.sock",
+                log=place / f"{named}.log",
+            )
+        reports = await self.warm.checked(
+            self.running(self.known), [Source(path=each) for each in python]
+        )
+        ruffs = await ruff_findings(self.ruff, root, python)
+        settling = Settling(
+            table=self.known,
+            exemptions=Exemptions(
+                patterns=list(self.module.exempt.given()),
+                tests=list(self.module.tests.given()),
+            ),
+        )
+        return [
+            settling.settled(
+                report.model_copy(
+                    update={
+                        "directives": read_directives((root / report.path).read_text())
+                    }
+                ),
+                [each for each in ruffs if each.path == report.path],
+            )
+            for report in reports
+        ]
+
+
+def written(root: Path, writes: list[Path]) -> list[str]:
+    """Return the files `writes` names that are in the worktree at `root`, by their paths from it."""
+    inside = [each.resolve() for each in writes if each.resolve().is_relative_to(root)]
+    return [each.relative_to(root).as_posix() for each in inside]
+
+
+def texts(root: Path, conversation: Conversation) -> dict[str, str]:
+    """Return the text of each file what waits in `conversation` is in, as it stands."""
+    paths = dict.fromkeys(each.path for each in conversation.held)
+    return {
+        path: (root / path).read_text() for path in paths if (root / path).is_file()
+    }
+
+
 class Guide(Part):
     """What a session is told of the code rules and `# lup:` comments, at its start."""
 
@@ -390,5 +733,10 @@ class CodeRules(Module):
     """Every rule of the engine's table but `runtime-mention`, so a rule a later
     release adds runs unless a project drops it."""
     exempt: Exempt = Exempt.of("**/tests/**", "**/test_*.py", "**/conftest.py")
+    tests: Tests = Tests.of(
+        "**/tests/**", "**/test_*.py", "**/conftest.py", "**/promises.py"
+    )
     steps: Steps = Steps.of(RULES)
-    parts: Parts = Parts.of(Checker, Guide, CodeRulesPromises)
+    parts: Parts = Parts.of(
+        Checker, Findings, Guide, CodeRulesPromises, FindingsPromises
+    )

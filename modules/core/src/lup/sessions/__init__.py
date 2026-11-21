@@ -4,3 +4,27 @@ Starting, holding, waking and ending sessions is the machine's (`lup.sessions.pa
 and what runs in a session's room is the environment's
 (`lup.environment.sessions`). Its reasons are in `README.md` here.
 """
+
+from lup.sessions.events import (
+    CallFinished,
+    CallStarting,
+    ConversationEnded,
+    ConversationStarted,
+    SessionEnded,
+    SessionEvent,
+    SessionStarted,
+    TurnEnded,
+    TurnStarted,
+)
+
+__all__ = [
+    "CallFinished",
+    "CallStarting",
+    "ConversationEnded",
+    "ConversationStarted",
+    "SessionEnded",
+    "SessionEvent",
+    "SessionStarted",
+    "TurnEnded",
+    "TurnStarted",
+]

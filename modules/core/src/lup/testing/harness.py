@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 from lup.command_line.answering import Answerer, Here, Offered, Typed
 from lup.declaration.module import Module
 from lup.doors.door import Accepted, Refused
+from lup.doors.events import Event, Heeded
 from lup.doors.parties import Party
 from lup.doors.tool import ToolSpec
 from lup.errors import LupError
@@ -259,6 +260,14 @@ class Crossing(ABC):
         """Answer one message that crossed to the container running the parts, as it would: its call through a door answered, or why it's refused."""
 
 
+class Happening(ABC):
+    """A started lup's methods run at an event, as lup runs them where each class runs: a session's events among them."""
+
+    @abstractmethod
+    async def happened(self, event: Event) -> Heeded:
+        """Run every started class's methods run at `event`, and say what they answered."""
+
+
 class Telling(ABC):
     """A started lup's guidance, as a session's start renders it."""
 
@@ -325,6 +334,8 @@ class Started(Model, arbitrary_types_allowed=True):
     stand-in heard it."""
     telling: Telling
     """Its guidance, as a session's start renders it."""
+    happening: Happening
+    """Its methods run at an event, as lup runs them where they run."""
 
     async def crossed(self, text: bytes) -> bytes:
         """Answer one message as the container running its parts would: a call through a door, carrying the version of its shape (`lup.running.wire`)."""
@@ -355,6 +366,14 @@ class Started(Model, arbitrary_types_allowed=True):
         render.
         """
         return await self.telling.guidance(by)
+
+    async def happened(self, event: Event) -> Heeded:
+        """Run every method run at `event` of the classes started, wherever each runs, a session's room among them, and say what they answered: their words, in order, and the first refusal, as a session's hook would tell them.
+
+        No law is checked over it: a law is about calls through a door, and
+        nobody calls a method run at an event.
+        """
+        return await self.happening.happened(event)
 
     async def call(self, tool: str, arguments: Sent, by: Party) -> Accepted | Refused:
         """Call the tool named `tool` with `arguments`, as `by` does, and say what came of it."""
