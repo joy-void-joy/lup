@@ -9,6 +9,7 @@ import { Vim, getCM } from "@replit/codemirror-vim";
 
 import type { FoldKind } from "../generated/read";
 import { counted, every, foldKind, offsetOf } from "../document/tree";
+import { bindIndenting } from "./markdown";
 import { shells, type Shell } from "./shell";
 
 /** A mode a binding works in. */
@@ -441,6 +442,7 @@ export function bindVim(bindings: readonly Bind[]): void {
         // asks for one, though what it does compares the mode given with the binding's, none matching none.
         (Vim.unmap as (keys: string, mode?: string) => unknown)("<Space>");
     }
+    bindIndenting();
     for (const bind of bindings) {
         const run = commands[bind.command]?.run;
         if (run === undefined) {
