@@ -107,7 +107,9 @@ class Run(Model):
     sockets: Path
     control: Path
     busy: bool = False
-    heard: datetime
+    heard: float
+    """When it was last heard from or told something, on the event loop's
+    clock, which measures how long it's been idle."""
 
 
 SESSIONS = TypeAdapter(dict[str, Session])
@@ -324,11 +326,11 @@ class Held(Part, machine=True, shared=True):
             container=container,
             sockets=sockets,
             control=control,
-            heard=datetime.now(UTC),
+            heard=asyncio.get_running_loop().time(),
         )
         self.running = {**self.running, session.session: run}
         stretch = Stretch(
-            began=run.heard,
+            began=datetime.now(UTC),
             begun=begin.begun,
             worktree=session.worktree,
             container=container,
@@ -491,7 +493,9 @@ class Held(Part, machine=True, shared=True):
             case _:
                 pass
         if run is not None and session.session in self.running:
-            stamped = run.model_copy(update={"heard": datetime.now(UTC)})
+            stamped = run.model_copy(
+                update={"heard": asyncio.get_running_loop().time()}
+            )
             self.running = {**self.running, session.session: stamped}
 
     @lup.on(Starting)
@@ -514,7 +518,7 @@ class Held(Part, machine=True, shared=True):
             except RefusedError:
                 await self.gone(each)
                 continue
-            idle = datetime.now(UTC) - run.heard
+            idle = timedelta(seconds=asyncio.get_running_loop().time() - run.heard)
             if not standing.busy and standing.up and idle > self.module.idle:
                 await self.ended(each)
         repositories = list(dict.fromkeys(each.repository for each in kept.values()))
@@ -561,7 +565,9 @@ class Held(Part, machine=True, shared=True):
         )
         woke = self.running.get(session.session)
         if woke is not None:
-            stamped = woke.model_copy(update={"busy": True, "heard": datetime.now(UTC)})
+            stamped = woke.model_copy(
+                update={"busy": True, "heard": asyncio.get_running_loop().time()}
+            )
             self.running = {**self.running, session.session: stamped}
 
     async def gone(self, session: Session) -> None:
