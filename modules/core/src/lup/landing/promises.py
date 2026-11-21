@@ -51,12 +51,13 @@ from lup.hosting.module import Hosting
 project = Project(
     modules=Modules.default()
     .edit(Gate(steps=Steps.of(Step(name="checked", command=["checked"], tells=True))))
+    .drop("private", why="the promises' gate runs its one step alone")
     .add(Hosting())
 )
 """
 """The home repository's declaration, as lup's own declares it, lup's default
-modules and the machine's parts, its gate one step, `checked`, which tells what
-it prints, as a step listing what's due does, and whose program the promises
+modules and the machine's parts, `Private` dropped so its own step doesn't run,
+its gate one step, `checked`, which tells what it prints, as a step listing what's due does, and whose program the promises
 stand in for passing, saying `TOLD`: the gate as an agent runs it, on the files
 the promise committed."""
 TOLD = "historical-voice: main.py:3"

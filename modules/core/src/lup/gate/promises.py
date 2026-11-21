@@ -128,8 +128,15 @@ class Noting(Module):
 
 
 def project() -> Project:
-    """Return a project of lup's default modules, the gate among them, and one declaring a step of its own."""
-    return Project(modules=Modules.default().add(Noting()))
+    """Return a project of lup's default modules, the gate among them, and one declaring a step of its own; `Private`, whose step the promises don't stand in for, dropped."""
+    return Project(
+        modules=Modules.default()
+        .drop(
+            "private",
+            why="the promises stand in for the gate's steps and the project's own alone",
+        )
+        .add(Noting())
+    )
 
 
 @contextmanager
