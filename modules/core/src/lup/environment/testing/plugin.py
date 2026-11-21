@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from lup.declaration.layout import RepositoryLayout
 from lup.declaration.module import Module
@@ -35,7 +35,7 @@ from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
 from lup.environment.testing.guarding import Guard, HaltedError, Limits, seconds
 from lup.environment.testing.harness import invariants, promises
-from lup.environment.testing.reaching import Reach
+from lup.environment.testing.reaching import Reach, located
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
 from lup.testing.promise import PromiseDoor
@@ -96,6 +96,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "mutation to read."
         ),
     )
+    parser.addoption(
+        "--lup-reach-only",
+        type=Path,
+        action="append",
+        metavar="FILE",
+        default=[],
+        help="Record which check runs which line of FILE alone, with `--lup-reach`; repeatable.",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -110,18 +118,20 @@ def pytest_configure(config: pytest.Config) -> None:
         for name in ["stalled", "slow", "ceiling"]
         if (value := config.getini(f"lup_{name}")) is not None
     }
-    guard = Guard(limits=Limits.model_validate(given))
-    guard.started()
-    config.stash[GUARD] = guard
     path = config.getoption("lup_reach")
+    only = TypeAdapter(list[Path]).validate_python(config.getoption("lup_reach_only"))
     if isinstance(path, Path):
         reach = Reach(
             path=path.resolve(),
             root=config.rootpath,
+            only=[each.resolve() for each in only],
             worker=hasattr(config, "workerinput"),
         )
         reach.started()
         config.stash[REACH] = reach
+    guard = Guard(limits=Limits.model_validate(given))
+    guard.started()
+    config.stash[GUARD] = guard
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -207,6 +217,13 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
         )
         for line in flaky:
             terminalreporter.write_line(line)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Write where each check collected is written, beside which check runs which line, where that's recorded."""
+    reach = session.config.stash.get(REACH, None)
+    if reach is not None and session.items:
+        located(reach.path.with_suffix(".checks.json"), session.items)
 
 
 def pytest_collect_file(file_path: Path, parent: pytest.Collector) -> Declared | None:

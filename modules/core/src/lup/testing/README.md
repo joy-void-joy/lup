@@ -88,6 +88,14 @@ Each limit is the plugin's ini option of its name (`lup_stalled`, `lup_ceiling`,
 
 A broken promise is told with what it promises, the smallest values it drew, each as Python writes it, the shortest run of calls that broke it and how their slices interleaved, and where. Hypothesis's explain phase is left out: the report says this itself, and explaining reruns a broken promise hundreds of times.
 
+## Mutation
+
+Whether a branch's promises check what it changed is told at its landing, never blocking it: `python -m lup.environment.testing.mutating`, from the worktree's root, against `dev` (`lup.environment.testing.mutating`). It compares each file the branch changed with what it was where the branch left `dev` (`Worktree.changed`), and runs every check once recording which runs which changed line (`--lup-reach`, with `coverage`'s tracer that keeps contexts, about half again the run's time, so never in the gate's every run). Then it says:
+- **the changed lines no check runs.** A line runs only as its module is imported, at its top or in a class's body, is credited to no check, so it isn't listed; neither is one only another process runs, as a child pytest a promise starts, which the list can't tell apart;
+- **the small breaks no check notices,** of a sample of the others (20): a comparison flipped, `and` and `or` swapped, a `not` added or dropped, a constant or an index changed, a statement dropped. Each is made in a copy of the sources apart from the worktree, and run against at most 16 of the checks running its line, those written nearest its file first, stopping at the first that fails; a line run as its module is imported runs against those running any line of its file. Up to 12 breaks run side by side, each in a copy of its own.
+
+A break the harness itself makes, as one swallowing every failure, is noticed by no promise, since each runs under it: such a break is shown in a docstring's example, which pytest runs apart from the harness.
+
 ## What the gate runs
 
 Promises, and docstrings' examples, which show how something is used. A test function names no promise, and the gate fails it, saying to write it as one; one that can't be said as an invariant or a scenario is kept with `@pytest.mark.unpromised(why=…)`, and what couldn't be said is sent as a friction. A class of the repository's holding promises that no module lists in its `parts` fails too, since nothing would check them.
