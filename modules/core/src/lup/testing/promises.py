@@ -178,6 +178,8 @@ class Checked(Model):
 
     name: str
     failed: bool
+    told: str = ""
+    """What its failure told, where it failed."""
     properties: dict[str, str]
     """What the gate's plugin marked it with, by name: why the guard halted it
     (`lup-halted`), the processor's seconds it took past its `slow`
@@ -209,17 +211,21 @@ def gated(files: dict[str, str], limits: dict[str, float]) -> list[Checked]:
         )
         # lup: ignore("S314", why="the XML is the report of a run of pytest this promise started")
         cases = ET.parse(report).getroot().iter("testcase")
-        return [
-            Checked(
-                name=case.get("name", ""),
-                failed=case.find("failure") is not None,
-                properties={
-                    each.get("name", ""): each.get("value", "")
-                    for each in case.iter("property")
-                },
-            )
-            for case in cases
-        ]
+        return [checked(case) for case in cases]
+
+
+def checked(case: ET.Element) -> Checked:
+    """Read how one check ended from its case in pytest's JUnit report."""
+    failure = case.find("failure")
+    return Checked(
+        name=case.get("name", ""),
+        failed=failure is not None,
+        told="" if failure is None else "".join(failure.itertext()),
+        properties={
+            each.get("name", ""): each.get("value", "")
+            for each in case.iter("property")
+        },
+    )
 
 
 STUCK = """
@@ -286,6 +292,32 @@ class Flaky(Module):
 project = Project(modules=Modules.default().add(Flaky()))
 """
 """A declaration whose module's promise fails the first time it's checked and holds after, as one depending on more than its tree does."""
+
+BROKEN = """
+import lup
+from lup import Module, Modules, Part, Parts, Project
+from lup.testing import Testing
+
+
+class BrokenPromises(Part):
+    \"\"\"A promise every number below ten breaks.\"\"\"
+
+    @lup.promise
+    async def every_number_is_ten_or_more(self, by: Testing) -> None:
+        \"\"\"Every number is ten or more.\"\"\"
+        assert by.any(int) >= 10
+
+
+class Broken(Module):
+    \"\"\"A module whose promise doesn't hold.\"\"\"
+
+    name = "broken"
+    parts: Parts = Parts.of(BrokenPromises)
+
+
+project = Project(modules=Modules.default().add(Broken()))
+"""
+"""A declaration whose module's promise any number below ten breaks, the smallest being 0."""
 
 
 class TestingPromises(Part):
@@ -466,11 +498,23 @@ class TestingPromises(Part):
         self, by: Testing
     ) -> None:
         """A promise that fails, then holds when checked again on the same values, depends on more than its tree: it passes, marked with how it failed, to fix, rather than failing a branch it may have nothing to do with."""
-        checked = gated({"lup_project.py": FLAKY}, {})
+        ran = gated({"lup_project.py": FLAKY}, {})
         [flaky] = [
-            each
-            for each in checked
-            if each.name == "FlakyPromises.holds_once_it_failed"
+            each for each in ran if each.name == "FlakyPromises.holds_once_it_failed"
         ]
         assert not flaky.failed
         assert "lup-flaky" in flaky.properties
+
+    @lup.promise
+    async def a_broken_promise_fails_its_check_told_with_what_broke_it(
+        self, by: Testing
+    ) -> None:
+        """A promise a run breaks fails its check in pytest's report, as the gate runs it, whatever checks it inside: told with the smallest value it drew."""
+        ran = gated({"lup_project.py": BROKEN}, {})
+        [broken] = [
+            each
+            for each in ran
+            if each.name == "BrokenPromises.every_number_is_ten_or_more"
+        ]
+        assert broken.failed
+        assert repr(0) in broken.told

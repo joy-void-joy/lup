@@ -80,6 +80,15 @@ class Check(Model, arbitrary_types_allowed=True):
         own run, its calls and their slices, and explaining which of its values
         matter runs it again hundreds of times, tracing every line, after which
         the run it replays last, which the report names, isn't the shrunk one.
+
+        Shown here as well as promised, since a promise checking this runs
+        under the very check it's about, which couldn't tell it fails no more:
+
+        >>> from lup.testing.promises import Counter, counter
+        >>> [small] = [each for each in promises(Counter()) if each.name == "every_number_is_small"]
+        >>> broken = Check(entry=small, project=counter()).checked(Exploring())
+        >>> type(broken).__name__, broken.drawn
+        ('Broken', [Small(number=10)])
         """
         runs: list[Run] = []
 
