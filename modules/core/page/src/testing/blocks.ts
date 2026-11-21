@@ -5,7 +5,8 @@ import fc from "fast-check";
 
 import type { Block, Fold, Line, Markdown } from "../generated/read";
 
-export const words = fc.string({ unit: fc.constantFrom("a", "b", "c", " ", "é"), maxLength: 12 });
+/** Words as views answer them: a line break among them now and then, as `\r\n` or `\r` as well as `\n`, which a line shows as a space and a block of text breaks at. */
+export const words = fc.string({ unit: fc.constantFrom("a", "b", "c", " ", "é", "\n", "\r"), maxLength: 12 });
 
 export function line(id: string): fc.Arbitrary<Line> {
     return words.map((text) => ({
