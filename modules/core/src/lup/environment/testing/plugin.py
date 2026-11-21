@@ -35,6 +35,7 @@ from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
 from lup.environment.testing.guarding import Guard, HaltedError, Limits, seconds
 from lup.environment.testing.harness import invariants, promises
+from lup.environment.testing.reaching import Reach
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
 from lup.testing.promise import PromiseDoor
@@ -51,6 +52,9 @@ if TYPE_CHECKING:
 
 GUARD = pytest.StashKey[Guard]()
 """Where the run keeps its guard."""
+
+REACH = pytest.StashKey[Reach]()
+"""Where the run keeps what records which check runs which line, where it's asked to."""
 
 SLOW = "lup-slow"
 """The property a slow check's report carries: the processor's seconds it took."""
@@ -81,6 +85,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "this."
         ),
     )
+    parser.addoption(
+        "--lup-reach",
+        type=Path,
+        metavar="PATH",
+        default=None,
+        help=(
+            "Record which check runs which line of the repository's code into the "
+            "coverage data file PATH, each check its own context, for a landing's "
+            "mutation to read."
+        ),
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -98,10 +113,21 @@ def pytest_configure(config: pytest.Config) -> None:
     guard = Guard(limits=Limits.model_validate(given))
     guard.started()
     config.stash[GUARD] = guard
+    path = config.getoption("lup_reach")
+    if isinstance(path, Path):
+        reach = Reach(
+            path=path.resolve(),
+            root=config.rootpath,
+            worker=hasattr(config, "workerinput"),
+        )
+        reach.started()
+        config.stash[REACH] = reach
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
-    """Guard the run's end, which a thread a check left stuck would hold."""
+    """Save which check ran which line, where that's recorded, and guard the run's end, which a thread a check left stuck would hold."""
+    if REACH in config.stash:
+        config.stash[REACH].stopped()
     if GUARD in config.stash:
         config.stash[GUARD].ending()
 
@@ -110,9 +136,16 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 def pytest_runtest_protocol(
     item: pytest.Item,
 ) -> Generator[None, bool | None, bool | None]:
-    """Guard each check while it runs."""
-    with item.config.stash[GUARD].guarding(item.nodeid):
-        return (yield)
+    """Guard each check while it runs, crediting the lines it runs to it where that's recorded."""
+    reach = item.config.stash.get(REACH, None)
+    if reach is not None:
+        reach.checking(item.nodeid)
+    try:
+        with item.config.stash[GUARD].guarding(item.nodeid):
+            return (yield)
+    finally:
+        if reach is not None:
+            reach.checking("")
 
 
 @pytest.hookimpl(wrapper=True)
