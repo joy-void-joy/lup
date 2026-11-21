@@ -11,6 +11,7 @@ pydantic's own `use_attribute_docstrings` reads each class's source as it's
 defined, which made importing lup's models about half as slow again.
 """
 
+import copy
 from functools import cache
 from itertools import pairwise
 from typing import dataclass_transform
@@ -123,3 +124,20 @@ class Settings(BaseSettings):
 
 type JsonObject = dict[str, JsonValue]
 """A JSON object whose schema lives elsewhere: a vendor's payload, a tool's input."""
+
+
+def schema_of(model: type[BaseModel]) -> JsonObject:
+    """Return the JSON Schema of `model`, as pydantic writes it: worked out once per class, since writing it is a good part of planning a declaration, and a copy handed out each time, so no caller changes another's.
+
+    >>> class Point(Model):
+    ...     x: int
+    >>> schema_of(Point)["required"]
+    ['x']
+    """
+    return copy.deepcopy(written_schema(model))
+
+
+@cache
+def written_schema(model: type[BaseModel]) -> JsonObject:
+    """Return the JSON Schema of `model`, written once per class (`schema_of`)."""
+    return model.model_json_schema()
