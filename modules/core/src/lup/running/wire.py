@@ -152,9 +152,19 @@ class Offering(Model):
     whatever this says."""
 
 
-type Asking = Annotated[Call | Offering, Field(discriminator="kind")]
+class EventSent(Model):
+    """A part's own event, sent from its container for every part of its project hearing it in another: its class, by its name, and its facts (`lup.heeded`)."""
+
+    format: int = 1
+    kind: Literal["event-sent"] = "event-sent"
+    event: str
+    given: JsonValue
+
+
+type Asking = Annotated[Call | Offering | EventSent, Field(discriminator="kind")]
 """What comes in on a socket of the program on the operator's machine: a call
-through a door, or a question of what the caller may call."""
+through a door, a question of what the caller may call, or a part's own
+event."""
 
 
 class Offer(Model):

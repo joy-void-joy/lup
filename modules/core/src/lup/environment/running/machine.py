@@ -43,6 +43,7 @@ from lup.hosting.carrying import (
     Forwards,
     Listens,
     Route,
+    Telling,
     Visiting,
 )
 from lup.hosting.containers import Clearing, ContainerError
@@ -52,6 +53,7 @@ from lup.running.wire import (
     Answered,
     Asking,
     Declined,
+    EventSent,
     FormatError,
     Host,
     Offer,
@@ -73,7 +75,7 @@ log = logging.getLogger(__name__)
 async def carried(
     running: Running, directory: Path, text: bytes, looks: Looks
 ) -> bytes:
-    """Answer one message come in on a socket in `directory`: a call, routed and answered here or forwarded to the container whose part answers it, or a question of what the caller may call; nothing sent makes this raise.
+    """Answer one message come in on a socket in `directory`: a call, routed and answered here or forwarded to the container whose part answers it, a question of what the caller may call, or a part's own event, carried to the parts of its project hearing it; nothing sent makes this raise.
 
     A view the machine's own parts answer is drawn with `looks`, the kinds the
     home repository's modules declare, as a container draws its project's.
@@ -82,14 +84,26 @@ async def carried(
         message = read(text, ASKED)
     except (FormatError, ValidationError) as wrong:
         return declined(str(wrong))
-    if isinstance(message, Offering):
-        visiting = Visiting(directory=directory, repository=message.repository)
-        offering = await running.serve(
-            "offered", visiting.model_dump(mode="json"), Machine()
-        )
-        if not isinstance(offering, Accepted):
-            return declined(offering.rejection.reason)
-        return Offer.model_validate(offering.output).model_dump_json().encode()
+    match message:
+        case Offering(repository=repository):
+            visiting = Visiting(directory=directory, repository=repository)
+            offering = await running.serve(
+                "offered", visiting.model_dump(mode="json"), Machine()
+            )
+            if not isinstance(offering, Accepted):
+                return declined(offering.rejection.reason)
+            return Offer.model_validate(offering.output).model_dump_json().encode()
+        case EventSent(event=event, given=given):
+            telling = Telling(directory=directory, event=event, given=given)
+            fired = await running.serve(
+                "fired", telling.model_dump(mode="json"), Machine()
+            )
+            if not isinstance(fired, Accepted):
+                return declined(fired.rejection.reason)
+            heeded = Heeded.model_validate(fired.output)
+            return REPLIES.dump_json(Answered(output=heeded.model_dump(mode="json")))
+        case _:
+            pass
     arrival = Arrival(directory=directory, call=message)
     routing = await running.serve("routed", arrival.model_dump(mode="json"), Machine())
     if not isinstance(routing, Accepted):

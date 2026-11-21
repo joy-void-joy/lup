@@ -167,6 +167,14 @@ class Hearing(Model):
     given: JsonValue
 
 
+class Telling(Model):
+    """A part's own event come in on a container's socket: the directory it came in on, and the event's class, by its name, with its facts."""
+
+    directory: Path
+    event: str
+    given: JsonValue
+
+
 class Carrying(Part, machine=True, shared=True):
     """The machine's part deciding where each call goes, and who it's by, from the socket it came in on."""
 
@@ -309,6 +317,61 @@ class Carrying(Part, machine=True, shared=True):
                 continue
             if not isinstance(reply, Answered):
                 continue
+            heeded = Heeded.model_validate(reply.output)
+            told = [*told, *heeded.told]
+            if heeded.refused is not None:
+                return Heeded(told=told, refused=heeded.refused)
+        return Heeded(told=told)
+
+    @lup.service
+    async def fired(self, telling: Telling, by: Machine) -> Heeded:
+        """Carry a part's own event to every part of its project hearing it in the project's other containers, and return what they answered: their words in that order, and the first refusal, after which none is told.
+
+        Only a project's own code fires one, from its container, to its own
+        project's parts alone; the container it came from told its own parts
+        already. A container hearing it that doesn't answer, or refuses to read
+        it, refuses it, since a check that didn't run let nothing through.
+        Raise `RefusedError` where the directory is no project's container.
+        """
+        del by
+        vouched = self.vouched(telling.directory, None)
+        repository = vouched.repository
+        if not isinstance(vouched.by, Codebase) or repository is None:
+            message = (
+                f"`{telling.event}` is fired by a project's own code, from one of "
+                "its containers, which this socket isn't"
+            )
+            raise RefusedError(message)
+        plan = self.plans.get(repository)
+        hearers = (
+            []
+            if plan is None
+            else [each for each in plan.parts if telling.event in each.hears]
+        )
+        placements = [
+            each
+            for each in self.placements
+            if each.repository == repository
+            and each.directory != telling.directory
+            and any(part.named() in each.parts for part in hearers)
+        ]
+        call = EventCalled(event=telling.event, given=telling.given, by=vouched.by)
+        told: list[str] = []
+        for placement in placements:
+            try:
+                if self.forwards is None:
+                    message = "the machine forwards nothing yet"
+                    raise RefusedError(message)
+                answer = await self.forwards.forwarded(
+                    placement.listening(), call.model_dump_json().encode()
+                )
+                reply = read(answer, REPLIED)
+            except (OSError, LupError, ValidationError) as lost:
+                refused = f"`{placement.container}`, hearing `{telling.event}`, didn't answer: {lost}"
+                return Heeded(told=told, refused=refused)
+            if not isinstance(reply, Answered):
+                refused = f"`{placement.container}`, hearing `{telling.event}`, refused to read it: {reply.rejection.reason}"
+                return Heeded(told=told, refused=refused)
             heeded = Heeded.model_validate(reply.output)
             told = [*told, *heeded.told]
             if heeded.refused is not None:

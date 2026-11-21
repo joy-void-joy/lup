@@ -48,6 +48,8 @@ class Planned(Model):
     git: bool = False
     github: list[str] = []
     packages: list[str] = []
+    hears: list[str] = []
+    """The events its methods run at, by their classes' names."""
     source: str | None = None
     tools: list[str] = []
     services: list[str] = []
@@ -79,6 +81,7 @@ class Planned(Model):
             "source": self.source,
             "doorways": doorways,
             "packages": list[JsonValue](self.packages),
+            "hears": list[JsonValue](self.hears),
         }
 
 
@@ -468,6 +471,64 @@ class HostingPromises(Part):
             "routed", {"directory": "/srv/elsewhere", "call": call}, Machine()
         )
         assert isinstance(stranger, Refused)
+
+    @lup.promise
+    async def a_parts_event_goes_from_its_projects_containers_alone(
+        self, by: Testing
+    ) -> None:
+        """A part's own event is carried from a container of its project, and from nowhere else, to the parts of that project hearing it in its other containers: where none hears it, nothing's told or refused; where one is out of reach, it's refused, since a check that didn't run let nothing through."""
+        heard_elsewhere = by.any(bool)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        plan = plan_of(
+            Planned(module="notes", part="Notes"),
+            Planned(
+                module="guard",
+                part="Guard",
+                secrets=["key"],
+                hears=["Publishing"] if heard_elsewhere else [],
+            ),
+        )
+        made = await started.serve("directory", {"container": "c"}, Machine())
+        guarding = await started.serve("directory", {"container": "g"}, Machine())
+        assert isinstance(made, Accepted)
+        assert isinstance(guarding, Accepted)
+        own: str = json.loads(made.answer())["path"]
+        guard: str = json.loads(guarding.answer())["path"]
+        await started.serve(
+            "placed",
+            {
+                "repository": "harmon",
+                "plan": plan,
+                "placements": [
+                    {
+                        "repository": "harmon",
+                        "parts": ["notes.Notes"],
+                        "container": "c",
+                        "directory": own,
+                    },
+                    {
+                        "repository": "harmon",
+                        "parts": ["guard.Guard"],
+                        "container": "g",
+                        "directory": guard,
+                    },
+                ],
+            },
+            Machine(),
+        )
+        told: JsonValue = {"event": "Publishing", "given": {}}
+        fired = await started.serve("fired", {"directory": own, **told}, Machine())
+        assert isinstance(fired, Accepted)
+        heeded = json.loads(fired.answer())
+        assert (heeded["refused"] is not None) == heard_elsewhere
+        stray = await started.serve(
+            "fired", {"directory": "/srv/nowhere", **told}, Machine()
+        )
+        assert isinstance(stray, Refused)
 
     @lup.promise
     async def a_call_from_a_room_is_by_its_session(self, by: Testing) -> None:

@@ -16,7 +16,7 @@ class Guard(lup.Part):
         ...
 ```
 
-It carries what would leave as text, so a part hearing it reads nothing of the repository's, and runs wherever its holdings put it:
+The part about to publish tells it with `lup.heeded`, which reaches every part of the project hearing it, in its own container and, through the machine, in the project's others (`lup/hosting/README.md`, *Carrying*). It carries what would leave as text, so a part hearing it reads nothing of the repository's, and runs wherever its holdings put it:
 - **a push** (`Push`): the remote, by its name in the repository's configuration, the ref it updates, and one commit the remote lacks, each in an event of its own, so a first push of a long history isn't one message: its id, its message, and each file it adds or changes, with the lines it adds against each parent (a merge's resolution, never what a parent brought), or its bytes whole where it isn't text. A push publishing no commit, a ref moved to one the remote holds, is told once with none, for its ref's name;
 - **a post** (`Post`): what it is, in a few words, and each of its parts, a title and a body.
 

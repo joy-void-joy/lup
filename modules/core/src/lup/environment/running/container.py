@@ -20,6 +20,7 @@ from lup.declaration.errors import ProjectError
 from lup.doors.door import Answer, Method, Refused, RefusedError, Rejection
 from lup.doors.events import Event, Heeded
 from lup.doors.on import OnDoor
+from lup.doors.parties import Codebase
 from lup.doors.service import Carrier
 from lup.environment.declaration import Resolved, load, resolve
 from lup.environment.running.programs import Local
@@ -27,10 +28,12 @@ from lup.environment.shell.viewing import viewed
 from lup.errors import LupError
 from lup.running.wire import (
     Answered,
+    Caller,
     CommandCalled,
     Crossed,
     Declined,
     EventCalled,
+    EventSent,
     FormatError,
     Reply,
     ServiceCalled,
@@ -51,8 +54,10 @@ CALLS = TypeAdapter[Crossed](Crossed)
 REPLIES = TypeAdapter[Reply](Reply)
 
 
-async def heeded(running: Running, named: str, given: JsonValue) -> bytes:
-    """Run the methods made here run at the event of the class named `named`, `given` as its facts, and answer what they answered (`Heeded`); refused where no method here hears an event of that name, or `given` isn't one."""
+async def heeded(
+    running: Running, named: str, given: JsonValue, by: Caller | None
+) -> bytes:
+    """Run the methods made here run at the event of the class named `named`, `given` as its facts, and answer what they answered (`Heeded`); refused where no method here hears an event of that name, `given` isn't one, or a project's code fired one only lup tells (`Event.fired`)."""
     kinds = [
         entry.method.door.event
         for entry in running.here()
@@ -61,6 +66,10 @@ async def heeded(running: Running, named: str, given: JsonValue) -> bytes:
     ]
     if not kinds:
         return declined(f"no part here hears an event named `{named}`")
+    if isinstance(by, Codebase) and not kinds[0].fired:
+        return declined(
+            f"`{named}` is an event only lup tells: a part's code doesn't fire it"
+        )
     try:
         event = kinds[0].model_validate(given)
     except ValidationError as wrong:
@@ -94,7 +103,7 @@ async def answered(
         )
     match call:
         case EventCalled(event=named, given=given):
-            return await heeded(running, named, given)
+            return await heeded(running, named, given, call.by)
         case ToolCalled(tool=tool, given=given):
             outcome = await running.call(tool, given, call.by)
         case ServiceCalled(service=service, given=given):
@@ -163,18 +172,23 @@ class Outward(Model, Carrier):
 
     @override
     async def heeded(self, event: Event) -> Heeded:
-        """Tell `event` to the parts of the project hearing it in its other containers, through the program on the operator's machine, and return what they answered.
+        """Send `event` to the program, which tells it to the parts of the project hearing it in its other containers, and return what they answered.
 
-        Raise `RefusedError` where it can't be carried there.
+        Raise `RefusedError` where it's refused there, or can't be sent.
         """
-        # lup: defer(issue=3, why="the machine carrying a part's event to the parts of its project hearing it in its other containers, which `Carrying` is to route")
         kind = type(event).__name__
-        message = (
-            f"`{kind}` can't reach the parts hearing it in the project's other "
-            "containers: the program on the operator's machine doesn't carry a "
-            "part's event yet"
-        )
-        raise RefusedError(message, about=[kind])
+        sent = EventSent(event=kind, given=event.model_dump(mode="json"))
+        try:
+            text = await asked(self.calling, sent.model_dump_json().encode())
+            reply = read(text, REPLIES)
+            match reply:
+                case Answered(output=output):
+                    return Heeded.model_validate(output)
+                case Declined(rejection=rejection):
+                    raise RefusedError(rejection.reason, about=[kind])
+        except (OSError, ValueError, LupError, ValidationError) as lost:
+            message = f"`{kind}` couldn't be told to the parts hearing it: {lost}"
+            raise RefusedError(message, about=[kind]) from lost
 
     @override
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:
