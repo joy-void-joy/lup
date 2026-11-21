@@ -315,7 +315,7 @@ def stating(entry: Entry, doors: Doors) -> Stating | None:
     return found[0]
 
 
-def stated(annotation: object) -> type | None:
+def stated(annotation: type | None) -> type | None:
     """Return the state a field's annotation says a part holds, `Tally` in `State[Tally]`; none where it's no `State`."""
     if get_origin(annotation) is not State:
         return None
