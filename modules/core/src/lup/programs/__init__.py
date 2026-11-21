@@ -4,7 +4,9 @@
 event loop, `started` keeps one running beside it to talk to over its input and
 output, `spawned` one with its output the caller's, and `detached` starts one
 that outlives its caller. `lup` re-exports it as a namespace, `lup.programs`,
-never its names alone. Its reasons are in `README.md` here.
+never its names alone. Its companion for git, `lup.programs.git`, runs git and
+reads its answers for every module, imported when first used. Its reasons are
+in `README.md` here.
 """
 
 from lup.programs.beside import Apart, Child, Running, detached, spawned, started
@@ -17,6 +19,7 @@ from lup.programs.ended import (
     Ran,
 )
 from lup.programs.waited import awaited, run
+lazy from lup.programs import git
 
 __all__ = [
     "Apart",
@@ -30,6 +33,7 @@ __all__ = [
     "Running",
     "awaited",
     "detached",
+    "git",
     "run",
     "spawned",
     "started",

@@ -38,23 +38,27 @@ class Local(Model, Runs):
         given: bytes | None,
         env: dict[str, str],
         cwd: Path | None,
+        *,
+        within: timedelta | None,
     ) -> Finished:
         """Run `program` with `arguments`, `given` on its input, `env` set beside the variables this process runs with, from `cwd` or where this process runs, and say how it ended, whatever its status.
 
-        Raise `UnrunError` where it isn't there, or runs past `within`.
+        Raise `UnrunError` where it isn't there, or runs past `within`, or
+        this runner's own `within` where it's none.
         """
         pinned = [f"{name}={value}" for name, value in env.items()]
         words = [*(["env", *pinned] if env else []), program.name, *arguments]
         missing = program.missing()
+        limit = within or self.within
         try:
             ran = await awaited(
-                *words, cwd=cwd, stdin=given, checked=False, within=self.within
+                *words, cwd=cwd, stdin=given, checked=False, within=limit
             )
         except ProgramMissingError as unfound:
             raise UnrunError(missing, about=[program.name]) from unfound
         except ProgramOverdueError as late:
             message = (
-                f"`{program.name}` ran past {self.within}, and was stopped: "
+                f"`{program.name}` ran past {limit}, and was stopped: "
                 "something it reads may be a FIFO, or a file nothing finishes writing"
             )
             raise UnrunError(message, about=[program.name]) from late

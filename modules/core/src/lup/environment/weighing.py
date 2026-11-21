@@ -11,6 +11,7 @@ lup's core doesn't need, its extras left out, and outside the worktree
 (`lup/gate/README.md`, *Steps*).
 """
 
+import asyncio
 import inspect
 import sys
 from importlib.abc import MetaPathFinder
@@ -143,7 +144,11 @@ def weighed(root: Path, tracing: Tracing) -> list[Heavy]:
 
 def main() -> None:
     """Load and resolve the declaration of the worktree this runs in, noting every module it imports, and end failed, naming each heavy distribution and the chain to it, where one is imported."""
-    layout = RepositoryLayout.found(Path.cwd())
+    layout = asyncio.run(RepositoryLayout.found(Path.cwd()))
+    if layout is None:
+        sys.exit(
+            f"{Path.cwd()} is in no git worktree, so there's no declaration to load"
+        )
     machine = MachineLayout(configuration=LupSettings().xdg_config_home)
     tracing = Tracing()
     sys.meta_path.insert(0, tracing)

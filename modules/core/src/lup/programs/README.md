@@ -27,6 +27,8 @@ detached("uv", "run", "serve", log=log)
 
 A program ending with a status its caller doesn't accept raises `ProgramFailedError`, carrying how it ended (`ran`); one that can't be started raises `ProgramMissingError`, one past its time `ProgramOverdueError`, and one printing past its limit `ProgramOverflowError`, each a `ProgramError`, a `LupError`.
 
+git has a companion here, `lup.programs.git`, which every module asks git through rather than running it: each question a method running one git command, hardened and held to a time, and reading git's answer into a model (`git/README.md`).
+
 ## Why it runs them as it does
 
 - **A program's arguments are a list, never a line a shell reads,** so a value holding a quote, a `$` or a `;` reaches the program as written.
