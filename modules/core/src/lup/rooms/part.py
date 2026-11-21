@@ -52,6 +52,9 @@ class RoomFor(Model):
     declaration: Path = Path("lup_project.py")
     """The project's declaration, relative to its root, which the room's own
     parts are made from, at the worktree."""
+    kept: Kept
+    """Where what rooms share across sessions is kept: each project's
+    history, each account's logins."""
     serving: list[str] = []
     """The parts run in the room, each `module.Part`: none starts nothing."""
     held: bool = True
@@ -188,7 +191,6 @@ class Rooms(Part, machine=True, shared=True):
         install="https://docs.astral.sh/uv/getting-started/installation/",
     )
     base: Base = Field(default_factory=Base)
-    kept: Kept = Field(default_factory=Kept)
     inside: InRoom = Field(default_factory=InRoom)
     fresh: dict[str, Fresh] = {}
     """Each runtime's CLI as last fetched, by the runtime's name."""
@@ -232,7 +234,7 @@ class Rooms(Part, machine=True, shared=True):
             (files / name).write_text(text)
         for name, text in prepared.homed.items():
             replaced(directory / name, text)
-        history = self.kept.history(room.common, runtime.name)
+        history = room.kept.history(room.common, runtime.name)
         for name in runtime.rooming.kept():
             self.linked(directory / name, history / name)
         container = f"lup-{room.repository}-{room.session}"
@@ -274,7 +276,7 @@ class Rooms(Part, machine=True, shared=True):
             "--",
             *prepared.command,
         ]
-        login = self.kept.login(room.account, runtime.name, runtime.rooming.login())
+        login = room.kept.login(room.account, runtime.name, runtime.rooming.login())
         binds = [
             *spec.binds,
             *[

@@ -35,6 +35,7 @@ from lup.hosting.projects import Locating, Projects, Telling
 from lup.inbox.part import Inboxes
 from lup.inbox.said import Ended, Ending, ToldItem, Untelling
 from lup.inbox.said import Naming as Named2
+from lup.rooms.layout import Kept
 from lup.rooms.part import RoomFor, Rooms, WorktreeFor
 from lup.running.plan import Name
 from lup.runtimes.known import named
@@ -313,6 +314,9 @@ class Held(Part, machine=True, shared=True):
                 packages=located.opened.plan.packages,
                 declaration=located.opening.declaration,
                 serving=[each.named() for each in located.opened.plan.rooms()],
+                kept=Kept(data=self.module.kept)
+                if self.module.kept is not None
+                else Kept(),
             )
         )
         run = Run(
@@ -585,6 +589,10 @@ class Sessions(lup.Module):
     spawns rather than as a budget."""
     most_per_repository: int = 16
     """The most sessions of one repository running at once."""
+    kept: Path | None = None
+    """Where rooms keep what they share across sessions, each project's
+    history and each account's logins: lup's data (`~/.local/share/lup`),
+    shared with the second lup, where none is set."""
     telling: int = 9_000
     """The most characters of items a hook tells an agent whole: past it, each
     is named for `inbox` to read whole. Claude Code takes 10,000 characters of
