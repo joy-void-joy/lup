@@ -76,10 +76,16 @@ def first_line(text: str) -> str:
 
 
 def where(conversation: Conversation | Hit) -> str:
-    """Say where a conversation is: its runtime and session, its subagent's id where it's one, and the directory it ran in."""
+    """Say where a conversation is: its runtime and session, its subagent's id where it's one, and the directory it ran in, or its repository."""
     subagent = f" subagent {conversation.subagent}" if conversation.subagent else ""
-    ran = f" in {conversation.directory}" if conversation.directory else ""
-    return f"{conversation.runtime} {conversation.session}{subagent}{ran}"
+    ran = (
+        f" in {conversation.directory}"
+        if conversation.directory
+        else f" of {conversation.repository}"
+        if isinstance(conversation, Hit) and conversation.repository
+        else ""
+    )
+    return f"{conversation.runtime or ''} {conversation.session or ''}{subagent}{ran}".strip()
 
 
 def searched_blocks(searched: Searched, opens: Opens, *, whole: bool) -> Blocks:
@@ -107,53 +113,80 @@ def searched_blocks(searched: Searched, opens: Opens, *, whole: bool) -> Blocks:
 
 
 def hit_fold(hit: Hit, opens: Opens, *, whole: bool) -> Fold:
-    """Return a hit as a fold: when and where, what it answered, its words, and the view showing the conversation around it."""
+    """Return a hit as a fold: when and where, what it answered, its words, and, for a record's step, the view showing the conversation around it."""
+    name = hit.step if hit.step is not None else f"{hit.source}-{hit.number}"
     title = hit.title or "untitled"
+    item = f"@{hit.number} " if hit.number is not None else ""
+    answering = f"on @{hit.on}: " if hit.on is not None else "answering: "
     answered = (
         [
-            Line(
-                id=f"hit-{hit.step}-answered",
-                spans=[Span(text="answering: ", tone="muted")],
-            ),
+            Line(id=f"hit-{name}-answered", spans=[Span(text=answering, tone="muted")]),
             Markdown(
-                id=f"hit-{hit.step}-answered-text",
+                id=f"hit-{name}-answered-text",
                 text=hit.answered if whole else first_line(hit.answered),
                 tone="muted",
             ),
         ]
         if hit.answered
+        else (
+            [
+                Line(
+                    id=f"hit-{name}-on",
+                    spans=[Span(text=f"on @{hit.on}", tone="muted")],
+                )
+            ]
+            if hit.on is not None
+            else []
+        )
+    )
+    said = (
+        heard(hit.by)
+        if hit.kind == "said" or hit.source != "record"
+        else hit.tool or hit.kind
+    )
+    kind = f" ({hit.kind})" if hit.source != "record" else ""
+    around = (
+        [
+            Line(
+                id=f"hit-{name}-around",
+                spans=[
+                    Span(text="around it: ", tone="muted"),
+                    Span(
+                        text=f"step {hit.step}",
+                        refers=Viewing.of(
+                            opens.show,
+                            Showing(
+                                session=hit.session, subagent=hit.subagent, at=hit.step
+                            ),
+                        ),
+                    ),
+                ],
+            )
+        ]
+        if hit.step is not None and hit.session is not None
         else []
     )
-    said = heard(hit.by) if hit.kind == "said" else hit.tool or hit.kind
-    showing = Showing(session=hit.session, subagent=hit.subagent, at=hit.step)
     return Fold(
-        id=f"hit-{hit.step}",
+        id=f"hit-{name}",
         kind="hit",
         summary=[
-            Span(text=title, tone="strong"),
+            Span(text=f"{item}{title}", tone="strong"),
             Span(
-                text=f"  {hit.at or ''}  {where(hit)}, kept from {hit.whose}",
+                text=f"  {hit.at or ''}  {where(hit)}, from {hit.whose or hit.source}",
                 tone="muted",
             ),
         ],
         content=[
             *answered,
-            Line(id=f"hit-{hit.step}-by", spans=[Span(text=f"{said}:", tone="muted")]),
+            Line(
+                id=f"hit-{name}-by", spans=[Span(text=f"{said}{kind}:", tone="muted")]
+            ),
             Markdown(
-                id=f"hit-{hit.step}-text",
+                id=f"hit-{name}-text",
                 text=hit.text,
                 tone="operator" if hit.by == "operator" else "plain",
             ),
-            Line(
-                id=f"hit-{hit.step}-around",
-                spans=[
-                    Span(text="around it: ", tone="muted"),
-                    Span(
-                        text=f"step {hit.step}",
-                        refers=Viewing.of(opens.show, showing),
-                    ),
-                ],
-            ),
+            *around,
         ],
     )
 

@@ -17,9 +17,10 @@ statements are written once here.
 import json
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, get_args
+lazy import os
 lazy from collections.abc import Generator, Iterator
 lazy from sqlite3 import Connection as Driver
 
@@ -35,8 +36,10 @@ from sqlalchemy import (
     create_engine,
     delete,
     event,
+    false,
     func,
     insert,
+    literal,
     or_,
     select,
     update,
@@ -45,11 +48,12 @@ from sqlalchemy import (
     Index as Indexed,
 )
 from sqlalchemy.pool import StaticPool
-lazy from sqlalchemy import ColumnElement, ScalarSelect
+lazy from sqlalchemy import ColumnElement, ScalarSelect, Select
 lazy from sqlalchemy.pool import ConnectionPoolEntry
 
 from lup.runtimes.records import (
     Called,
+    Ended,
     Read,
     Reading,
     Record,
@@ -60,7 +64,9 @@ from lup.runtimes.records import (
     Stepped,
     Titled,
 )
+from lup.transcripts.ledger import Spoken, copied, spoken
 from lup.types import Model, MutableModel
+lazy from lup.inbox.said import SaidItem, SaidSince
 
 type Whose = Literal["rooms", "operator", "kept", "archive"]
 """Whose home a record was read from: a room's, the operator's own runtime
@@ -115,12 +121,52 @@ STEPS = Table(
     Column("call", String),
     Column("tool", String),
     Column("answers", Integer),
+    Column("ending", Integer, nullable=False, default=0),
     Column("text", Text, nullable=False),
     Indexed("steps_of", "record", "line", "place"),
     Indexed("steps_keyed", "key", "place"),
 )
-"""Each step indexed: what it is, who said it, its text, and, for the operator's
-words, the step of the agent's they answered."""
+"""Each step indexed: what it is, who said it, its text, for the operator's
+words the step of the agent's they answered, and, for the agent's words, whether
+they were the last of a turn."""
+
+SAID = Table(
+    "said",
+    TABLES,
+    Column("id", Integer, primary_key=True),
+    Column("source", String, nullable=False),
+    Column("number", Integer, nullable=False),
+    Column("part", Integer),
+    Column("at", String, nullable=False),
+    Column("repository", String, nullable=False),
+    Column("by", String, nullable=False),
+    Column("runtime", String),
+    Column("session", String),
+    Column("agent", String),
+    Column("kind", String, nullable=False),
+    Column("text", Text, nullable=False),
+    Column("on_number", Integer),
+    Column("quoted", Text),
+    Indexed("said_of", "source", "number"),
+    Indexed("said_session", "session"),
+)
+"""Each item said through lup, the second lup's ledger's or this lup's inbox's:
+the operator's words, each apart, and agents' items whole, each with the
+conversation it's of and what it's on."""
+
+MARKS = Table(
+    "marks",
+    TABLES,
+    Column("name", String, primary_key=True),
+    Column("value", Text, nullable=False),
+)
+"""Where each source of what's said was last read: the ledger's copy, as its
+files stood, and the inbox's last key."""
+
+SAID_WORDS = Table(
+    "said_words", MetaData(), Column("rowid", Integer), Column("said_words", Text)
+)
+"""The full-text index of what's said through lup, as `WORDS` is of the steps."""
 
 WORDS = Table("words", MetaData(), Column("rowid", Integer), Column("words", Text))
 """The full-text index of the steps' text, an FTS5 table SQLAlchemy reads but
@@ -142,6 +188,19 @@ def words_made(connection: Connection) -> None:
         "INSERT INTO words(words, rowid, tool, text) "
         "VALUES ('delete', old.id, old.tool, old.text); END"
     )
+    connection.exec_driver_sql(
+        "CREATE VIRTUAL TABLE said_words USING fts5(text, content='said', "
+        "content_rowid='id', tokenize='unicode61 remove_diacritics 2', prefix='2 3')"
+    )
+    connection.exec_driver_sql(
+        "CREATE TRIGGER said_indexed AFTER INSERT ON said BEGIN "
+        "INSERT INTO said_words(rowid, text) VALUES (new.id, new.text); END"
+    )
+    connection.exec_driver_sql(
+        "CREATE TRIGGER said_forgotten AFTER DELETE ON said BEGIN "
+        "INSERT INTO said_words(said_words, rowid, text) "
+        "VALUES ('delete', old.id, old.text); END"
+    )
 
 
 class StepRow(Model):
@@ -161,6 +220,14 @@ class StepRow(Model):
     text: str
 
 
+class Rowed(Model):
+    """A record's new steps as rows, the agent's steps that ended a turn among them, and the agent's last step after them."""
+
+    rows: list[StepRow]
+    endings: list[int]
+    spoken: int | None
+
+
 class Home(Model):
     """A home a runtime keeps records in, read with its reader: its own directory, a room's, or a copy kept of one in its layout."""
 
@@ -172,8 +239,9 @@ class Home(Model):
 
 
 type Searcher = Literal["operator", "agent", "lup", "tools", "any"]
-"""Whose words a search looks in: the operator's, the agent's, lup's, the
-calls and what they returned, or everything."""
+"""Whose words a search looks in: the operator's, typed or through lup; the
+agents', their last words of each turn and their items through lup; lup's; the
+calls and what they returned; or everything."""
 
 
 class Searching(Model):
@@ -191,24 +259,38 @@ class Searching(Model):
     """The most hits answered, the latest; how many more there are is said."""
 
 
-class Hit(Model):
-    """A step a search found: what it is, where, and, for the operator's words, the agent's last words before them."""
+type Source = Literal["record", "ledger", "inbox"]
+"""Where a hit was read from: a runtime's record of a conversation, the second
+lup's ledger, or this lup's inbox."""
 
-    step: int
-    runtime: str
-    session: str
-    subagent: str | None
-    title: str | None
-    directory: str | None
-    whose: Whose
+
+class Hit(Model):
+    """What a search found: a step of a conversation's record, or an item said through lup; when, where, and what it answered."""
+
+    source: Source
+    step: int | None = None
+    """The record's step, which `show` opens the conversation around; none for
+    an item."""
+    number: int | None = None
+    """The item's number; none for a record's step."""
+    runtime: str | None = None
+    session: str | None = None
+    subagent: str | None = None
+    title: str | None = None
+    directory: str | None = None
+    repository: str | None = None
+    whose: Whose | None = None
     at: str | None
     kind: str
-    by: Speaker | None
-    tool: str | None
+    by: str | None
+    tool: str | None = None
     text: str
     answered: str | None = None
-    """The agent's last words before the operator's, in the same conversation;
-    none where nothing came before, or the hit isn't the operator's."""
+    """What it answered: for the operator's words in a record, the agent's last
+    words before them; for an item, the passage of the item it's on; none
+    where nothing is known."""
+    on: int | None = None
+    """For an item, the number of the item it's on."""
 
 
 class Searched(Model):
@@ -344,9 +426,15 @@ class Index(MutableModel, arbitrary_types_allowed=True):
 
     @contextmanager
     def writing(self) -> Generator[Connection]:
-        """Hold the lock and one transaction across a write: committed where it ends, rolled back where it raises."""
-        with self.lock, self.connection.begin():
-            yield self.connection
+        """Hold the lock and one transaction across a read or a write: committed where it ends, rolled back where it raises; within another, a savepoint of it."""
+        with self.lock:
+            begun = (
+                self.connection.begin_nested()
+                if self.connection.in_transaction()
+                else self.connection.begin()
+            )
+            with begun:
+                yield self.connection
 
     def caught_up(self, homes: list[Home]) -> Caught:
         """Read what every record in `homes` added since it was last read, each conversation from the home preferred among those holding it."""
@@ -439,12 +527,15 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             if read.again or since is None:
                 connection.execute(delete(STEPS).where(STEPS.c.record == record_id))
                 spoken = None
-            rows = list(self.rows(record_id, read.steps, spoken))
-            if rows:
-                connection.execute(insert(STEPS), [each.model_dump() for each in rows])
-            agents = [
-                each.id for each in rows if each.kind == "said" and each.by == "agent"
-            ]
+            rowed = self.rows(record_id, read.steps, spoken)
+            if rowed.rows:
+                connection.execute(
+                    insert(STEPS), [each.model_dump() for each in rowed.rows]
+                )
+            if rowed.endings:
+                connection.execute(
+                    update(STEPS).where(STEPS.c.id.in_(rowed.endings)).values(ending=1)
+                )
             titles = [each for each in read.steps if isinstance(each, Titled)]
             times = [each.at for each in read.steps if each.at is not None]
             connection.execute(
@@ -456,45 +547,61 @@ class Index(MutableModel, arbitrary_types_allowed=True):
                     changed=stat.st_mtime_ns,
                     indexed=1,
                     whose=home.whose,
-                    spoken=agents[-1] if agents else spoken,
+                    spoken=rowed.spoken,
                     **titled(titles),
                     **timed(times, first=row is None or since is None),
                 )
             )
             return read
 
-    def rows(
-        self, record: int, steps: list[Stepped], spoken: int | None
-    ) -> Iterator[StepRow]:
-        """Yield each step's row, its text what's searched, the operator's words noting the agent's last words before them, which `spoken` starts as."""
-        last = spoken
+    def rows(self, record: int, steps: list[Stepped], spoken: int | None) -> Rowed:
+        """Return each step's row, its text what's searched, the operator's words noting the agent's last words before them, which `spoken` starts as, and which of the agent's steps ended a turn."""
         number = self.next_step()
-        for step in steps:
-            text = searched(step)
-            if text is None:
-                continue
-            number += 1
-            by: Speaker | None = step.by if isinstance(step, Said) else None
-            yield StepRow(
-                id=number,
-                record=record,
-                line=step.place.line,
-                place=step.place.index,
-                at=step.at.isoformat() if step.at else None,
-                kind=step.kind,
-                by=by,
-                key=step.key,
-                call=step.call if isinstance(step, Called | Returned) else None,
-                tool=step.tool if isinstance(step, Called) else None,
-                answers=last if by == "operator" else None,
-                text=text,
-            )
-            if by == "agent":
-                last = number
+
+        def made() -> Iterator[StepRow | int]:
+            """Yield each step's row, and at a turn's end the agent's step that ended it."""
+            nonlocal number
+            last = spoken
+            for step in steps:
+                if isinstance(step, Ended) and last is not None:
+                    yield last
+                text = searched(step)
+                if text is None:
+                    continue
+                number += 1
+                by: Speaker | None = step.by if isinstance(step, Said) else None
+                yield StepRow(
+                    id=number,
+                    record=record,
+                    line=step.place.line,
+                    place=step.place.index,
+                    at=moment(step.at),
+                    kind=step.kind,
+                    by=by,
+                    key=step.key,
+                    call=step.call if isinstance(step, Called | Returned) else None,
+                    tool=step.tool if isinstance(step, Called) else None,
+                    answers=last if by == "operator" else None,
+                    text=text,
+                )
+                if by == "agent":
+                    last = number
+
+        made_ = list(made())
+        rows = [each for each in made_ if isinstance(each, StepRow)]
+        agents = [
+            each.id for each in rows if each.kind == "said" and each.by == "agent"
+        ]
+        return Rowed(
+            rows=rows,
+            endings=[each for each in made_ if isinstance(each, int)],
+            spoken=agents[-1] if agents else spoken,
+        )
 
     def next_step(self) -> int:
         """Return the highest step's id, from which new ones count."""
-        return self.connection.execute(select(func.max(STEPS.c.id))).scalar() or 0
+        with self.writing() as connection:
+            return connection.execute(select(func.max(STEPS.c.id))).scalar() or 0
 
     def listed(self, listing: Listing) -> Listed:
         """Return the conversations indexed, the latest first, narrowed as `listing` says."""
@@ -521,7 +628,7 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             .limit(listing.limit)
         )
         counted = select(func.count()).select_from(RECORDS).where(*kept)
-        with self.lock:
+        with self.writing():
             rows = self.connection.execute(query).mappings().all()
             total = self.connection.execute(counted).scalar() or 0
         listed = [Conversation.model_validate(dict(each)) for each in rows]
@@ -551,7 +658,7 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             ),
             whose,
         )
-        with self.lock:
+        with self.writing():
             rows = self.connection.execute(query).mappings().all()
         return [Conversation.model_validate(dict(each)) for each in rows]
 
@@ -595,20 +702,20 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             case _:
                 shown = steps.where(STEPS.c.kind == "said", STEPS.c.by == "operator")
         every = select(func.count()).where(STEPS.c.record == record)
-        with self.lock:
-            rows = self.connection.execute(shown.order_by(STEPS.c.id)).mappings().all()
-            total = self.connection.execute(every).scalar() or 0
-        listed = [Stepping.model_validate(dict(each)) for each in rows]
-        before = (
-            self.connection.execute(
-                select(func.count()).where(
-                    STEPS.c.record == record, STEPS.c.id < listed[0].step
-                )
-            ).scalar()
-            or 0
-            if listed and showing.at is not None
-            else 0
-        )
+        with self.writing() as connection:
+            rows = connection.execute(shown.order_by(STEPS.c.id)).mappings().all()
+            total = connection.execute(every).scalar() or 0
+            listed = [Stepping.model_validate(dict(each)) for each in rows]
+            before = (
+                connection.execute(
+                    select(func.count()).where(
+                        STEPS.c.record == record, STEPS.c.id < listed[0].step
+                    )
+                ).scalar()
+                or 0
+                if listed and showing.at is not None
+                else 0
+            )
         after = total - before - len(listed) if showing.at is not None else 0
         return Shown(
             conversation=conversation, steps=listed, before=before, after=after
@@ -625,7 +732,7 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             .order_by(STEPS.c.id if by >= 0 else STEPS.c.id.desc())
             .limit(abs(by) + 1)
         )
-        with self.lock:
+        with self.writing():
             found = self.connection.execute(ids).scalars().all()
         return found[-1] if found else at
 
@@ -650,6 +757,7 @@ class Index(MutableModel, arbitrary_types_allowed=True):
         answered = STEPS.alias("answered")
         hits = (
             select(
+                literal("record").label("source"),
                 STEPS.c.id.label("step"),
                 RECORDS.c.runtime,
                 RECORDS.c.session,
@@ -672,11 +780,107 @@ class Index(MutableModel, arbitrary_types_allowed=True):
             .limit(searching.limit)
         )
         counted = select(func.count()).select_from(found).where(found.c.nth == 1)
-        with self.lock:
-            rows = self.connection.execute(hits).mappings().all()
-            total = self.connection.execute(counted).scalar() or 0
-        listed = [Hit.model_validate(dict(each)) for each in rows]
-        return Searched(hits=listed, more=max(0, total - len(listed)))
+        said = said_found(query, searching)
+        said_hits = (
+            select(
+                SAID.c.source,
+                SAID.c.number,
+                SAID.c.runtime,
+                SAID.c.session,
+                SAID.c.agent.label("subagent"),
+                SAID.c.repository,
+                SAID.c.at,
+                SAID.c.kind,
+                SAID.c.by,
+                SAID.c.text,
+                SAID.c.quoted.label("answered"),
+                SAID.c.on_number.label("on"),
+            )
+            .where(SAID.c.id.in_(said))
+            .order_by(SAID.c.at.desc(), SAID.c.id.desc())
+            .limit(searching.limit)
+        )
+        said_counted = select(func.count()).where(SAID.c.id.in_(said))
+        with self.writing():
+            rows = [
+                *self.connection.execute(hits).mappings().all(),
+                *self.connection.execute(said_hits).mappings().all(),
+            ]
+            total = (self.connection.execute(counted).scalar() or 0) + (
+                self.connection.execute(said_counted).scalar() or 0
+            )
+        every = sorted(
+            (Hit.model_validate(dict(each)) for each in rows),
+            key=lambda each: each.at or "",
+            reverse=True,
+        )
+        listed = every[: searching.limit]
+        return Searched(hits=self.titled(listed), more=max(0, total - len(listed)))
+
+    def titled(self, hits: list[Hit]) -> list[Hit]:
+        """Return `hits`, each item's given the title the index knows its conversation by, where it knows one."""
+        sessions = list(dict.fromkeys(each.session for each in hits if each.session))
+        with self.writing() as connection:
+            titles = dict(
+                connection.execute(
+                    select(RECORDS.c.session, RECORDS.c.title).where(
+                        RECORDS.c.session.in_(sessions),
+                        RECORDS.c.subagent.is_(None),
+                        RECORDS.c.title.is_not(None),
+                    )
+                )
+                .tuples()
+                .all()
+            )
+        return [
+            each
+            if each.title is not None or each.session not in titles
+            else each.model_copy(update={"title": titles[each.session]})
+            for each in hits
+        ]
+
+    def ledger_caught_up(self, ledger: Path, into: Path) -> int:
+        """Read the second lup's ledger at `ledger` again where its files changed since it was last read, its words in place of those read before, from a copy kept in `into`; return how many words it holds, or none read where it didn't change."""
+        files = [ledger, ledger.with_name(f"{ledger.name}-wal")]
+        stood = json.dumps(
+            [
+                [each.name, found.st_size, found.st_mtime_ns]
+                for each in files
+                if (found := statted(each)) is not None
+            ]
+        )
+        with self.writing():
+            before = self.connection.execute(
+                select(MARKS.c.value).where(MARKS.c.name == "ledger")
+            ).scalar()
+        if before == stood or statted(ledger) is None:
+            return 0
+        words = spoken(copied(ledger, into))
+        with self.writing() as connection:
+            connection.execute(delete(SAID).where(SAID.c.source == "ledger"))
+            if words:
+                connection.execute(
+                    insert(SAID), [said_row("ledger", each) for each in words]
+                )
+            marked(connection, "ledger", stood)
+        return len(words)
+
+    def inbox_after(self) -> int:
+        """Return the inbox's key after which it's to be read next: 0 where it never was."""
+        with self.writing():
+            value = self.connection.execute(
+                select(MARKS.c.value).where(MARKS.c.name == "inbox")
+            ).scalar()
+        return int(value) if value is not None else 0
+
+    def inbox_caught_up(self, said: SaidSince) -> int:
+        """Index the items `said` read from the inbox, and keep the key to read after next; return how many."""
+        rows = [inbox_row(each) for each in said.items]
+        with self.writing() as connection:
+            if rows:
+                connection.execute(insert(SAID), rows)
+            marked(connection, "inbox", str(said.last))
+        return len(rows)
 
 
 def matching(words: list[str]) -> str:
@@ -711,6 +915,69 @@ def tokens(text: str) -> list[str]:
             yield held
 
     return list(runs())
+
+
+def said_found(query: str, searching: Searching) -> Select[int]:
+    """Return the query finding what's said through lup holding every word of `query`, narrowed as `searching` says: the operator's words, agents' items, or both."""
+    match searching.by:
+        case "operator" | "agent":
+            whose = [SAID.c.by == searching.by]
+        case "any":
+            whose = []
+        case _:
+            whose = [false()]
+    since = [SAID.c.at >= moment(searching.since)] if searching.since else []
+    until = [SAID.c.at < moment(searching.until)] if searching.until else []
+    return (
+        select(SAID.c.id)
+        .join(SAID_WORDS, SAID_WORDS.c.rowid == SAID.c.id)
+        .where(SAID_WORDS.c.said_words.match(query), *whose, *since, *until)
+    )
+
+
+def said_row(source: Source, said: Spoken) -> dict[str, str | int | None]:
+    """Return words read from the ledger as the index keeps them."""
+    conversation = said.conversation
+    return {
+        "source": source,
+        "number": said.number,
+        "part": said.part,
+        "at": moment(said.at),
+        "repository": said.repository,
+        "by": said.by,
+        "runtime": conversation.runtime if conversation else None,
+        "session": conversation.session if conversation else None,
+        "agent": conversation.agent if conversation else None,
+        "kind": said.kind,
+        "text": said.text,
+        "on_number": said.on,
+        "quoted": said.quoted,
+    }
+
+
+def inbox_row(said: SaidItem) -> dict[str, str | int | None]:
+    """Return an item read from the inbox as the index keeps it."""
+    return {
+        "source": "inbox",
+        "number": said.number,
+        "part": None,
+        "at": moment(said.at),
+        "repository": said.repository,
+        "by": "agent" if said.agent is not None else "operator",
+        "runtime": None,
+        "session": said.agent.session if said.agent else None,
+        "agent": said.agent.id if said.agent else None,
+        "kind": said.kind,
+        "text": said.text,
+        "on_number": said.on,
+        "quoted": said.quoted,
+    }
+
+
+def marked(connection: Connection, name: str, value: str) -> None:
+    """Keep where a source was last read, in place of where it was before."""
+    connection.execute(delete(MARKS).where(MARKS.c.name == name))
+    connection.execute(insert(MARKS).values(name=name, value=value))
 
 
 def conversation_columns() -> list[ColumnElement[str | None]]:
@@ -748,8 +1015,10 @@ def within(under: list[Path]) -> list[ColumnElement[bool]]:
 def narrowed(searching: Searching) -> list[ColumnElement[bool]]:
     """Return what narrows a search to the steps it looks in: whose words, where the conversation ran, and when."""
     match searching.by:
-        case "operator" | "agent" | "lup":
+        case "operator" | "lup":
             whose = [STEPS.c.kind == "said", STEPS.c.by == searching.by]
+        case "agent":
+            whose = [STEPS.c.kind == "said", STEPS.c.by == "agent", STEPS.c.ending == 1]
         case "tools":
             whose = [STEPS.c.kind.in_(["called", "returned"])]
         case "any":
@@ -758,6 +1027,19 @@ def narrowed(searching: Searching) -> list[ColumnElement[bool]]:
     since = [STEPS.c.at >= searching.since.isoformat()] if searching.since else []
     until = [STEPS.c.at < searching.until.isoformat()] if searching.until else []
     return [*whose, *under, *since, *until]
+
+
+def statted(path: Path) -> os.stat_result | None:
+    """Return what the machine says of the file at `path`; none where it isn't there."""
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def moment(at: datetime | None) -> str | None:
+    """Return a moment as the index keeps it, in UTC, so moments from any source sort as text."""
+    return None if at is None else at.astimezone(UTC).isoformat()
 
 
 def named(runtime: str, record: Record) -> str:
@@ -789,6 +1071,6 @@ def timed(times: list[datetime], *, first: bool) -> dict[str, str]:
     """Return when a record's steps began, where these are its first, and when its latest is."""
     if not times:
         return {}
-    return {"last": max(times).isoformat()} | (
-        {"first": min(times).isoformat()} if first else {}
+    return {"last": moment(max(times)) or ""} | (
+        {"first": moment(min(times)) or ""} if first else {}
     )
