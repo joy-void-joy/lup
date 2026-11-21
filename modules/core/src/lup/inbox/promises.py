@@ -25,7 +25,7 @@ from lup import (
     Recorded,
     Viewing,
 )
-from lup.inbox.records import Item, Laid, Question
+from lup.inbox.records import Decision, Item, Laid, Question, Ruling
 from lup.inbox.said import (
     Answering,
     AskSaid,
@@ -47,8 +47,10 @@ from lup.inbox.said import (
     Posted,
     Posting,
     Reached,
+    SaidSince,
     SendSaid,
     Settling,
+    Since,
     Told,
     Untelling,
     Untold,
@@ -284,6 +286,59 @@ class InboxPromises(Part):
         assert any(
             each.kind == "inbox:answer" for each in (await told(started, agent)).items
         )
+
+    @lup.promise
+    async def what_was_said_reads_once_with_what_it_answered(self, by: Testing) -> None:
+        """Every item said reads once from a read of what's been said since, each with its words whole and what it's on: a question with each decision and its lean, an answer with the question and the decisions it rules on, a comment with the item and the lines it quotes."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        reader = by.any(Machine) if by.any(bool) else HERE
+        await said(
+            started,
+            "ask",
+            AskSaid(
+                question="which way?",
+                decisions=[Decision(decision="go left", lean="yes, it's shorter")],
+            ),
+            agent,
+        )
+        [question] = (await inboxed(started)).waiting
+        await started.run(
+            "core",
+            "answer",
+            Answering(question=question, rulings=[Ruling(number=1, verdict="leaning")]),
+            Operator(),
+        )
+        await said(started, "note", NoteSaid(remark="a doubt\n\nand why"), agent)
+        note = max((await inboxed(started)).new)
+        await started.run(
+            "core",
+            "comment",
+            Commented[OnItem](
+                on=OnItem(item=note), words="answered", lines=["and why"]
+            ),
+            Operator(),
+        )
+        first = await started.serve("said", Since(), reader)
+        assert isinstance(first, Accepted)
+        assert isinstance(first.output, SaidSince)
+        items = first.output.items
+        asked = next(each for each in items if each.number == question)
+        assert "go left" in asked.text
+        assert "yes, it's shorter" in asked.text
+        ruled = next(each for each in items if each.kind == "inbox:answer")
+        assert ruled.on == question
+        assert ruled.quoted is not None
+        assert "go left" in ruled.quoted
+        commented = next(each for each in items if each.text == "answered")
+        assert commented.on == note
+        assert commented.quoted == "and why"
+        assert commented.agent is None
+        assert len(dict.fromkeys(each.key for each in items)) == len(items)
+        again = await started.serve("said", Since(after=first.output.last), reader)
+        assert isinstance(again, Accepted)
+        assert isinstance(again.output, SaidSince)
+        assert again.output.items == []
 
     @lup.promise
     async def a_withdrawn_question_waits_on_nobody(self, by: Testing) -> None:
