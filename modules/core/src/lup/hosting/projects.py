@@ -24,7 +24,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 import lup
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
-from lup.doors.parties import Machine, Operator
+from lup.doors.parties import Agent, Machine, Operator
 from lup.doors.parts import Data, Part, Program, Runtime
 from lup.errors import LupError
 from lup.hosting.approvals import Approvals, Asking
@@ -42,7 +42,8 @@ from lup.hosting.containers import (
 from lup.hosting.secrets import Holding, Secrets
 from lup.hosting.trees import Commit, Exporting, Trees
 from lup.running.plan import Name, PartPlan, Plan
-from lup.running.wire import Planning, Start, read
+from lup.running.wire import Planning, Rendering, Start, read
+from lup.told.guidance import Guidance
 from lup.types import Model
 
 PLANS = TypeAdapter[Plan](Plan)
@@ -78,6 +79,8 @@ class Opened(Model):
     repository: str
     commit: Commit
     plan: Plan
+    root: Path
+    """The commit's files, written out, which its containers mount."""
     containers: list[str] = []
     waiting: list[str] = []
     """Parts holding a secret nothing's kept yet, by `module.Part`, not
@@ -85,6 +88,26 @@ class Opened(Model):
 
 
 OPENINGS = TypeAdapter(dict[str, Opening])
+
+
+class Locating(Model):
+    """A project, by its repository, as lup names it."""
+
+    repository: str
+
+
+class Located(Model):
+    """Where a project running is, and what it runs: where git keeps it, the commit approved, its files written out, and its plan."""
+
+    opening: Opening
+    opened: Opened
+
+
+class Telling(Model):
+    """A session of a project, whose guidance at its start is asked for: the project, and the session's own agent."""
+
+    repository: str
+    agent: Agent
 
 
 class Statusing(Model):
@@ -216,6 +239,64 @@ class Projects(Part, machine=True, shared=True):
                 "UV_PYTHON_INSTALL_DIR": str(source.interpreters),
             },
         )
+
+    @lup.service
+    async def located(self, locating: Locating, by: Machine) -> Located:
+        """Say where a project running is and what it runs, for a session of it to start.
+
+        Raise `RefusedError` where it isn't running.
+        """
+        del by
+        opened = self.projects.get(locating.repository)
+        opening = self.kept().get(locating.repository)
+        if opened is None or opening is None:
+            message = (
+                f"{locating.repository} isn't running: open it first, which runs "
+                "the commit you approved last (`lup hosting open`)"
+            )
+            raise RefusedError(message)
+        return Located(opening=opening, opened=opened)
+
+    @lup.service
+    async def guided(self, telling: Telling, by: Machine) -> Guidance:
+        """Render what a session of a project running is told at its start, its declaration at the commit it runs loaded in a container, run to its end, which prints it.
+
+        Raise `RefusedError` where it isn't running, or its guidance doesn't
+        render.
+        """
+        located = await self.located(Locating(repository=telling.repository), by)
+        found = await self.uv.ran("python", "dir")
+        if found.status != 0:
+            message = f"uv couldn't say where it keeps Python: {found.said()}"
+            raise RefusedError(message)
+        source = Source(
+            opening=located.opening,
+            commit=located.opened.commit,
+            root=located.opened.root,
+            interpreters=Path(found.text().strip()),
+        )
+        asked = Rendering(
+            root=source.root,
+            declaration=located.opening.declaration,
+            agent=telling.agent,
+        )
+        name = f"lup-told-{telling.repository}"
+        finished = await Containers.ran(
+            Once(
+                spec=self.spec(source, name, name, None),
+                given=asked.model_dump_json(),
+            )
+        )
+        if finished.status != 0:
+            message = (
+                f"{telling.repository}'s guidance didn't render: {finished.said()}"
+            )
+            raise RefusedError(message)
+        try:
+            return Guidance.model_validate_json(finished.output)
+        except ValidationError as wrong:
+            message = f"{telling.repository}'s guidance isn't one lup reads: {wrong}"
+            raise RefusedError(message) from wrong
 
     @lup.command
     async def register(self, opening: Opening, by: Operator) -> str:
@@ -466,6 +547,7 @@ class Projects(Part, machine=True, shared=True):
             repository=opening.repository,
             commit=approved.commit,
             plan=plan,
+            root=source.root,
             containers=[each.container for each in placements],
             waiting=waiting,
         )

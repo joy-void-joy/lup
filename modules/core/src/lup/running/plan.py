@@ -15,6 +15,7 @@ from pydantic import StringConstraints
 
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
+from lup.rooms.packages import Package
 from lup.types import JsonObject, Model
 
 CORE = "core"
@@ -98,6 +99,9 @@ class PartPlan(Model):
     an approval calls out where it changes; none where it's outside the root,
     as a part lup ships is."""
     doorways: list[Doorway] = []
+    hears: list[str] = []
+    """The events its methods run at, each by its class's name, which the
+    machine carries a session's to it."""
 
     def apart(self) -> bool:
         """Say whether it runs apart: in a container of its own, from approved code, or on the operator's machine."""
@@ -119,14 +123,21 @@ class Plan(Model):
     parts: list[PartPlan] = []
     tools: list[ToolSpec] = []
     """What a session is told of each tool the project's modules serve."""
+    packages: list[Package] = []
+    """What its modules add to the standard machine in its sessions' rooms
+    (`lup.rooms`)."""
     files: list[str] = []
     """The files of the project loading the declaration imported, relative to
     its root: what an approval may point at, never what it approves, which is
     the commit whole."""
 
     def together(self) -> list[PartPlan]:
-        """Return the parts holding nothing, which run in the project's own container."""
-        return [each for each in self.parts if not each.apart()]
+        """Return the parts holding nothing, which run in the project's own container, but those run in each session's own room."""
+        return [each for each in self.parts if not each.apart() and not each.holds.room]
+
+    def rooms(self) -> list[PartPlan]:
+        """Return the parts run in each session's own room."""
+        return [each for each in self.parts if each.holds.room]
 
     def apart(self) -> list[PartPlan]:
         """Return the parts holding something, each run apart from approved code."""

@@ -1,7 +1,7 @@
 """The program a container runs: `python -m lup.environment.running`, what to do read as one JSON message from `LUP_ASKED`, or else its input.
 
 Asked to plan, it prints the declaration's plan as JSON and ends; asked to
-start, it starts the parts named and answers calls on its socket until it's
+render a session's guidance, it prints it as JSON and ends; asked to start, it starts the parts named and answers calls on its socket until it's
 stopped; asked to host, it starts the machine's own parts, on the operator's
 machine, and carries every call until it's stopped.
 """
@@ -16,7 +16,8 @@ from lup.environment.running.machine import hosted
 from lup.environment.running.planning import planned
 from lup.environment.running.programs import Local
 from lup.environment.running.settings import Running
-from lup.running.wire import Asked, Host, Planning, Start, read
+from lup.environment.told import rendered_at
+from lup.running.wire import Asked, Host, Planning, Rendering, Start, read
 
 
 def main() -> None:
@@ -27,6 +28,9 @@ def main() -> None:
     match asked:
         case Planning(root=root, declaration=declaration):
             sys.stdout.write(planned(root, declaration).model_dump_json() + "\n")
+        case Rendering(root=root, declaration=declaration, agent=agent):
+            guidance = asyncio.run(rendered_at(root, declaration, agent))
+            sys.stdout.write(guidance.model_dump_json() + "\n")
         case Start():
             asyncio.run(served(asked))
         case Host():

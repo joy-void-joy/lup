@@ -1,0 +1,21 @@
+{
+    // `pyright` links to pyright's source at the release the engine is built from,
+    // kept outside the repository, beside the build (`lup/code_rules/engine.py`).
+    // The build hands this file to the bundler explicitly.
+    "extends": "./pyright/tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "rootDir": ".",
+        "paths": {
+            "pyright/*": ["./pyright/packages/pyright-internal/src/*"],
+            // TypeScript's own parser, which reads a TypeScript file's `// lup:`
+            // comments, from pyright's source, which builds with it.
+            "typescript": ["./pyright/node_modules/typescript"]
+        },
+        "typeRoots": [
+            "./pyright/packages/pyright-internal/node_modules/@types",
+            "./pyright/packages/pyright-internal/typings"
+        ]
+    },
+    "include": ["src/**/*.ts"]
+}

@@ -6,23 +6,22 @@ session is told of, and the files loading the declaration imported, relative
 to the project's root (`lup/running/README.md`, *The plan*).
 """
 
-import functools
 import inspect
-import json
 import sys
+from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, TypeAdapter
-
 from lup.doors.command import CommandDoor
 from lup.doors.door import is_model
+from lup.doors.on import OnDoor
 from lup.doors.service import ServiceDoor
 from lup.doors.tool import ToolDoor
 from lup.environment.declaration import Resolved, load, resolve
+from lup.rooms.packages import Packages
 from lup.running.plan import Doorway, ModulePlan, PartPlan, Plan
 from lup.shell.view import ViewDoor
-from lup.types import JsonObject
+from lup.types import schema_of
 
 if TYPE_CHECKING:
     from lup.environment.doors import Entry, Serves
@@ -41,14 +40,28 @@ def planned(root: Path, declaration: Path) -> Plan:
 def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> Plan:
     """Return the plan of a declaration resolved, which loading imported `loaded`, each part's source read relative to `root`, where one is given."""
     entries = resolved.doors.entries()
+
+    def named(entry: Entry) -> str:
+        return entry.serves.named()
+
+    served = {
+        name: list(each)
+        for name, each in groupby(sorted(entries, key=named), key=named)
+    }
     return Plan(
         modules=[
             ModulePlan(name=each.name, description=each.sentence())
             for each in resolved.modules
         ],
-        parts=[part_plan(each, entries, root) for each in resolved.doors.served],
+        parts=[
+            part_plan(each, served.get(each.named(), []), root)
+            for each in resolved.doors.served
+        ],
         tools=resolved.doors.tools(),
         files=loaded,
+        packages=[
+            package for each in resolved.modules for package in each.held(Packages)
+        ],
     )
 
 
@@ -66,32 +79,21 @@ def source_of(part: type, root: Path | None) -> str | None:
 
 
 def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPlan:
-    """Return one part's plan: what it holds, the file it's defined in, and each method it serves behind a door a party calls."""
+    """Return one part's plan, its methods being `entries`: what it holds, the file it's defined in, each method it serves behind a door a party calls, and each event its methods run at."""
     return PartPlan(
         module=serves.module.name,
         part=serves.part.__name__,
         holds=serves.part.holds(),
         source=source_of(serves.part, root),
-        doorways=[
-            way
-            for entry in entries
-            if entry.serves == serves and (way := doorway(entry)) is not None
-        ],
+        doorways=[way for entry in entries if (way := doorway(entry)) is not None],
+        hears=list(
+            dict.fromkeys(
+                entry.method.door.event.__name__
+                for entry in entries
+                if isinstance(entry.method.door, OnDoor)
+            )
+        ),
     )
-
-
-SCHEMAS = TypeAdapter[JsonObject](JsonObject)
-
-
-@functools.cache
-def schema_text(model: type[BaseModel]) -> str:
-    """Return the JSON Schema of `model`, as text, made once for each model: pydantic makes it anew at each call, which a plan made for every promise's run did thousands of times."""
-    return json.dumps(model.model_json_schema())
-
-
-def schema_of(model: type[BaseModel]) -> JsonObject:
-    """Return the JSON Schema of `model`, a copy of its own for each caller."""
-    return SCHEMAS.validate_json(schema_text(model))
 
 
 def doorway(entry: Entry) -> Doorway | None:
