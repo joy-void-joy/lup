@@ -2,10 +2,10 @@
 
 Each is checked through the harness over an example module, a counter, whose
 own promises the harness checks as the gate does (`Started.checked`). Its count
-lives in an object its module holds, made afresh each time lup starts: a
-stand-in for the store, which lup doesn't have yet. Its bump reads the count,
-waits, then writes it, so two bumps that overlap lose one: a race a law catches
-only where calls interleave (`README.md` here, *Laws*).
+is its part's `State`, made afresh each time lup starts; a party reads it
+through a tool. Its bump reads the count, waits, then writes it, so two bumps
+that overlap lose one: a race an invariant catches only where calls interleave
+(`README.md` here, *Invariants*).
 
 The guard's promises run pytest itself on a scratch repository, as the gate
 does, since what they promise is how a check fares against the clock and the
@@ -26,18 +26,18 @@ from lup import (
     Model,
     Module,
     Modules,
-    MutableModel,
     Operator,
     Part,
     Parts,
     Project,
     ProjectError,
+    State,
 )
 from lup.programs import run
 from lup.testing import (
     Accepted,
     Broken,
-    BrokenLawError,
+    BrokenInvariantError,
     Kept,
     Step,
     Testing,
@@ -46,8 +46,8 @@ from lup.testing import (
 )
 
 
-class Tally(MutableModel):
-    """Where the counter keeps its count while lup runs."""
+class Tally(Model):
+    """How far the counter has counted, as its part keeps it while lup runs."""
 
     count: int = 0
 
@@ -83,7 +83,8 @@ class Small(Model):
 class CounterPart(Part):
     """The counter's tools: one moves the count, one reads it."""
 
-    module: Counter
+    tally: State[Tally] = Tally()
+    """How far it has counted."""
 
     @lup.tool
     async def bump(self, bumping: Bumping) -> Count:
@@ -92,23 +93,23 @@ class CounterPart(Part):
         It reads the count, waits, then writes it, so a bump overlapping
         another loses it.
         """
-        count = self.module.tally.count
+        count = self.tally.count
         await asyncio.sleep(0)
-        self.module.tally.count = count + bumping.by
-        return Count(count=self.module.tally.count)
+        self.tally = Tally(count=count + bumping.by)
+        return Count(count=self.tally.count)
 
     @lup.tool(reads=True)
     async def counted(self, _asking: Asking) -> Count:
         """Read how far the counter has counted."""
-        return Count(count=self.module.tally.count)
+        return Count(count=self.tally.count)
 
 
 class CounterPromises(Part):
-    """The counter's promises: laws it keeps and laws it breaks, alone or only where bumps overlap, and a scenario of each."""
+    """The counter's promises: invariants it keeps and invariants it breaks, alone or only where bumps overlap, over its part's state or what its tool reads, and a scenario of each."""
 
     @lup.promise
     def reading_changes_nothing(self, step: Step[Count]) -> bool:
-        """Reading the count never moves it."""
+        """Reading the count never moves it, as its tool reads it."""
         match step.call:
             case ToolCall(tool="counted"):
                 return step.after.count == step.before.count
@@ -116,7 +117,7 @@ class CounterPromises(Part):
                 return True
 
     @lup.promise
-    def moves_by_what_its_bumped(self, step: Step[Count]) -> bool:
+    def moves_by_what_its_bumped(self, step: Step[Tally]) -> bool:
         """The count moves by what a bump asks, on the slice that ends it, and not at all otherwise, which two bumps overlapping break."""
         moved = step.after.count - step.before.count
         match step.call:
@@ -128,7 +129,7 @@ class CounterPromises(Part):
                 return moved == 0
 
     @lup.promise
-    def never_goes_back(self, step: Step[Count]) -> bool:
+    def never_goes_back(self, step: Step[Tally]) -> bool:
         """The count never goes down, which a bump by a negative number breaks."""
         return step.after.count >= step.before.count
 
@@ -164,7 +165,6 @@ class Counter(Module):
     """Counting: an example module the testing submodule's promises check the harness with."""
 
     name = "counter"
-    tally: Tally = Field(default_factory=Tally)
     parts: Parts = Parts.of(CounterPart, CounterPromises)
 
 
@@ -292,39 +292,41 @@ class TestingPromises(Part):
     """What a module's author can count on of how their promises are checked."""
 
     @lup.promise
-    async def a_law_is_checked_after_every_call_a_scenario_makes(
+    async def an_invariant_is_checked_after_every_call_a_scenario_makes(
         self, by: Testing
     ) -> None:
-        """Every law of every module a scenario starts is checked over each call it makes, and one that doesn't hold fails the scenario there."""
+        """Every invariant of every module a scenario starts is checked over each call it makes, and one that doesn't hold fails the scenario there."""
         started = await by.started(counter())
         agent = by.any(Agent)
         await started.call("bump", Bumping(by=1), agent)
-        with raises(BrokenLawError) as broken:
+        with raises(BrokenInvariantError) as broken:
             await started.call("bump", Bumping(by=-1), agent)
-        assert broken.raised().step.before.model_dump() == {"count": 1}
+        before = broken.raised().step.before
+        assert isinstance(before, Tally)
+        assert before.count == 1
 
     @lup.promise
-    async def a_broken_law_is_told_with_the_shortest_run_that_breaks_it(
+    async def a_broken_invariant_is_told_with_the_shortest_run_that_breaks_it(
         self, by: Testing
     ) -> None:
-        """A law that a run of calls through its project's doors breaks is reported broken, with the shortest run hypothesis finds, its last call the one that broke it."""
+        """An invariant that a run of calls through its project's doors breaks is reported broken, with the shortest run hypothesis finds, its last call the one that broke it."""
         started = await by.started(counter())
         [broken] = await started.checked("counter", "never_goes_back")
         assert isinstance(broken, Broken)
-        assert isinstance(broken.error, BrokenLawError)
+        assert isinstance(broken.error, BrokenInvariantError)
         [call] = broken.calls
         assert isinstance(call, ToolCall)
         assert Bumping.model_validate(call.arguments).by == -1
 
     @lup.promise
-    async def a_law_broken_only_where_calls_overlap_is_told_with_how_they_interleaved(
+    async def an_invariant_broken_only_where_calls_overlap_is_told_with_how_they_interleaved(
         self, by: Testing
     ) -> None:
-        """A law that only calls overlapping break, each slice of a call a step of its own, is reported broken with the calls and the order their slices ran in."""
+        """An invariant that only calls overlapping break, each slice of a call a step of its own, is reported broken with the calls and the order their slices ran in."""
         started = await by.started(counter())
         [broken] = await started.checked("counter", "moves_by_what_its_bumped")
         assert isinstance(broken, Broken)
-        assert isinstance(broken.error, BrokenLawError)
+        assert isinstance(broken.error, BrokenInvariantError)
         first, second = broken.calls
         assert all(isinstance(each, ToolCall) for each in (first, second))
         ends = max(at for at, each in enumerate(broken.slices) if each == first)
@@ -351,11 +353,11 @@ class TestingPromises(Part):
 
     @lup.promise
     async def a_promise_that_holds_is_kept(self, by: Testing) -> None:
-        """A law that holds over every run, and a scenario that holds for every value it draws, are kept."""
+        """An invariant that holds over every run, and a scenario that holds for every value it draws, are kept."""
         started = await by.started(counter())
-        [law] = await started.checked("counter", "reading_changes_nothing")
+        [invariant] = await started.checked("counter", "reading_changes_nothing")
         [scenario] = await started.checked("counter", "counts_what_its_told")
-        assert isinstance(law, Kept)
+        assert isinstance(invariant, Kept)
         assert isinstance(scenario, Kept)
 
     @lup.promise
@@ -389,22 +391,30 @@ class TestingPromises(Part):
         assert drawn == b"\x80"
 
     @lup.promise
-    async def a_law_reads_its_state_through_a_door_that_only_reads(
+    async def an_invariant_with_nowhere_to_read_its_state_fails_to_start(
         self, by: Testing
     ) -> None:
-        """A law reads its module's state through a door of the module that only reads: a module holding a law with no such door fails to start, rather than its law going unchecked."""
+        """An invariant reads its module's state from a part's field typed `State[…]`, or through a door of the module that only reads: a module holding an invariant with neither fails to start, naming it, rather than its invariant going unchecked."""
 
         class Unread(Counter):
-            """A counter whose count can't be read."""
+            """A counter whose count is neither held nor read."""
 
             parts: Parts = Parts.of(CounterPromises)
 
-        with raises(ProjectError):
+        with raises(ProjectError) as failed:
             await by.started(Project(modules=Modules.default().add(Unread())))
+        invariants = [
+            "CounterPromises.reading_changes_nothing",
+            "CounterPromises.moves_by_what_its_bumped",
+            "CounterPromises.never_goes_back",
+        ]
+        assert any(each in failed.raised().about for each in invariants)
 
     @lup.promise
-    async def a_law_reads_a_state_only_the_operator_may(self, by: Testing) -> None:
-        """A law reads its module's state through a door only the operator may call, as through any door that only reads, so a module's whole state needn't be every agent's to read."""
+    async def an_invariant_reads_a_state_only_the_operator_may(
+        self, by: Testing
+    ) -> None:
+        """An invariant reads its module's state through a door only the operator may call, as through any door that only reads, so a module's whole state needn't be every agent's to read."""
 
         class OperatorsCount(CounterPart):
             """The counter's tools, its count the operator's alone to read."""
@@ -412,7 +422,7 @@ class TestingPromises(Part):
             @lup.tool(reads=True)
             async def counted(self, _asking: Asking, by: Operator) -> Count:
                 """Read how far the counter has counted."""
-                return Count(count=self.module.tally.count)
+                return Count(count=self.tally.count)
 
         class Guarded(Counter):
             """A counter whose count only the operator reads."""

@@ -1,4 +1,4 @@
-"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, a law over runs of calls through every door of its module, and the smallest run that breaks either kept to say so.
+"""Checking a module's promises, as the gate does: a scenario run on hypothesis's draws, an invariant over runs of calls through every door of its module, and the smallest run that breaks either kept to say so.
 
 The gate's check is repeatable: each promise draws from a seed its own source
 fixes, so a tree gets the same values, and the same verdict, every time. An
@@ -61,7 +61,7 @@ class Exploring(Model):
 
 
 class Check(Model, arbitrary_types_allowed=True):
-    """One promise to check, with the project whose doors a law's runs call."""
+    """One promise to check, with the project whose doors an invariant's runs call."""
 
     entry: Entry
     project: Project
@@ -129,17 +129,17 @@ class Check(Model, arbitrary_types_allowed=True):
         )
 
     async def ran(self, harness: Harness) -> None:
-        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the law checked after each."""
+        """Run the promise once, then stop what it started: a scenario's story, or a run of calls through every door of its module, the invariant checked after each."""
         try:
             await self.told(harness)
         finally:
             await harness.run.stopped()
 
     async def told(self, harness: Harness) -> None:
-        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its module, the law checked after each."""
+        """Run the promise once: a scenario's story on its class made for it, or a run of calls through every door of its module, the invariant checked after each."""
         method = self.entry.method
         door = method.door
-        if not (isinstance(door, PromiseDoor) and door.law(method.taken)):
+        if not (isinstance(door, PromiseDoor) and door.invariant(method.taken)):
             serves = self.entry.serves
             made = serves.part.made(serves.module, Given())
             told = method.function(made, by=harness)
@@ -151,11 +151,12 @@ class Check(Model, arbitrary_types_allowed=True):
         reached = await harness.reached(self.project)
         mine = reached.model_copy(
             update={
-                "laws": [
-                    law
-                    for law in reached.laws
-                    if law.method is method
-                    and law.entry.serves.module.name == self.entry.serves.module.name
+                "invariants": [
+                    invariant
+                    for invariant in reached.invariants
+                    if invariant.method is method
+                    and invariant.entry.serves.module.name
+                    == self.entry.serves.module.name
                 ]
             }
         )
@@ -186,7 +187,7 @@ def chooser(data: st.DataObject) -> Callable[[int], int]:
 def watching(
     guard: Guard | None,
 ) -> Callable[[asyncio.Handle], Callable[[], None] | None]:
-    """Return how a run's loop watches each slice: told to `guard`, where there's one, as the check going on, and each law checked over it."""
+    """Return how a run's loop watches each slice: told to `guard`, where there's one, as the check going on, and each invariant checked over it."""
 
     def watch(handle: asyncio.Handle) -> Callable[[], None] | None:
         if guard is not None:
@@ -210,10 +211,10 @@ def checked(
 def calls(doors: Doors, module: str) -> SearchStrategy[Call]:
     """Return every call a party could make through the doors `doors` serve of the module named `module`: each tool, command and service, given a value of what it takes, by a party of any its doors name.
 
-    A law's runs call its own module's doors alone: only they change the state
+    An invariant's runs call its own module's doors alone: only they change the state
     it reads, its services among them, which code in another module calls; the
     rest of a project's doors, the core's growing with each submodule, would
-    only dilute the search. A scenario checks every law of every module it
+    only dilute the search. A scenario checks every invariant of every module it
     starts, over every call it makes.
     """
     entries = [

@@ -31,11 +31,11 @@ nothing, as its door allows."""
 
 type Returned = Answer | Template | bool
 """What a method behind any door returns: what a party's call answers, a
-section of guidance's template (`lup.told`), or a law's verdict
+section of guidance's template (`lup.told`), or an invariant's verdict
 (`lup.testing`), neither of which a party calls."""
 
 type Function = Callable[..., Awaitable[Returned] | bool]
-"""A method as a door takes it: async, or, where its door allows, a law's
+"""A method as a door takes it: async, or, where its door allows, an invariant's
 predicate, which answers its verdict at once."""
 
 type Annotation = type | GenericAlias | UnionType | None
@@ -152,7 +152,7 @@ class Taken(Model, arbitrary_types_allowed=True):
     """Its docstring, which describes it: what an agent reads of a tool."""
     model: inspect.Parameter | None
     """The parameter taking its model: a tool's input, a command's arguments or one mark of a send, a
-    command's arguments or a law's value; none where it takes `by` alone, as a
+    command's arguments or an invariant's value; none where it takes `by` alone, as a
     scenario does."""
     by: inspect.Parameter | None
     """The parameter taking who calls it, typed as who may; none where it's left
@@ -395,7 +395,7 @@ class Method(property):
         """Run the method of `instance` on `value`, handing it `by` where it takes who calls it.
 
         Raise `DoorError` where it answers a verdict or a template, as only a
-        law or a section of guidance does: no party calls either.
+        invariant or a section of guidance does: no party calls either.
         """
         if self.taken.by is None:
             called = self.function(instance, value)
@@ -405,7 +405,7 @@ class Method(property):
         if isinstance(answered, bool | Template):
             message = (
                 f"`{self.taken.qualified}` answers a verdict or a template, as a "
-                "law or a section of guidance does, which no party calls"
+                "invariant or a section of guidance does, which no party calls"
             )
             raise DoorError(message)
         return answered

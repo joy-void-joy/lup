@@ -2,7 +2,7 @@
 
 A promise imports this and `lup` alone, which an import contract holds: the
 harness (`Testing`, handed to a scenario as `by`), lup as it starts it
-(`Started`), the step a law reads (`Step`), what a call through a door answers,
+(`Started`), the step an invariant reads (`Step`), what a call through a door answers,
 the guidance a started lup renders (`Guidance`), what checking a promise found
 (`Kept`, `Broken`), and `raises`, which says a block fails. `lup` re-exports the
 promise door, `lup.promise`. Checking promises is the environment's
@@ -33,7 +33,7 @@ from lup.testing.harness import (
     Acting,
     Answering,
     Broken,
-    BrokenLawError,
+    BrokenInvariantError,
     Call,
     Kept,
     Page,
@@ -59,7 +59,7 @@ __all__ = [
     "Answered",
     "Answering",
     "Broken",
-    "BrokenLawError",
+    "BrokenInvariantError",
     "Call",
     "Comment",
     "Delivered",

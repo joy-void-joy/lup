@@ -34,7 +34,7 @@ from lup.doors.parts import Part, Parts
 from lup.environment.declaration import load, resolve
 from lup.environment.testing.checking import Check, Exploring
 from lup.environment.testing.guarding import Guard, HaltedError, Limits, seconds
-from lup.environment.testing.harness import promises, readers
+from lup.environment.testing.harness import invariants, promises
 from lup.errors import LupError
 from lup.testing.harness import Broken, Kept
 from lup.testing.promise import PromiseDoor
@@ -87,7 +87,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """Name the mark a check that names no promise is kept with, and start the guard."""
     config.addinivalue_line(
         "markers",
-        "unpromised(why): a check that can't be said as a law or a scenario, kept, "
+        "unpromised(why): a check that can't be said as an invariant or a scenario, kept, "
         "saying why; send a friction saying what couldn't be said",
     )
     given = {
@@ -201,7 +201,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
             pytest.fail(message, pytrace=False)
         return None
     message = (
-        f"`{pyfuncitem.name}` names no promise: write it as one, a law or a "
+        f"`{pyfuncitem.name}` names no promise: write it as one, an invariant or a "
         "scenario behind `@lup.promise` (`lup/testing/README.md`). Where it can't "
         "be said as one, keep it with `@pytest.mark.unpromised(why=…)` and send a "
         "friction saying what couldn't be said"
@@ -260,10 +260,10 @@ class Declared(pytest.File):
 
     @override
     def collect(self) -> Iterator[pytest.Item | pytest.Collector]:
-        """Collect each of the repository's own modules' promises, a law with no door to read its state through failing here."""
+        """Collect each of the repository's own modules' promises, an invariant with nowhere to read its state failing here."""
         project = load(self.path)
         resolved = resolve(project)
-        readers(resolved.doors)
+        invariants(resolved.doors)
         root = self.config.rootpath
         for module in resolved.modules:
             mine = own(type(module), root)

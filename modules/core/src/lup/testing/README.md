@@ -4,15 +4,28 @@ What a module promises, and how the gate checks it. A promise is a method behind
 
 ```python
 import lup
-from lup import Part
+from lup import Part, State
 from lup.testing import Step, Testing
+
+
+class CounterPart(Part):
+    """The counter's tools."""
+
+    tally: State[Tally] = Tally()
+    """How far it has counted: what its invariants read."""
+
+    @lup.tool
+    async def bump(self, bumping: Bumping) -> Count:
+        """Move the count by as much as asked."""
+        self.tally = Tally(count=self.tally.count + bumping.by)
+        return Count(count=self.tally.count)
 
 
 class CounterPromises(Part):
     """The counter's promises."""
 
     @lup.promise
-    def never_goes_back(self, step: Step[Count]) -> bool:
+    def never_goes_back(self, step: Step[Tally]) -> bool:
         """The count never goes down."""
         return step.after.count >= step.before.count
 
@@ -30,21 +43,21 @@ class CounterPromises(Part):
 
 Its library side (`lup.testing`) is what a promise imports: the harness, and what a call answers. Checking promises is the environment's (`lup.environment.testing`), with the pytest plugin the gate runs them through. A promise imports `lup` and `lup.testing` alone, never the core's insides nor the environment, which an import contract holds, so a change inside a module leaves its promises alone.
 
-## A law and a scenario
+## An invariant and a scenario
 
-A promise takes one of two shapes, told apart by what it takes.
-- **A law** is about every moment: a predicate over one step, `def name(self, step: Step[State]) -> bool`, the state before, the call made through a door, what it answered, and the state after. It isn't async and takes the step alone, so it can't drive lup, and it answers its verdict, so it can't check nothing. "Never X unless Y" is a law.
+A promise takes one of two shapes, told apart by what it takes. Start from the invariants: what always holds of a module, or never happens, is what a design rests on, and one invariant is checked everywhere.
+- **An invariant** is about every moment: a predicate over one step, `def name(self, step: Step[State]) -> bool`, the state before, the call made through a door, what it answered, and the state after. It isn't async and takes the step alone, so it can't drive lup, and it answers its verdict, so it can't check nothing. "Never X unless Y", "only the operator does X", "X never goes back" are invariants.
 - **A scenario** is about a run: `async def name(self, by: Testing) -> None`, a story through the harness that asserts where it ends. What only a run can say is a scenario: that something can happen at all, where several steps end up, and a setup a generator wouldn't build. What it explores it draws from the harness, `by.any(Kind)`: a value of any type hypothesis can build, a model's every field explored and its constraints kept, and a run that breaks the promise is shrunk to the smallest values that do.
 
-A law is checked over every slice of every call of every run the harness makes: the runs it generates for the law, and every scenario's too, so a scenario is also a check of every law of the modules it starts.
+An invariant is checked over every slice of every call of every run the harness makes: the runs it generates for the invariant, and every scenario's too, so a scenario is also a check of every invariant of the modules it starts.
 
-## Laws
+## Invariants
 
-A law over `Step[State]` reads its module's state through a door of the module that only reads: a tool marked `reads=True` answering `State`, taking nothing it must be given, and answering at once. Where it says who may call it, the harness reads it as the first party its `by` names that's made with nothing given: `by: Operator` keeps a module's whole state off every agent's list of tools. The harness reads it before and after each step, so a law sees only what a party can see, and reading never changes what it reads. A module holding a law with no such door fails to start, naming the law.
+An invariant over `Step[State]` reads its module's state where a part of the module keeps it: a field typed `State[State]`, with its default, which the part reads and changes as it would any field (`lup.State`). The harness copies it before and after each step, so what a slice changes in place leaves the state before as it was. A state too big to copy at every slice, as a whole database, is read instead through a door of the module that only reads: a tool marked `reads=True` answering `State`, taking nothing it must be given, and answering at once. Where it says who may call it, the harness reads it as the first party its `by` names that's made with nothing given: `by: Operator` keeps a module's whole state off every agent's list of tools. A module holding an invariant with neither fails to start, naming the invariant.
 
-A step is a slice of a call: what one call runs from one `await` to the next. Each call runs as a task of its own, so where calls overlap, each slice is credited to its own call, and a law sees exactly what that call changed and when. `step.answered` is what the call answered, on the slice that ended it, and none before. A law a slice breaks is raised from that call when it ends (`BrokenLawError`), so a scenario sees it where it called.
+A step is a slice of a call: what one call runs from one `await` to the next. Each call runs as a task of its own, so where calls overlap, each slice is credited to its own call, and an invariant sees exactly what that call changed and when. `step.answered` is what the call answered, on the slice that ended it, and none before. An invariant a slice breaks is raised from that call when it ends (`BrokenInvariantError`), so a scenario sees it where it called.
 
-The gate checks a law over runs of calls through every door of its own module: each tool, command and service, given a value of what it takes, by a party of any its doors name, all started at once. Only they change the state the law reads, its services among them, which another module's code calls; the rest of a project's doors would dilute the search, and the core's grow with each submodule. A scenario checks every law of every module it starts, over every call it makes, whichever module's door it goes through. A run that breaks it is shrunk to the fewest calls, in the order closest to asyncio's own, and told with the order their slices ran in.
+The gate checks an invariant over runs of calls through every door of its own module: each tool, command and service, given a value of what it takes, by a party of any its doors name, all started at once. Only they change the state the invariant reads, its services among them, which another module's code calls; the rest of a project's doors would dilute the search, and the core's grow with each submodule. A scenario checks every invariant of every module it starts, over every call it makes, whichever module's door it goes through. A run that breaks it is shrunk to the fewest calls, in the order closest to asyncio's own, and told with the order their slices ran in.
 
 ## Time and order
 
@@ -52,7 +65,7 @@ Every run is made on an event loop the harness keeps (`lup.environment.testing.s
 
 ## The harness
 
-`Testing`, handed to a scenario as `by`, starts lup on a declaration, a `Project` or a repository's files (`Repository`), read with their layers as lup reads a repository's (`by.started(…)`, raising `ProjectError` where it doesn't), and draws values (`by.any(…)`). What it starts (`Started`) has the modules it resolved to, the tools a session is told of, the guidance a session is told (`guidance(by)`), and its doors, called as a party calls them: `call`, `run`, `serve` and `view`, each answering `Accepted` or `Refused`, every law checked over each call (`BrokenLawError` where one doesn't hold). `typed(words, by)` types on the command line as `by` does, its call made through the same doors, and answers what it did (`Typed`: what its help listed, the call it made, what it printed and how it ended). `checked(module, promise)` checks another module's promises as the gate does, for promises about checking itself, in a thread of its own, since asyncio runs one task at a time in a thread. `raises(Kind)` says a block fails, since a module's promises can't import a test runner.
+`Testing`, handed to a scenario as `by`, starts lup on a declaration, a `Project` or a repository's files (`Repository`), read with their layers as lup reads a repository's (`by.started(…)`, raising `ProjectError` where it doesn't), and draws values (`by.any(…)`). What it starts (`Started`) has the modules it resolved to, the tools a session is told of, the guidance a session is told (`guidance(by)`), and its doors, called as a party calls them: `call`, `run`, `serve` and `view`, each answering `Accepted` or `Refused`, every invariant checked over each call (`BrokenInvariantError` where one doesn't hold). `typed(words, by)` types on the command line as `by` does, its call made through the same doors, and answers what it did (`Typed`: what its help listed, the call it made, what it printed and how it ended). `checked(module, promise)` checks another module's promises as the gate does, for promises about checking itself, in a thread of its own, since asyncio runs one task at a time in a thread. `raises(Kind)` says a block fails, since a module's promises can't import a test runner.
 
 What the harness does is said on the library side and done on the environment's: loading a declaration imports neither hypothesis nor the environment, and another harness, driving real agents, could check the same promises.
 
@@ -75,4 +88,4 @@ A broken promise is told with what it promises, the smallest values it drew, eac
 
 ## What the gate runs
 
-Promises, and docstrings' examples, which show how something is used. A test function names no promise, and the gate fails it, saying to write it as one; one that can't be said as a law or a scenario is kept with `@pytest.mark.unpromised(why=…)`, and what couldn't be said is sent as a friction. A class of the repository's holding promises that no module lists in its `parts` fails too, since nothing would check them.
+Promises, and docstrings' examples, which show how something is used. A test function names no promise, and the gate fails it, saying to write it as one; one that can't be said as an invariant or a scenario is kept with `@pytest.mark.unpromised(why=…)`, and what couldn't be said is sent as a friction. A class of the repository's holding promises that no module lists in its `parts` fails too, since nothing would check them.
