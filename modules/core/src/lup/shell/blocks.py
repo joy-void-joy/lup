@@ -156,8 +156,9 @@ class Offer(Model):
         *,
         says: str | None = None,
         draws: str | None = None,
+        module: str | None = None,
     ) -> Offer:
-        """Return the offer of `command`, a command read through its class, given `given`: its verb and what it does are the command's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`).
+        """Return the offer of `command`, a command read through its class, given `given`: its verb and what it does are the command's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`); of the module named `module`, where it's another's than the view offering it.
 
         A command taking `Commented[G]`, as one offered under the `comment` verb
         does, is given a `G`, the comment written with it as it's sent. Raise
@@ -182,6 +183,7 @@ class Offer(Model):
             raise BlockError(message, about=[command.taken.qualified])
         return cls(
             command=command.taken.name,
+            module=module,
             given=given.model_dump(mode="json"),
             verb=verb,
             says=said if says is None else says,

@@ -8,7 +8,7 @@ An agent calls `land` with their branch and what its merge will say. It lands wh
 - **the branch holds the integration branch's tip on the remote:** the agent merged it in, in their worktree, where they resolve a conflict and see what it brought;
 - **the gate passed on its files:** a pass recorded for the tree its tip names, with the local layers (`lup gate check`, everything committed).
 
-So `land` runs neither a merge nor the gate: it reads the remote's tip and the pass, and is answered at once. The pass is a room's word on how its gate went, since a room writes the git directory: it steers, and guards nothing, the operator's review being what does. It returns as soon as the landing waits on the operator's review, and their answer reaches the agent as a message: a yes, or their comment, after which the agent lands it again. A branch landed again puts its new tip before them; what's on trial stays at the tip they said yes to until they say yes to the new one.
+So `land` runs neither a merge nor the gate: it reads the remote's tip and the pass, and is answered at once. The pass is a room's word on how its gate went, since a room writes the git directory: it steers, and guards nothing, the operator's review being what does. It returns as soon as the landing waits on the operator's review: an item in the agent's conversation, of landing's own kind (`WaitsOnReview`, posted through the inbox), opening on the branch's review and offering the operator's yes on the tip that landed, or declining it. It waits until they answer it, and what came of it is told to the agent at their next call: on trial, declined, or their comment, after which the agent lands it again. Landing again answers the item before, the tip that landed since waiting in its place; an accept is told the same way. A branch landed again puts its new tip before them; what's on trial stays at the tip they said yes to until they say yes to the new one.
 
 `want` asks the operator to accept a branch on trial, saying why, which shows on its line: a branch on trial isn't on the integration branch, so another agent's branch doesn't hold it until it's accepted.
 
@@ -39,10 +39,9 @@ Every git command runs through `Git` (`lup/hosting/git.py`), pinned to the repos
 
 ## What's left
 
-- The landing's item waiting on the operator in the agent's conversation, once the inbox takes a module's item (#8): until then, what waits is read in `lup landing trial`.
 - The `# lup: defer` comments a landing adds and removes, through #9's reader.
 - A gate's result shown on the agent's line in the dashboard, beside the review where it's shown now.
 
 ## Promises
 
-`promises.py`, git run for real in a temporary directory, since merging is what only git can say: a remote's bare repository and the project's clone of it, where the promise commits as an agent would and runs the gate as an agent does. A branch lands only holding the integration branch and gated; a yes runs the reviewed tip, approved, and a branch toggled out runs no more, nor a commit added after the yes; a branch that conflicts is left out of what runs; what waits and what's on trial show, each with its review, what the gate told among it; accepting pushes the reviewed tip onto the remote's integration branch, which nothing before it moved.
+`promises.py`, git run for real in a temporary directory, since merging is what only git can say: a remote's bare repository and the project's clone of it, where the promise commits as an agent would and runs the gate as an agent does. A branch lands only holding the integration branch and gated; a yes runs the reviewed tip, approved, and a branch toggled out runs no more, nor a commit added after the yes; a branch that conflicts is left out of what runs; what waits and what's on trial show, each with its review, what the gate told among it; accepting pushes the reviewed tip onto the remote's integration branch, which nothing before it moved; a landing waits on the operator in the agent's conversation until they answer it, which the agent is told, landing again answering the one before.
