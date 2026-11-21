@@ -11,6 +11,7 @@ from lup.doors.promises import DoorsPromises, PartsPromises
 from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
+from lup.programs.git.promises import GitPromises
 from lup.programs.promises import ProgramsPromises
 from lup.rooms.packages import Packages, standard
 from lup.running.plan import CORE
@@ -58,6 +59,7 @@ class Core(Module):
         Speaking,
         InboxPromises,
         ProgramsPromises,
+        GitPromises,
         GuidancePromises,
         CommandLinePromises,
         Setup,

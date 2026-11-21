@@ -223,11 +223,12 @@ forbidden_modules = ["lup.environment"]
 # a module's promises import `lup`, `lup.testing` and modules' packages, never a
 # module inside one, nor the core's own modules beside them. Written as a
 # pattern, so a module added later is covered without naming it. Only what they
-# import themselves counts, since `lup` imports everything.
+# import themselves counts, since `lup` imports everything. `**` reaches a
+# submodule's own submodule's promises, as git's companion's are.
 [[tool.importlinter.contracts]]
 name = "a promise imports the harness and lup's front door alone"
 type = "forbidden"
-source_modules = ["lup.*.promises"]
+source_modules = ["lup.**.promises"]
 forbidden_modules = ["lup.environment", "lup.core", "lup.types", "lup.errors", "lup.*.*"]
 allow_indirect_imports = true
 

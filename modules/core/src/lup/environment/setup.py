@@ -10,18 +10,17 @@ runs, and nothing is registered, which the answer says (`lup/setup/README.md`).
 
 import shutil
 import sys
-from pathlib import Path
 
 from pydantic import ValidationError
 
-from lup.declaration.layout import COMMON, RepositoryLayout
 from lup.doors.door import RefusedError, served
 from lup.environment.command_line import InProcess, machine
 from lup.environment.running.calling import Calling
 from lup.environment.running.loader import Loader, LoaderError, Places
 from lup.environment.settings import LupSettings
 from lup.hosting.projects import Opening
-from lup.programs import ProgramError, run
+from lup.programs import ProgramError
+from lup.programs.git import Git
 from lup.running.plan import CORE
 from lup.running.wire import Answered, Call, CommandCalled, Declined, Reply
 from lup.setup.part import SetUp, Setup
@@ -56,11 +55,15 @@ async def registered(done: SetUp) -> SetUp:
             }
         )
     try:
-        layout = RepositoryLayout.found(done.root)
-        common = Path(run("git", *COMMON, cwd=done.root).text())
+        worktree = await Git.located(done.root)
+        if worktree is None:
+            message = (
+                f"{done.root} is in no git worktree, so there's no repository to list"
+            )
+            return done.model_copy(update={"unregistered": message})
         opening = Opening(
-            repository=layout.main.name,
-            common=common,
+            repository=worktree.main.name,
+            common=worktree.common,
             declaration=done.declaration.relative_to(done.root),
         )
         socket = (

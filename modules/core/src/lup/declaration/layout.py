@@ -6,21 +6,22 @@ directory), so every worktree of the repository shares it. The machine's layer
 sits in lup's directory of the operator's configuration, and applies to every
 repository on this machine (`README.md` here, *Layers*).
 
-Git says where a worktree's root and its main worktree are, asked the same three
-things whoever runs it: lup's own code, through `lup.programs` (`found`), or a
-part, through the program it declares, which a promise stands in for
-(`located`).
+Git says where a worktree's root and its main worktree are, asked through git's
+companion (`found`, `lup.programs.git`): by lup's own code, through
+`lup.programs`, or by a part, through the program it declares, which a promise
+stands in for.
 """
 
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.programs import run
 from lup.types import Model
+lazy from lup.programs.git import Git
 
 if TYPE_CHECKING:
     from lup.doors.parts import Program
+    from lup.programs.git import Worktree
 
 TOP_LEVEL = ["rev-parse", "--show-toplevel"]
 """What git is asked for a worktree's root."""
@@ -66,33 +67,23 @@ class RepositoryLayout(Model):
     directory, which every worktree shares."""
 
     @classmethod
-    def of(cls, root: str, common: str, bare: str) -> RepositoryLayout:
-        r"""Return the layout git's answers say: a worktree's root (`TOP_LEVEL`), the directory every worktree shares (`COMMON`), and whether the repository is bare (`BARE`).
-
-        The main worktree is that shared directory where the repository is
-        bare, else its parent, a clone's root.
-
-        >>> RepositoryLayout.of("/src/app\n", "/src/app/.git\n", "false\n").main
-        PosixPath('/src/app')
-        """
-        shared = Path(common.strip())
-        return cls(
-            root=Path(root.strip()),
-            main=shared if bare.strip() == "true" else shared.parent,
-        )
+    def of(cls, worktree: Worktree) -> RepositoryLayout:
+        """Return the layout of `worktree`, as git's companion found it: its root, and its repository's main worktree."""
+        return cls(root=worktree.root, main=worktree.main)
 
     @classmethod
-    def found(cls, within: Path) -> RepositoryLayout:
-        """Return the layout of the repository holding `within`, as git finds it: the root of the worktree `within` is in, and the repository's main worktree.
+    async def found(
+        cls, within: Path, through: Program | None = None
+    ) -> RepositoryLayout | None:
+        """Return the layout of the repository holding `within`, as git finds it from there, through a part's own git program where `through` names one: the root of the worktree `within` is in, and the repository's main worktree; none where `within` is in no worktree.
 
-        Raise `lup.programs.ProgramFailedError` where `within` is in no
-        worktree.
+        Raise `lup.programs.git.GitError` where git can't be run, or
+        `lup.UnrunError` where the part's program can't.
         """
-        root = run("git", *TOP_LEVEL, cwd=within).text()
-        common = run("git", *COMMON, cwd=within).text()
-        bare = run("git", *BARE, cwd=Path(common), checked=False).text()
-        return cls.of(root, common, bare)
+        worktree = await Git.located(within, through)
+        return None if worktree is None else cls.of(worktree)
 
+    # lup: defer(issue=25, why="the gate and code rules ask git for a worktree's layout themselves, by these arguments, which their promises' stand-ins answer, until they ask git's companion (`found`)")
     @classmethod
     async def located(cls, git: Program, within: Path) -> RepositoryLayout | None:
         """Return the layout of the repository holding `within`, as `git`, a part's program, finds it; none where `within` is in no worktree.
@@ -106,7 +97,11 @@ class RepositoryLayout(Model):
         if common.status != 0:
             return None
         bare = await git.ran("-C", common.text().strip(), *BARE)
-        return cls.of(root.text(), common.text(), bare.text())
+        shared = Path(common.text().strip())
+        return cls(
+            root=Path(root.text().strip()),
+            main=shared if bare.text().strip() == "true" else shared.parent,
+        )
 
     @property
     def pyproject(self) -> Path:

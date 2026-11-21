@@ -15,6 +15,7 @@ operator approved, with what it holds alone, or on the machine.
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar, Unpack, override
+lazy from datetime import timedelta
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -148,10 +149,12 @@ class Runs(ABC):
         given: bytes | None,
         env: dict[str, str],
         cwd: Path | None,
+        *,
+        within: timedelta | None,
     ) -> Finished:
-        """Run `program` with `arguments`, `given` on its input, `env` set beside the variables it runs with, from the directory `cwd` or, where it's none, where the part runs, and say how it ended, whatever its status.
+        """Run `program` with `arguments`, `given` on its input, `env` set beside the variables it runs with, from the directory `cwd` or, where it's none, where the part runs, killed past `within` or, where it's none, past the longest any program may run there, and say how it ended, whatever its status.
 
-        Raise `UnrunError` where it can't be run at all.
+        Raise `UnrunError` where it can't be run at all, or runs past its time.
         """
 
     @abstractmethod
@@ -193,10 +196,11 @@ class Program(Model, arbitrary_types_allowed=True):
         given: bytes | str | None = None,
         env: dict[str, str] | None = None,
         cwd: Path | None = None,
+        within: timedelta | None = None,
     ) -> Finished:
-        """Run it with `arguments`, `given` on its input, text as UTF-8, `env` set beside the variables it runs with, from the directory `cwd` or, where it's none, where the part runs, and say how it ended, whatever its status.
+        """Run it with `arguments`, `given` on its input, text as UTF-8, `env` set beside the variables it runs with, from the directory `cwd` or, where it's none, where the part runs, killed past `within` or, where it's none, past the longest any program may run there, and say how it ended, whatever its status.
 
-        Raise `UnrunError` where it can't be run.
+        Raise `UnrunError` where it can't be run, or runs past its time.
         """
         if self.runs is None:
             message = (
@@ -205,7 +209,9 @@ class Program(Model, arbitrary_types_allowed=True):
             )
             raise UnrunError(message, about=[self.name])
         sent = given.encode() if isinstance(given, str) else given
-        return await self.runs.ran(self, list(arguments), sent, dict(env or {}), cwd)
+        return await self.runs.ran(
+            self, list(arguments), sent, dict(env or {}), cwd, within=within
+        )
 
     def missing(self) -> str:
         """Say it isn't there, what lup runs it for and how to install it, as a refusal or a check says it."""
