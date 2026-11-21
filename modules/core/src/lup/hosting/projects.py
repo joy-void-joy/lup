@@ -103,7 +103,11 @@ class Resumed(Model):
 
 
 class Base(Model):
-    """The image every project's containers start from: Arch Linux's, pinned with the day of its archive its packages come from, with git and uv."""
+    """The image every project's containers start from: Arch Linux's, pinned with the day of its archive its packages come from, with git and uv.
+
+    The archive answers slowly at times, so pacman waits on it as long as it
+    takes, rather than giving up past its ten seconds.
+    """
 
     image: str = (
         "docker.io/library/archlinux:base-20260816.0.574111"
@@ -116,7 +120,8 @@ class Base(Model):
         """Return its Containerfile."""
         steps = [
             f"echo 'Server = {self.archive}' > /etc/pacman.d/mirrorlist",
-            "pacman -Syu --noconfirm --needed -- " + " ".join(self.packages),
+            "pacman -Syu --noconfirm --needed --disable-download-timeout -- "
+            + " ".join(self.packages),
             "rm -rf /var/cache/pacman/pkg/*",
         ]
         return f"FROM {self.image}\nRUN " + " \\\n    && ".join(steps) + "\n"

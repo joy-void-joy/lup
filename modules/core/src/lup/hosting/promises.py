@@ -1513,3 +1513,46 @@ class HerePromises(Part):
         assert isinstance(status, Accepted)
         said = status.answer()
         assert "harmon is registered, and not open: opening it was refused" in said
+
+
+class Flaky(lup.MutableModel, Responding):
+    """podman as a promise stands it in where building an image fails its first `failing` times, as fetching packages does when the network does."""
+
+    failing: int
+    built: int = 0
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer each run, failing a build the first `failing` times."""
+        del given
+        if arguments and arguments[0] == "version":
+            return VERSIONED
+        if arguments and arguments[0] == "image":
+            return Answering(status=1)
+        if arguments and arguments[0] == "build":
+            self.built += 1
+            return Answering(status=1 if self.built <= self.failing else 0)
+        return Answering()
+
+
+class Failures(Model):
+    """How many times a promise's podman fails to build before it builds."""
+
+    failing: int = Field(ge=0, le=4)
+
+
+class BuildingPromises(Part):
+    """What the operator can count on of an image built over a network that fails at times."""
+
+    @lup.promise
+    async def a_build_failing_for_a_moment_is_built_again(self, by: Testing) -> None:
+        """An image whose build fails is built again, three times at most: a failure that passes is built; one that doesn't is refused, saying podman's words."""
+        podman = Flaky(failing=by.any(Failures).failing)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": podman},
+            machine=True,
+        )
+        image = {"base": BASE, "definition": "FROM scratch", "project": "harness"}
+        built = await started.serve("built", image, Machine())
+        assert isinstance(built, Accepted) == (podman.failing < 3)
+        assert podman.built == min(podman.failing + 1, 3)
