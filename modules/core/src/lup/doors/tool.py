@@ -15,7 +15,7 @@ from pydantic import BaseModel, model_validator
 
 from lup.doors.door import Door, DoorError, Served, Taken, is_model, spelled
 from lup.doors.parties import Agent, Party
-from lup.types import JsonObject, Model
+from lup.types import JsonObject, Model, schema_of
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -114,7 +114,7 @@ class ToolDoor(Door):
         return ToolSpec(
             name=taken.name,
             description=taken.description,
-            input_schema=model.model_json_schema(),
+            input_schema=schema_of(model),
             reads=self.reads,
             idempotent=self.idempotent,
         )

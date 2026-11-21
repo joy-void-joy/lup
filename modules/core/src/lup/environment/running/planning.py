@@ -8,6 +8,7 @@ to the project's root (`lup/running/README.md`, *The plan*).
 
 import inspect
 import sys
+from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from lup.environment.declaration import Resolved, load, resolve
 from lup.rooms.packages import Packages
 from lup.running.plan import Doorway, ModulePlan, PartPlan, Plan
 from lup.shell.view import ViewDoor
+from lup.types import schema_of
 
 if TYPE_CHECKING:
     from lup.environment.doors import Entry, Serves
@@ -38,12 +40,22 @@ def planned(root: Path, declaration: Path) -> Plan:
 def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> Plan:
     """Return the plan of a declaration resolved, which loading imported `loaded`, each part's source read relative to `root`, where one is given."""
     entries = resolved.doors.entries()
+    def named(entry: Entry) -> str:
+        return entry.serves.named()
+
+    served = {
+        name: list(each)
+        for name, each in groupby(sorted(entries, key=named), key=named)
+    }
     return Plan(
         modules=[
             ModulePlan(name=each.name, description=each.sentence())
             for each in resolved.modules
         ],
-        parts=[part_plan(each, entries, root) for each in resolved.doors.served],
+        parts=[
+            part_plan(each, served.get(each.named(), []), root)
+            for each in resolved.doors.served
+        ],
         tools=resolved.doors.tools(),
         files=loaded,
         packages=[
@@ -66,22 +78,18 @@ def source_of(part: type, root: Path | None) -> str | None:
 
 
 def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPlan:
-    """Return one part's plan: what it holds, the file it's defined in, and each method it serves behind a door a party calls."""
+    """Return one part's plan, its methods being `entries`: what it holds, the file it's defined in, each method it serves behind a door a party calls, and each event its methods run at."""
     return PartPlan(
         module=serves.module.name,
         part=serves.part.__name__,
         holds=serves.part.holds(),
         source=source_of(serves.part, root),
-        doorways=[
-            way
-            for entry in entries
-            if entry.serves == serves and (way := doorway(entry)) is not None
-        ],
+        doorways=[way for entry in entries if (way := doorway(entry)) is not None],
         hears=list(
             dict.fromkeys(
                 entry.method.door.event.__name__
                 for entry in entries
-                if entry.serves == serves and isinstance(entry.method.door, OnDoor)
+                if isinstance(entry.method.door, OnDoor)
             )
         ),
     )
@@ -109,7 +117,7 @@ def doorway(entry: Entry) -> Doorway | None:
         name=entry.name,
         parties=[each.__name__ for each in entry.method.parties()],
         description=taken.description,
-        input_schema=model.model_json_schema() if is_model(model) else {},
+        input_schema=schema_of(model) if is_model(model) else {},
         here=here,
     )
 
