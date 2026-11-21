@@ -4,8 +4,12 @@ Each is checked through the harness, as lup's start resolves a declaration
 (`README.md` here).
 """
 
+from datetime import UTC, datetime
+
 import lup
-from lup import Module, Modules, Node, Part, Project, ProjectError, Recorded
+from lup import LupError, Module, Modules, Node, Part, Project, ProjectError, Recorded
+from lup.store.database import Database
+from lup.store.records import Kinds
 from lup.testing import Testing, raises
 
 
@@ -30,6 +34,10 @@ class Jottings(Module):
     kinds: Recorded = Recorded.of(Note)
 
 
+class UndoneError(LupError):
+    """What a promise raises in a transaction, to roll it back."""
+
+
 class StorePromises(Part):
     """What a module keeping records in the store can count on."""
 
@@ -44,3 +52,21 @@ class StorePromises(Part):
         about = refused.raised().about
         assert "notes" in about
         assert "jottings" in about
+
+    @lup.promise
+    async def a_write_rolled_back_is_never_read(self, by: Testing) -> None:
+        """What a transaction wrote, then rolled back, reads as never written, even where it was read before the rollback."""
+        database = Database.opened(":memory:", Kinds(nodes=[Note]))
+        written = Note(
+            repository="notes",
+            by=None,
+            at=datetime(2026, 1, 1, tzinfo=UTC),
+            text=by.any(str),
+        )
+        with raises(UndoneError), database.writing():
+            kept = database.kept(written)
+            assert database.nodes("notes", Note) == [kept]
+            message = "rolled back"
+            raise UndoneError(message)
+        assert database.nodes("notes", Note) == []
+        database.close()

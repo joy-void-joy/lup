@@ -257,7 +257,8 @@ class Database(MutableModel, arbitrary_types_allowed=True):
 
         Within another, it's a savepoint of that one: what's written inside is
         undone alone where it raises, and kept or rolled back with the rest
-        where the outer one ends.
+        where the outer one ends. What was read is forgotten where it's rolled
+        back, since it may have been read after a write that's undone.
         """
         with self.lock:
             begun = (
@@ -265,8 +266,14 @@ class Database(MutableModel, arbitrary_types_allowed=True):
                 if self.connection.in_transaction()
                 else self.connection.begin()
             )
-            with begun:
-                yield self.connection
+            ended = False
+            try:
+                with begun:
+                    yield self.connection
+                ended = True
+            finally:
+                if not ended:
+                    self.remembered = Remembered()
 
     def wrote(self) -> None:
         """Count a write, and forget what was read before it."""
