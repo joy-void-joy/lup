@@ -10,6 +10,7 @@ parts or forwarded to the container whose part answers it, its `by` the one
 """
 
 import asyncio
+import logging
 import signal
 from pathlib import Path
 from typing import override
@@ -27,7 +28,7 @@ from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import Served, started
 from lup.hosting.carrying import Arrival, Carrying, Listens, Route, Visiting
 from lup.hosting.containers import ContainerError
-from lup.hosting.projects import Resuming
+from lup.hosting.projects import Resumed, Resuming
 from lup.running.plan import Plan
 from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
 from lup.types import MutableModel
@@ -36,6 +37,9 @@ lazy from lup.environment.doors import Running
 lazy from lup.shell.looks import Looks
 
 ASKED = TypeAdapter[Asking](Asking)
+
+log = logging.getLogger(__name__)
+"""What the machine says of what it couldn't do, in its log."""
 
 
 async def carried(
@@ -169,6 +173,8 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         )
         if not isinstance(resumed, Accepted):
             raise ContainerError(resumed.rejection.reason)
+        for repository, why in Resumed.model_validate(resumed.output).refused.items():
+            log.warning("lup couldn't open %s again: %s", repository, why)
         stopping = asyncio.Event()
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopping.set)
         await stopping.wait()
