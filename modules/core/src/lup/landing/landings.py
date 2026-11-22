@@ -34,6 +34,15 @@ from lup.inbox.records import Item, Laid
 from lup.inbox.said import FrictionSaid, Posting, Settling, Spoken
 from lup.landing.merging import Composed, Unmerged, apart
 from lup.programs.git import Entry, Git, Store
+from lup.remote import remotes
+from lup.remote.remotes import (
+    Fetching,
+    Lease,
+    Listing,
+    Remotes,
+    Update,
+    Updates,
+)
 from lup.running.plan import Name
 from lup.shell.blocks import (
     Blocks,
@@ -267,19 +276,46 @@ class Landings(Part, machine=True, shared=True):
         """Return the store of the project at `opening`'s repository, git pinned to it, read hash-checked."""
         return Git.pinned(opening.common, through=self.git)
 
-    async def remote_tip(self, git: Store, trial: Trial) -> Commit:
-        """Return the integration branch's tip on the remote, fetched into the repository's store: the remote's word, never a ref a room writes.
+    async def remote_tip(self, project: str, trial: Trial) -> Commit:
+        """Return the integration branch's tip on the remote, fetched into the repository's store: the remote's word, never a ref a room writes, read through the project's `remote`, which holds the operator's credentials.
 
-        Raise `RefusedError` where the remote hasn't the branch.
+        Raise `RefusedError` where the remote hasn't the branch, or `remote`
+        can't reach it.
         """
-        url = await git.url(trial.remote)
         ref = f"refs/heads/{trial.integration}"
-        tip = await git.remote_tip(url, ref)
+        with lup.within(project):
+            listed = await Remotes.listed(Listing(remote=trial.remote, for_push=True))
+        tip = next((each.object for each in listed.refs if each.name == ref), None)
         if tip is None:
             message = f"{trial.remote} has no branch {trial.integration} to land on"
             raise RefusedError(message)
-        await git.fetched(url, ref)
+        with lup.within(project):
+            await Remotes.fetched(
+                Fetching(
+                    remote=trial.remote, wanted=[remotes.Wanted(object=tip, name=ref)]
+                )
+            )
         return tip
+
+    async def pushed(
+        self, project: str, remote: str, update: Update, lease: str
+    ) -> None:
+        """Push `update` through the project's `remote`, as the machine's, leased on the tip `lease` it read, so it's refused where the remote moved since.
+
+        Raise `RefusedError` where it's refused or fails, saying why.
+        """
+        with lup.within(project):
+            pushed = await Remotes.pushed(
+                Updates(
+                    remote=remote,
+                    updates=[update],
+                    leases=[Lease(ref=update.destination, expected=lease)],
+                )
+            )
+        failed = [each.error for each in pushed.updates if each.error is not None]
+        if failed:
+            message = "\n".join([*([pushed.said] if pushed.said else []), *failed])
+            raise RefusedError(message)
 
     @lup.service
     async def lands(self, landing: LandingAsked, by: Codebase) -> Landed:
@@ -322,7 +358,7 @@ class Landings(Part, machine=True, shared=True):
                     "released": landing.released,
                 }
             )
-            onto = await self.remote_tip(git, trial)
+            onto = await self.remote_tip(project, trial)
             if not await git.holds(onto, tip):
                 message = (
                     f"{landing.integration} moved since {landing.branch} last held it: "
@@ -482,7 +518,7 @@ class Landings(Part, machine=True, shared=True):
                 raise RefusedError(message, about=[naming.branch])
             opening = await Projects.registered(Asking(project=naming.project))
             git = self.repository(opening)
-            dev = await self.remote_tip(git, trial)
+            dev = await self.remote_tip(naming.project, trial)
             if not await git.holds(landed.onto, dev):
                 message = (
                     f"{trial.integration} doesn't hold {landed.onto}, which "
@@ -496,13 +532,17 @@ class Landings(Part, machine=True, shared=True):
                 else await self.merged(opening, trial, landed, dev)
             )
             if merge != dev:
-                url = await git.url(trial.remote)
-                await git.pushed(url, merge, f"refs/heads/{trial.integration}", dev)
+                await self.pushed(
+                    naming.project,
+                    trial.remote,
+                    Update(source=merge, destination=f"refs/heads/{trial.integration}"),
+                    dev,
+                )
             trial = trial.with_landing(
                 landed.model_copy(update={"ended": "accepted"})
             ).model_copy(update={"accepted": merge})
             self.keep(naming.project, trial)
-            cleaned = await self.cleaned(git, trial, landed, merge)
+            cleaned = await self.cleaned(naming.project, git, trial, landed, merge)
             said = await self.ran(
                 naming.project,
                 trial,
@@ -547,9 +587,9 @@ class Landings(Part, machine=True, shared=True):
                     )
 
     async def cleaned(
-        self, git: Store, trial: Trial, landed: Landed, merge: Commit
+        self, project: str, git: Store, trial: Trial, landed: Landed, merge: Commit
     ) -> str:
-        """Move the repository's tracking ref of the integration branch to `merge`, as `git push` would, and delete `landed`'s branch on the remote where it's there at its reviewed tip; say what of it failed, the accept standing."""
+        """Move the repository's tracking ref of the integration branch to `merge`, as `git push` would, and delete `landed`'s branch on the remote through the project's `remote` where it's there at its reviewed tip, leased on it; say what of it failed, the accept standing."""
         said: list[str] = []
         try:
             await git.moved(f"refs/remotes/{trial.remote}/{trial.integration}", merge)
@@ -557,9 +597,20 @@ class Landings(Part, machine=True, shared=True):
             said = [*said, f"; the tracking ref stays where it was: {unmoved}"]
         branch = f"refs/heads/{landed.branch}"
         try:
-            url = await git.url(trial.remote)
-            if await git.remote_tip(url, branch) == landed.reviewed:
-                await git.pushed(url, "", branch, landed.reviewed or landed.tip)
+            with lup.within(project):
+                listed = await Remotes.listed(
+                    Listing(remote=trial.remote, for_push=True)
+                )
+            there = next(
+                (each.object for each in listed.refs if each.name == branch), None
+            )
+            if there is not None and there == landed.reviewed:
+                await self.pushed(
+                    project,
+                    trial.remote,
+                    Update(source=None, destination=branch),
+                    there,
+                )
         except RefusedError as kept:
             said = [*said, f"; {landed.branch} stays on {trial.remote}: {kept}"]
         return "".join(said)
@@ -582,7 +633,7 @@ class Landings(Part, machine=True, shared=True):
         opening = await Projects.registered(Asking(project=project))
         git = self.repository(opening)
         try:
-            base = await self.remote_tip(git, trial)
+            base = await self.remote_tip(project, trial)
             live = await self.live(opening, trial, base)
         except RefusedError as uncomputed:
             return f"{said}. What runs stays as it was: {uncomputed}"

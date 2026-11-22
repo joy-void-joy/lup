@@ -121,11 +121,11 @@ class Repository(Model):
 
 
 class Step[S](Model):
-    """One step of a run, as a law reads it: a slice of a call, from one `await` to the next, with the module's state before and after it.
+    """One step of a run, as an invariant reads it: a slice of a call, from one `await` to the next, with the module's state before and after it.
 
     `S` is the module's state as a party sees it: what a door of the module
-    that only reads answers (`README.md` here, *Laws*). Where calls overlap,
-    each slice of each is a step of its own, so a law sees what that call
+    that only reads answers (`README.md` here, *Invariants*). Where calls overlap,
+    each slice of each is a step of its own, so an invariant sees what that call
     changed, and when.
     """
 
@@ -154,25 +154,33 @@ class Broken(Model, arbitrary_types_allowed=True):
 
     promise: str
     """The promise, by its class's name and its own: `CounterPromises.counts`."""
-    drawn: list[JsonValue]
-    """What the run drew from the harness, in order, as JSON."""
+    # lup: ignore("bare-object", why="a value drawn is of whatever kind its promise asked the harness for, bytes and sets among them, which no one type holds")
+    drawn: list[object]
+    """What the run drew from the harness, in order, each a copy taken as it
+    was drawn."""
     calls: list[Call]
     """The calls the run made through lup's doors, in the order they started."""
     slices: list[Call] = []
     """The call each slice of the run belonged to, in the order the slices
     ran: how the calls interleaved, where they overlapped."""
     error: BaseException
-    """What broke it: a law that didn't hold (`BrokenLawError`), an assertion
+    """What broke it: an invariant that didn't hold (`BrokenInvariantError`), an assertion
     that failed, or what the promise raised."""
+    halted: str = ""
+    """Why the gate's guard halted the check before hypothesis had shrunk the
+    run that broke it, where it did: the run is then the smallest found so
+    far."""
 
 
-class BrokenLawError(LupError, AssertionError):
-    """A law didn't hold over a step of a run: a promise broken, as a failed assertion is."""
+class BrokenInvariantError(LupError, AssertionError):
+    """An invariant didn't hold over a step of a run: a promise broken, as a failed assertion is."""
 
-    def __init__(self, law: str, step: Step[BaseModel]) -> None:
-        """Say that the law named `law` didn't hold over `step`."""
-        super().__init__(f"the law `{law}` doesn't hold over this step: {step!r}")
-        self.law = law
+    def __init__(self, invariant: str, step: Step[BaseModel]) -> None:
+        """Say that the invariant named `invariant` didn't hold over `step`."""
+        super().__init__(
+            f"the invariant `{invariant}` doesn't hold over this step: {step!r}"
+        )
+        self.invariant = invariant
         self.step = step
 
 
@@ -181,7 +189,7 @@ class Reaching(ABC):
 
     @abstractmethod
     async def answered(self, call: Call) -> Accepted | Refused:
-        """Make `call`, and say what came of it, every law the modules hold checked over it."""
+        """Make `call`, and say what came of it, every invariant the modules hold checked over it."""
 
     @abstractmethod
     async def checked(self, module: str, promise: str | None) -> list[Kept | Broken]:
@@ -303,21 +311,34 @@ class Opening(ABC):
         """Open a page of the dashboard, its socket open, nothing said yet."""
 
 
+class Planning(ABC):
+    """A started lup's plan, made where it's first asked for: making it writes every door's JSON Schema, which most promises never read."""
+
+    @abstractmethod
+    def plan(self) -> Plan:
+        """Return the declaration's plan, as the program on the operator's machine reads it."""
+
+
 class Started(Model, arbitrary_types_allowed=True):
     """lup started on a declaration: its modules, and its doors, called as a party calls them.
 
     Each call answers `Accepted` or `Refused`, as a service relays it; nothing
-    sent makes a call raise. Every law its modules hold is checked over each
-    call, and one that doesn't hold raises `BrokenLawError`.
+    sent makes a call raise. Every invariant its modules hold is checked over each
+    call, and one that doesn't hold raises `BrokenInvariantError`.
     """
 
     modules: list[Module]
     """The modules it's made of, every layer applied, in order."""
     specs: list[ToolSpec]
     """What a session is told of each tool its modules serve."""
-    plan: Plan
-    """Its declaration's plan, as the program on the operator's machine reads
-    it."""
+    planning: Planning
+    """Its declaration's plan, made where it's first read."""
+
+    @property
+    def plan(self) -> Plan:
+        """Its declaration's plan, as the program on the operator's machine reads it."""
+        return self.planning.plan()
+
     doors: Reaching
     """Its doors, as the harness reaches them."""
     dashboards: Opening
@@ -370,7 +391,7 @@ class Started(Model, arbitrary_types_allowed=True):
     async def happened(self, event: Event) -> Heeded:
         """Run every method run at `event` of the classes started, wherever each runs, a session's room among them, and say what they answered: their words, in order, and the first refusal, as a session's hook would tell them.
 
-        No law is checked over it: a law is about calls through a door, and
+        No invariant is checked over it: an invariant is about calls through a door, and
         nobody calls a method run at an event.
         """
         return await self.happening.happened(event)
@@ -414,7 +435,7 @@ class Started(Model, arbitrary_types_allowed=True):
         """Type `words` on the command line, `lup`, as `by` does in their terminal or their room, and say what it did: what it printed and how it ended, what the help it showed listed, and the call it made.
 
         It offers what this lup's plan lets `by` call, the core's methods at
-        its top level, and makes its call through these doors, every law
+        its top level, and makes its call through these doors, every invariant
         checked over it. Where `command` names modules, it's a project's own
         command instead, given those modules: it offers theirs alone, the
         first's at its top level. Where `here` is given, this lup stands for
@@ -455,7 +476,7 @@ class Harnessed(Model, Answerer, arbitrary_types_allowed=True):
         )
 
     async def answered(self, call: wire.Call) -> wire.Reply:
-        """Make `call` through the started lup's doors, by the party this names, every law checked over it, and return its reply."""
+        """Make `call` through the started lup's doors, by the party this names, every invariant checked over it, and return its reply."""
         by = self.by
         match call:
             case ToolCalled(tool=tool, given=given):
@@ -487,13 +508,19 @@ class Testing(Party, ABC):
         programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
+        git: Path | None = None,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class of its modules made once and started, as the code of `repository`, each program its parts run stood in for as `programs` scripts it; where `machine`, as the machine's own parts, a service their code calls being by `Machine`.
 
-        `secrets` holds the value of each secret a class holds, by its name;
-        left out, each is drawn. Raise `ProjectError` where it doesn't load or
-        resolve, or where a secret a class holds isn't given, as lup's start
-        does. What it started is stopped once the promise ends.
+        `secrets` holds the value of each secret a class holds, and of the
+        operator's GitHub login, by its field's name; left out, a secret is
+        drawn and a login is a token nothing takes. A class holding the
+        project's git directory is given `git`, a scratch repository the
+        promise made, and one holding the operator's SSH agent a socket
+        nothing answers on, as ssh never runs in a promise. Raise
+        `ProjectError` where it doesn't load or resolve, or where a secret a
+        class holds isn't given, as lup's start does. What it started is
+        stopped once the promise ends.
         """
 
     @abstractmethod

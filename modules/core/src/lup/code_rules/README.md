@@ -16,7 +16,8 @@ project = Project(
 ## The module
 
 - **`rules`**: which rules run, a selection of the engine's table by name (`lup code-rules rules` lists them). Every rule but `runtime-mention` by default, so a rule a later release adds runs unless a project drops it: `runtime-mention` is lup's own architecture, a runtime named only in its adapter, and fires on every choice of a project choosing its runtime by a setting.
-- **`exempt`**: where lup's rules don't read, as patterns from the worktree's root (`PurePath.full_match`): tests, whose shapes are a test's own. pyright and ruff still read them.
+- **`exempt`**: where lup's rules for code don't read, as patterns from the worktree's root (`PurePath.full_match`): tests, whose shapes are a test's own. pyright and ruff still read them.
+- **`tests`**: where lup's rules for tests read: a test's files and a module's promises. They're about what makes a promise break when something nobody relied on changes (`lup/testing/README.md`): a message's words asserted (`asserted-words`), an answer compared whole (`whole-answer`), or the whole argument list a stand-in heard (`whole-arguments`).
 - **`steps`**: the gate's `rules` step (`lup/gate/README.md`), `lup code-rules check .`, whose fix is `lup code-rules fix .`.
 
 ## Categories

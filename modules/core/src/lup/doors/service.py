@@ -17,22 +17,42 @@ called (`UncarriedError`).
 Who calls is, by default, a project's own code (`Codebase`), which whoever carries
 the call vouches for from where it came; a room's program calls for its agent,
 so a service it may call says `by: Agent | Codebase`.
+
+The machine's own parts serve every project, so a call of theirs to a part that
+runs one per project names which project's (`within`):
+
+    with lup.within("harmon"):
+        await Remotes.pushed(updates)
+
+Named anywhere but where the machine's parts run, the call is refused: a
+project's code calls its own project's parts alone.
 """
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
 from typing import TYPE_CHECKING, ClassVar, Concatenate, overload
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from lup.doors.door import Answer, Door, DoorError, Method, Taken, is_model, spelled
+from lup.doors.door import (
+    Answer,
+    Door,
+    DoorError,
+    Method,
+    RefusedError,
+    Taken,
+    is_model,
+    spelled,
+)
+from lup.doors.events import Event, Heeded
 from lup.doors.parties import Codebase, Party
 from lup.errors import LupError
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Generator
 
 
 class UncarriedError(LupError):
@@ -50,10 +70,53 @@ class Carrier(ABC):
         or the method refusing.
         """
 
+    @abstractmethod
+    async def heeded(self, event: Event) -> Heeded:
+        """Tell every part of the project hearing `event`'s class of it, here and wherever else each runs, and return what they answered: their words in order, and the first refusal, after which none is told."""
+
 
 CARRYING = ContextVar[Carrier | None]("carrying", default=None)
 """What carries a service's call from here: set by lup wherever it runs a
 module's code, none outside lup."""
+
+WITHIN = ContextVar[str | None]("within", default=None)
+"""The project whose part a service call made here goes to, as `within`
+names it; none where the call names none."""
+
+
+@contextmanager
+def within(project: str) -> Generator[None]:
+    """Send each service call made inside to the part of the project named `project` (its repository, as lup names it), where the part runs one per project: how the machine's own parts, which serve every project, call one project's part.
+
+    Honoured only where the machine's parts run: a call made inside it
+    anywhere else is refused.
+    """
+    named = WITHIN.set(project)
+    try:
+        yield
+    finally:
+        WITHIN.reset(named)
+
+
+async def heeded(event: Event) -> Heeded:
+    """Tell every part of the project hearing `event`'s class of it, wherever each runs, and return what they answered: their words, in order, and the first refusal, after which none is told.
+
+    Only an event a part may fire (`Event.fired`) is told so: one only lup
+    tells, as a session's is, is refused. Raise `UncarriedError` where nothing
+    carries it, outside lup.
+    """
+    kind = type(event).__name__
+    if not type(event).fired:
+        message = f"`{kind}` is an event only lup tells: a part's code doesn't fire it"
+        raise RefusedError(message, about=[kind])
+    carrier = CARRYING.get()
+    if carrier is None:
+        message = (
+            f"`{kind}` is told to the parts hearing it where lup runs a module's "
+            "code, which carries it to where each runs; nothing here does"
+        )
+        raise UncarriedError(message, about=[kind])
+    return await carrier.heeded(event)
 
 
 class ServiceDoor(Door):

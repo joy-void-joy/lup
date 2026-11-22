@@ -5,6 +5,7 @@ project's part hands `Inboxes` as `Spoken`, with who they are; the
 operator's commands take what they do (`Answering`, `Clearing`…).
 """
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -93,6 +94,32 @@ class AskSaid(Model):
     decisions: list[Decision] = []
     thread: str | None = None
     """The concern it lands in. Left out, the one they work in."""
+    wait: bool = True
+    """Hold the call until the operator answers, and return their answer;
+    false, it returns at once, and their answer reaches you at a later call."""
+
+
+class Asked(Model):
+    """A question kept: its number, which a held call waits on."""
+
+    number: Cited
+
+
+class Awaiting(Model):
+    """A question an agent waits on the operator's answer to, and how long they wait at most."""
+
+    question: Cited
+    within: timedelta = timedelta(days=7)
+    """How long the call holds before it says the question isn't answered
+    yet: longer than a runtime holds a call, so the runtime's own limit is the
+    one met."""
+
+
+class Awaited(Model):
+    """What came of waiting on a question: whether something settled it, and what, as its asker reads it."""
+
+    settled: bool
+    text: str
 
 
 class Words(Model):
@@ -311,6 +338,9 @@ class Placed(Model):
     """The ended agent who held it, as `@` cites them, where it reads as in `no-agent`."""
     said: int = 0
     """How many items are in it."""
+    new: bool = False
+    """Whether something in it hasn't been on the operator's screen: its line is
+    new to them until they've opened it."""
     done: bool = False
     cleared: bool = False
     declined: bool = False

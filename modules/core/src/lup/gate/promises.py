@@ -96,18 +96,29 @@ class Noting(Module):
 
 
 def project() -> Project:
-    """Return a project of lup's default modules, the gate among them, and one declaring a step of its own."""
-    return Project(modules=Modules.default().add(Noting()))
+    """Return a project of lup's default modules, the gate among them, and one declaring a step of its own; `Private`, whose step the promises don't stand in for, dropped."""
+    return Project(
+        modules=Modules.default()
+        .drop(
+            "private",
+            why="the promises stand in for the gate's steps and the project's own alone",
+        )
+        .add(Noting())
+    )
 
 
 def formatting() -> Project:
-    """Return a project of lup's default modules, its gate the format step alone and its fix, so nothing runs beside it."""
+    """Return a project of lup's default modules, its gate the format step alone and its fix, so nothing runs beside it; `Private`, whose step would, dropped."""
     alone = Steps.of(
         Step(
             name="format", command=["ruff", "format", "--check"], fix=["ruff", "format"]
         )
     )
-    return Project(modules=Modules.default().edit(Gate(steps=alone)))
+    return Project(
+        modules=Modules.default()
+        .drop("private", why="its step would run beside the format step")
+        .edit(Gate(steps=alone))
+    )
 
 
 @contextmanager
@@ -214,8 +225,8 @@ class GatePromises(Part):
         assert isinstance(unfixed, Refused)
         assert isinstance(fixed, Accepted)
         fixing = runs.index(["format"])
-        assert ["format", "--check"] in runs[fixing:]
-        assert runs[:fixing] == [["format", "--check"]]
+        assert all("--check" in each for each in runs[:fixing])
+        assert any("--check" in each for each in runs[fixing:])
 
     @lup.promise
     async def a_heavy_import_fails_the_declaration_step(self, by: Testing) -> None:

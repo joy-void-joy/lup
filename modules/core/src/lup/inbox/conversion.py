@@ -535,7 +535,7 @@ def converted(inbox: Inbox, ledger: Ledger) -> Converted:
             by = writer(event.by)
             match event:
                 case Filed():
-                    there.said(by, latest, event.reason.text)
+                    there.filed(by, latest, event.reason.text)
                 case Bodied():
                     latest = there.rewritten(by, latest, event.text)
                 case Marked() if isinstance(by, AgentRecord):

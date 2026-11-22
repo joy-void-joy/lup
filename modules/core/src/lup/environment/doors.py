@@ -42,15 +42,15 @@ from lup.doors.door import (
 from lup.doors.events import Event, Heeded, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Codebase, Machine, Party, said
-from lup.doors.parts import Given, Part, Parts, Runs
-from lup.doors.service import CARRYING, Carrier, ServiceDoor
+from lup.doors.parts import Given, Part, Parts, Runs, SshAgent
+from lup.doors.service import CARRYING, WITHIN, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
 
 
-def refused(given: JsonValue, reason: str) -> Refused:
-    """Return a call refused, with what was sent and why."""
-    return Refused(rejection=Rejection(submitted=given, reason=reason))
+def refused(given: JsonValue, reason: str, about: list[str]) -> Refused:
+    """Return a call refused, with what was sent, why, and what it's about by name."""
+    return Refused(rejection=Rejection(submitted=given, reason=reason, about=about))
 
 
 class Serves(Model):
@@ -216,6 +216,8 @@ class Doors(Model):
         runtime: Path | None = None,
         runs: Runs | None = None,
         machine: bool = False,
+        git: Path | None = None,
+        ssh: SshAgent | None = None,
     ) -> Running:
         """Make each part once, with its module and the value of each secret it holds, run what each runs at `Starting`, and return them running, as the project of `repository`'s code.
 
@@ -228,6 +230,9 @@ class Doors(Model):
         keeping what lasts while it runs one under `runtime`, named so too, and
         a program a part declares is run by `runs`. Where `machine`, these are
         the machine's own parts, and a service their code calls is by `Machine`.
+        A part holding the project's git directory is given `git`, and one
+        holding the operator's SSH agent `ssh`; their GitHub login is among
+        `secrets`, under its field's name.
 
         Where `runs` is given, each program a part declares is checked first
         (`Program.checked`): one that isn't there, or isn't at a version the
@@ -275,6 +280,8 @@ class Doors(Model):
                             runtime=None if runtime is None else runtime / each.named(),
                             runs=runs,
                             modules=self.modules,
+                            git=git,
+                            ssh=ssh,
                         ),
                     ),
                 )
@@ -283,7 +290,11 @@ class Doors(Model):
             ],
             beyond=beyond,
             unrun=[
-                Unrun(part=name, why="; ".join(check.why for check in found))
+                Unrun(
+                    part=name,
+                    why="; ".join(check.why for check in found),
+                    about=[check.name for check in found],
+                )
                 for name, found in unfit.items()
                 if found
             ],
@@ -298,6 +309,8 @@ class Unrun(Model):
     part: str
     """The part, `module.Part`."""
     why: str
+    about: list[str] = []
+    """The programs it lacks, by name, which a call to it refused names."""
 
 
 class Made(Model, arbitrary_types_allowed=True):
@@ -432,17 +445,18 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
         raises goes up as raised.
         """
         method = entry.method
+        named = [method.taken.qualified]
         if not method.admits(by):
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` is "
                 f"called by {said(method.parties())}, never by `{type(by).__name__}`"
             )
-            return refused(given, reason)
+            return refused(given, reason, named)
         try:
             value = method.validated(given)
         except ValidationError as wrong:
             reason = f"`{entry.name}` doesn't take what it was given: {wrong}"
-            return refused(given, reason)
+            return refused(given, reason, named)
         instance = self.instance(entry)
         unrun = next(
             (each for each in self.unrun if each.part == entry.serves.named()), None
@@ -452,17 +466,17 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` isn't "
                 f"running: {unrun.why}"
             )
-            return refused(given, reason)
+            return refused(given, reason, [*named, *unrun.about])
         if instance is None:
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` runs "
                 "elsewhere, not where it was called"
             )
-            return refused(given, reason)
+            return refused(given, reason, named)
         try:
             output = await self.ran(method, instance, value, by)
         except RefusedError as refusal:
-            return refused(given, str(refusal))
+            return refused(given, str(refusal), refusal.about)
         return Accepted(value=value, output=output)
 
     async def call(
@@ -471,7 +485,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
         """Call the tool named `tool` with `arguments`, called by `by`, and say what came of it."""
         found = [entry for entry in self.doors.through(ToolDoor) if entry.name == tool]
         if not found:
-            return refused(arguments, f"no module serves a tool `{tool}`")
+            return refused(arguments, f"no module serves a tool `{tool}`", [tool])
         return await self.answered(found[0], arguments, by)
 
     async def serve(
@@ -482,7 +496,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             entry for entry in self.doors.through(ServiceDoor) if entry.name == service
         ]
         if not found:
-            return refused(given, f"no module serves a service `{service}`")
+            return refused(given, f"no module serves a service `{service}`", [service])
         return await self.answered(found[0], given, by)
 
     async def run(
@@ -523,8 +537,17 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
             reason = (
                 f"`{name}` isn't {door.called} of `{module}`, whose are {listed(names)}"
             )
-            return refused(given, reason)
+            return refused(given, reason, [name])
         return await self.answered(found[0], given, by)
+
+    @override
+    async def heeded(self, event: Event) -> Heeded:
+        """Tell `event` to every part hearing it made here, then, where none refused, to those made elsewhere, through `beyond`, and return what they answered."""
+        here = await self.heard(event)
+        if here.refused is not None or self.beyond is None:
+            return here
+        there = await self.beyond.heeded(event)
+        return Heeded(told=[*here.told, *there.told], refused=there.refused)
 
     @override
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:
@@ -532,9 +555,19 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
 
         Raise `RefusedError` where it's refused.
         """
+        name = method.taken.qualified
+        project = WITHIN.get()
+        if project is not None and not isinstance(self.caller, Machine):
+            message = (
+                f"`{name}` was called within {project}, which only the machine's "
+                "own parts may name: a project's code calls its own project's parts"
+            )
+            raise RefusedError(message, about=[name])
         found = [entry for entry in self.doors.entries() if entry.method is method]
+        elsewhere = not found or self.instance(found[0]) is None
+        if elsewhere and project is not None and self.beyond is not None:
+            return await self.beyond.carried(method, value)
         if not found:
-            name = method.taken.qualified
             message = f"`{name}` isn't served by any module of this project"
             raise RefusedError(message, about=[name])
         if self.instance(found[0]) is None and self.beyond is not None:

@@ -20,6 +20,10 @@ class Event(Model):
 
     answered: ClassVar[bool] = False
     """Whether a method run at it may answer words, or refuse it."""
+    fired: ClassVar[bool] = False
+    """Whether a part's own code may tell it to its project's parts
+    (`lup.heeded`): a project's own event, never one only lup tells, as a
+    session's is."""
 
 
 class Heeded(Model):

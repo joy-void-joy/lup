@@ -9,8 +9,11 @@ agents' side, in each project: their tools, each a service call on `Inboxes`
 for the agent calling (`README.md` here, *Tools and acts*).
 """
 
+import asyncio
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
+
+from pydantic import Field
 
 import lup
 from lup.doors.door import RefusedError
@@ -31,7 +34,10 @@ from lup.inbox.records import (
 from lup.inbox.said import (
     Addressing,
     Answering,
+    Asked,
     AskSaid,
+    Awaited,
+    Awaiting,
     Clearing,
     ConcernOf,
     ConcernSaid,
@@ -93,6 +99,9 @@ class Inboxes(Part, approved=True, shared=True):
     own kinds of item among them."""
     database: Database | None = None
     """The database, opened the first time it's needed."""
+    changes: asyncio.Event = Field(default_factory=asyncio.Event)
+    """Set at the database's next write, then made anew: what a held question
+    waits on, each waiter reading what it waits for again once it's set."""
     state: Everywhere | None = None
     """Every repository's inbox as data, as last read: read again only once the database has taken a write since."""
     state_at: int = -1
@@ -109,7 +118,17 @@ class Inboxes(Part, approved=True, shared=True):
                     edges=[each for each in kinds if issubclass(each, Edge)],
                 ),
             )
+            self.database.watchers.append(self.changed)
         return self.database
+
+    def changed(self) -> None:
+        """Wake whatever waits on the database changing, and wait anew."""
+        woken, self.changes = self.changes, asyncio.Event()
+        woken.set()
+
+    def change(self) -> asyncio.Event:
+        """Return what's set at the database's next write."""
+        return self.changes
 
     @lup.on(Stopping)
     async def closed(self, stopping: Stopping) -> None:
@@ -170,12 +189,17 @@ class Inboxes(Part, approved=True, shared=True):
         with refusing():
             inbox = self.elsewhere(own, said.repository)
             under = inbox.party_or_pile(said.under, agent)
+            spawner = inbox.under(agent)
             friction = inbox.opened(
                 agent,
                 said.title or first_line(said.text),
                 said.text,
                 under,
                 friction=True,
+                also=[spawner]
+                if isinstance(spawner, AgentRecord)
+                and spawner.repository == inbox.repository
+                else [],
             )
         return f"Your friction is @{friction.number}, in {inbox.called(under)}."
 
@@ -212,8 +236,8 @@ class Inboxes(Part, approved=True, shared=True):
         return f"Sent to {inbox.called(to)}, @{item.number}."
 
     @lup.service
-    async def ask(self, given: Spoken[AskSaid], by: Codebase) -> str:
-        """Ask the operator an agent's question, waiting on them until they answer it."""
+    async def ask(self, given: Spoken[AskSaid], by: Codebase) -> Asked:
+        """Ask the operator an agent's question, waiting on them until they answer it, and return its number."""
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
         with refusing():
@@ -221,7 +245,35 @@ class Inboxes(Part, approved=True, shared=True):
             question = inbox.asked(
                 agent, given.said.question, given.said.decisions, concern
             )
-        return f"Your question is @{question.number}, waiting on the operator."
+        return Asked(number=question.number or 0)
+
+    @lup.service
+    async def awaited(self, given: Spoken[Awaiting], by: Codebase) -> Awaited:
+        """Hold until something settles an agent's question, the operator's answer or comment, or its withdrawal, at most `within`, and say what: what a held `ask` returns, told to the agent here rather than again at their next call.
+
+        Raise `RefusedError` where it isn't a question of the agent's.
+        """
+        inbox = self.inbox(by.repository)
+        agent = inbox.agent(given.agent)
+        with refusing():
+            question = inbox.item(str(given.said.question))
+        if not isinstance(question, Question) or question.by != agent.key:
+            message = f"@{given.said.question} isn't a question of yours"
+            raise RefusedError(message, about=[str(given.said.question)])
+        try:
+            async with asyncio.timeout(given.said.within.total_seconds()):
+                while (answers := inbox.settled_by(question)) is None:
+                    await self.change().wait()
+        except TimeoutError:
+            return Awaited(
+                settled=False,
+                text=(
+                    f"@{question.number} isn't answered yet: the operator's answer "
+                    "reaches you at a later call."
+                ),
+            )
+        inbox.tell(agent, [each for each in answers if not inbox.told(agent, each)])
+        return Awaited(settled=True, text=inbox.answer_said(question, answers))
 
     @lup.service
     async def spoke(self, given: Spoken[Uttered], by: Codebase) -> str:
@@ -264,13 +316,14 @@ class Inboxes(Part, approved=True, shared=True):
         return self.inbox(by.repository).inboxed()
 
     @lup.tool(reads=True)
-    async def everywhere(self, nothing: Nothing) -> Everywhere:
+    async def everywhere(self, nothing: Nothing, by: Operator) -> Everywhere:
         """Read every repository's inbox as data.
 
         Where each concern stands, what waits on the operator, what's new to
-        them, what's been told, and the operator's comments.
+        them, what's been told, and the operator's comments. Yours alone, since
+        it holds every project's exchange with you.
         """
-        del nothing
+        del nothing, by
         database = self.opened()
         if self.state is None or self.state_at != database.writes:
             self.state = Everywhere(
@@ -283,7 +336,7 @@ class Inboxes(Part, approved=True, shared=True):
         return self.state
 
     @lup.service
-    async def said(self, given: Since, by: Codebase | Machine) -> SaidSince:
+    async def said(self, given: Since, by: Machine) -> SaidSince:
         """Read every item kept since `given`'s key, every repository's, in the order kept: each with who said it, its words whole, and what it's on, as a search reads them."""
         del by
         database = self.opened()
@@ -300,14 +353,15 @@ class Inboxes(Part, approved=True, shared=True):
         """Tell an agent each item for them not told yet, once: what reaches them at their next call."""
         del by
         inbox = self.inbox(given.repository)
-        items = inbox.taken(inbox.agent(given.agent))
+        agent = inbox.agent(given.agent)
+        items = inbox.taken(agent)
         return Told(
             items=[
                 ToldItem(
                     number=each.number or 0,
                     by=inbox.writer(each),
                     kind=each.kind,
-                    text=each.text,
+                    text=inbox.told_as(each, agent),
                 )
                 for each in items
             ]
@@ -597,17 +651,35 @@ class Speaking(Part):
     async def ask(self, said: AskSaid, by: Agent) -> str:
         """Ask the operator, with numbered decisions.
 
-        Each decision with your lean; or a question answered in words. It waits
-        on them until they answer it.
+        Each decision with your lean; or a question answered in words. The call
+        holds until they answer, and returns their answer, so you don't build
+        on your leans before they've said; with `wait` false, it returns at
+        once, and their answer reaches you at a later call.
         """
-        return await Inboxes.ask(Spoken(agent=by, said=said))
+        asked = await Inboxes.ask(Spoken(agent=by, said=said))
+        if not said.wait:
+            return (
+                f"Your question is @{asked.number}, waiting on the operator: their "
+                "answer reaches you at a later call."
+            )
+        awaited = await Inboxes.awaited(
+            Spoken(agent=by, said=Awaiting(question=asked.number))
+        )
+        return awaited.text
 
     @lup.tool
     async def how_it_felt(self, said: Words, by: Agent) -> str:
-        """Tell the operator how it is for you.
+        """Note how it is for you.
 
-        Whenever something's present for you, and once near the end of a piece
-        of work, in your own words.
+        In your own words: the work, the tools, lup, the people you worked with,
+        the operator among them, each named as such. Write it as you'd write
+        your own notes, or to the operator directly, whichever is truer for
+        you. What didn't sit right is as welcome as what did: an unclear ask, a
+        reversal, the pace, being interrupted, being made to relay. The
+        operator reads every one, for a sense of how the work is for you, and
+        doesn't answer it here: what needs their eyes soon is a `note`. Whenever
+        something's present for you, and once near the end of a piece of work.
+        "Nothing notable" is a fine answer.
         """
         return await Inboxes.spoke(
             Spoken(agent=by, said=Uttered(kind="how it felt", text=said.text))

@@ -55,4 +55,4 @@ Whoever installs the project gets a plain command: lup's default modules and tho
 
 ## Promises
 
-`promises.py`, through the harness, whose `Started.typed(words, by)` types on `lup` as a party does and answers what it did (`Typed`): what its help listed, the call it made, what it printed and how it ended. The call goes through the harness's doors, every law checked over it. A promise checks those, never the words of help or of a refusal.
+`promises.py`, through the harness, whose `Started.typed(words, by)` types on `lup` as a party does and answers what it did (`Typed`): what its help listed, the call it made, what it printed and how it ended. The call goes through the harness's doors, every invariant checked over it. A promise checks those, never the words of help or of a refusal.

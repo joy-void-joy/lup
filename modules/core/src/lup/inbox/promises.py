@@ -5,6 +5,7 @@ call the inbox's tools, the operator its commands, and an agent's project's code
 its services, as #5's sessions will (`README.md` here).
 """
 
+import asyncio
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -34,18 +35,22 @@ from lup import (
     Recorded,
     Viewing,
 )
-from lup.inbox.records import Decision, Item, Laid, Question, Ruling
-from lup.inbox.said import (
+from lup.inbox import (
     Answering,
     AskSaid,
+    Awaited,
+    Awaiting,
     Clearing,
     ConcernOf,
     ConcernSaid,
     Converting,
+    Decision,
     Ending,
     Everywhere,
     FrictionSaid,
     Inboxed,
+    Item,
+    Laid,
     Naming,
     NoteSaid,
     Nothing,
@@ -56,11 +61,15 @@ from lup.inbox.said import (
     Placed,
     Posted,
     Posting,
+    Question,
     Reached,
+    Ruling,
     SaidSince,
     SendSaid,
     Settling,
+    Showing,
     Since,
+    Spoken,
     Told,
     Untelling,
     Untold,
@@ -512,7 +521,7 @@ class InboxPromises(Part):
         """A question waits on the operator until they answer it, and a note never does."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await said(started, "ask", AskSaid(question="which way?"), agent)
+        await said(started, "ask", AskSaid(question="which way?", wait=False), agent)
         await said(started, "note", NoteSaid(remark="a doubt"), agent)
         [question] = (await inboxed(started)).waiting
         answered = await started.run(
@@ -529,13 +538,14 @@ class InboxPromises(Part):
         """Every item said reads once from a read of what's been said since, each with its words whole and what it's on: a question with each decision and its lean, an answer with the question and the decisions it rules on, a comment with the item and the lines it quotes."""
         started = await by.started(project())
         agent = by.any(Agent)
-        reader = by.any(Machine) if by.any(bool) else HERE
+        reader = Machine()
         await said(
             started,
             "ask",
             AskSaid(
                 question="which way?",
                 decisions=[Decision(decision="go left", lean="yes, it's shorter")],
+                wait=False,
             ),
             agent,
         )
@@ -582,7 +592,7 @@ class InboxPromises(Part):
         """A question its agent withdraws waits on nobody after."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await said(started, "ask", AskSaid(question="still needed?"), agent)
+        await said(started, "ask", AskSaid(question="still needed?", wait=False), agent)
         [question] = (await inboxed(started)).waiting
         await said(
             started, "withdraw", WithdrawSaid(item=question, why="settled"), agent
@@ -591,11 +601,14 @@ class InboxPromises(Part):
 
     @lup.promise
     async def news_stays_until_cleared(self, by: Testing) -> None:
-        """News stays new until the operator clears it; clearing a concern clears what's in it, until something newer is said there."""
+        """News stays new until the operator clears it; clearing a concern clears the news in it, until something newer is said there."""
         started = await by.started(project())
         agent = by.any(Agent)
         await said(
             started, "concern", ConcernSaid(text="first", title="a direction"), agent
+        )
+        await said(
+            started, "note", NoteSaid(remark="a doubt", thread="a-direction"), agent
         )
         state = await inboxed(started)
         assert state.new
@@ -611,10 +624,7 @@ class InboxPromises(Part):
         assert not after.new
         assert placed(after, "a direction").cleared
         await said(
-            started,
-            "concern",
-            ConcernSaid(name=str(concern.number), text="second"),
-            agent,
+            started, "note", NoteSaid(remark="another", thread="a-direction"), agent
         )
         again = await inboxed(started)
         assert again.new
@@ -719,7 +729,7 @@ class InboxPromises(Part):
         """What waits on the operator is in their view of what waits, and leaves it once they answer it."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await said(started, "ask", AskSaid(question="which way?"), agent)
+        await said(started, "ask", AskSaid(question="which way?", wait=False), agent)
         assert (
             "which way?"
             in (
@@ -865,3 +875,107 @@ class InboxPromises(Part):
             "core", "party", PartyOf(repository="harness", name="probe"), Operator()
         )
         assert isinstance(probe, Accepted), probe
+
+    @lup.promise
+    async def a_concerns_words_mark_it_rather_than_the_news(self, by: Testing) -> None:
+        """Words filed in a concern aren't news: the concern's line is new until the operator has had what's in it on their screen, while a note in it is news."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        await said(
+            started, "concern", ConcernSaid(text="first", title="a direction"), agent
+        )
+        state = await inboxed(started)
+        assert not state.new
+        concern = placed(state, "a direction")
+        assert concern.new
+        opened = await viewed(started, "concern_view", ConcernOf(number=concern.number))
+        for block in opened.blocks:
+            if block.sighted is not None:
+                seen = Showing.model_validate(block.sighted.given)
+                shown = await started.run("core", "shown", seen, Operator())
+                assert isinstance(shown, Accepted), shown
+        assert not placed(await inboxed(started), "a direction").new
+        await said(
+            started, "note", NoteSaid(remark="a doubt", thread="a-direction"), agent
+        )
+        after = await inboxed(started)
+        assert after.new
+        assert placed(after, "a direction").new
+
+    @lup.promise
+    async def a_subagents_friction_reaches_its_parent_as_a_line(
+        self, by: Testing
+    ) -> None:
+        """A subagent's friction is told to the agent who spawned them once, as a line saying what and where, never whole and never waiting; their concern isn't told to them."""
+        started = await by.started(project())
+        lead, probe = Agent.of("lead-id"), Agent.of("lead-id", "probe-id")
+        for agent, name, spawner in [(lead, "lead", None), (probe, "probe", lead)]:
+            await started.serve(
+                "agent_named",
+                Naming(repository="harness", agent=agent, name=name, spawner=spawner),
+                Machine(),
+            )
+        await said(
+            started,
+            "friction",
+            FrictionSaid(text="the keys lag\n\nEach press waits a second."),
+            probe,
+        )
+        await said(
+            started, "concern", ConcernSaid(text="watch the keys", title="keys"), probe
+        )
+        [line] = (await told(started, lead)).items
+        assert "the keys lag" in line.text
+        assert "Each press" not in line.text
+        assert not (await told(started, lead)).items
+        assert not (await inboxed(started)).waiting
+
+    @lup.promise
+    async def an_ask_holds_until_the_operator_answers(self, by: Testing) -> None:
+        """An agent's `ask` holds until the operator answers or `within` passes, and the answer is told to them once, by the held call or at their next; what's held settles once the answer is in, and an ask that doesn't wait leaves its question waiting."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        held = asyncio.ensure_future(
+            said(
+                started,
+                "ask",
+                AskSaid(
+                    question="which way?",
+                    decisions=[Decision(decision="go left", lean="it's shorter")],
+                ),
+                agent,
+            )
+        )
+        while not (await inboxed(started)).waiting and not held.done():
+            await asyncio.wait([held], timeout=60)
+        [question] = (await inboxed(started)).waiting
+        answered = await started.run(
+            "core",
+            "answer",
+            Answering(
+                question=question,
+                rulings=[Ruling(number=1, verdict="leaning", comment="go")],
+                text="and quickly",
+            ),
+            Operator(),
+        )
+        assert isinstance(answered, Accepted), answered
+        await held
+        await told(started, agent)
+        state = await inboxed(started)
+        [answer] = [
+            each
+            for each in state.told
+            if each.party != "@operator" and each.item > question
+        ]
+        assert answer.times == 1
+        settled = await started.serve(
+            "awaited",
+            Spoken(agent=agent, said=Awaiting(question=question)),
+            HERE,
+        )
+        assert isinstance(settled, Accepted), settled
+        assert isinstance(settled.output, Awaited)
+        assert settled.output.settled
+        await said(started, "ask", AskSaid(question="and then?", wait=False), agent)
+        assert len((await inboxed(started)).waiting) == 1

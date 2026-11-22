@@ -87,6 +87,8 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
         if standing.cleared or standing.declined is not None
         else "waiting"
         if standing.done is not None
+        else "new"
+        if inbox.fresh(concern)
         else None
     )
     return Fold(
@@ -115,7 +117,7 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
 
     Each of its blocks offers a comment on it, and what its kind offers beside.
     """
-    new = item in inbox.new_to_operator()
+    new = inbox.unseen(item)
     waits = item in inbox.waits_on_operator()
     writer = inbox.by(item)
     number = item.number or 0
