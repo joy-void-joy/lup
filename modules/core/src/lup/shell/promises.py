@@ -442,8 +442,7 @@ class ShellPromises(Part):
             await page.say(Mark(marked=mark))
             review = await reviewed(page)
         going = [each.id for each in marks if not each.held]
-        held = [f"m{notes}"]
-        assert list(parts_in(review).values()) == [*([going] if going else []), held]
+        assert list(parts_in(review).values()) == [[each.id for each in marks]]
         await page.say(Send())
         drafted = await heard(page)
         sent = await heard(page)
@@ -665,7 +664,7 @@ class ShellPromises(Part):
     async def every_page_is_told_the_review_as_the_draft_changes(
         self, by: Testing
     ) -> None:
-        """Every page open, the one that changed the draft among them, is told the review as the draft changes: a fold for each place its parts go, and one for those held back."""
+        """Every page open, the one that changed the draft among them, is told the review as the draft changes: a fold for each place its parts go, a part held back staying in its place, unticked."""
         words = f"said {by.any(Words).words}".strip()
         started = await by.started(noted(1))
         first = await opened(started)
@@ -678,7 +677,7 @@ class ShellPromises(Part):
         await first.say(Write(comment=comment.model_copy(update={"held": True})))
         for page in [first, second]:
             review = await reviewed(page)
-            assert parts_in(review) == {"held": ["c"]}
+            assert list(parts_in(review).values()) == [["c"]]
         await first.leave()
         await second.leave()
 

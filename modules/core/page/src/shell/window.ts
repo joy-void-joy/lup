@@ -224,5 +224,5 @@ export class Window {
 /** Return the window's title for `review`: what its summary says, else that the draft holds nothing. */
 function titleOf(review: Blocks): string {
     const summary = review.summary.map((span) => span.text).join("");
-    return `${summary === "" ? "the draft holds nothing" : summary}  ·  Ctrl+Enter sends, Space x keeps a part back, Space d lets it go, Esc closes`;
+    return `${summary === "" ? "the draft holds nothing" : summary}  ·  Ctrl+Enter sends what's ticked, Space d ticks, Space x unticks, Space h either, Esc closes`;
 }

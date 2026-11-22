@@ -30,8 +30,8 @@ export class Memory implements Source {
     }
 
     /**
-     * Return the review of the draft as the server lays it out, each part a line under where it goes, then what's held
-     * back: but each place a comment goes said by whom it's chosen to reach alone, and a mark's by what it does.
+     * Return the review of the draft as the server lays it out, a checklist, each part a line under where it goes, ticked
+     * where it goes and blank where it's held back: but each place a comment goes said by whom it's chosen to reach alone.
      */
     review(): Blocks {
         interface Part {
@@ -56,7 +56,7 @@ export class Memory implements Source {
             offers: [],
             reaches: null,
             sighted: null, standing: null,
-            spans: [{ text: part.text, tone: "strong", ticking: null, gauge: null, refers: null }],
+            spans: [{ text: `${part.held ? "[ ]" : "[x]"} ${part.text}`, tone: "strong", ticking: null, gauge: null, refers: null }],
         });
         const place = (id: string, summary: string, placed: readonly Part[]): Block => ({
             block: "fold",
@@ -71,13 +71,12 @@ export class Memory implements Source {
             content: placed.map(line),
         });
         const sending = parts.filter((each) => !each.held);
-        const held = parts.filter((each) => each.held);
-        const places = [...new Set(sending.map((each) => each.to))].map((to) =>
-            place(to === "marked" ? to : `to ${to}`, to, sending.filter((each) => each.to === to)),
+        const places = [...new Set(parts.map((each) => each.to))].map((to) =>
+            place(to === "marked" ? to : `to ${to}`, to, parts.filter((each) => each.to === to)),
         );
         return {
-            blocks: [...places, ...(held.length > 0 ? [place("held", "held back", held)] : [])],
-            summary: parts.length > 0 ? [{ text: `draft · ${sending.length} to send`, tone: "strong", ticking: null, gauge: null, refers: null }] : [],
+            blocks: places,
+            summary: parts.length > 0 ? [{ text: `draft · ${sending.length} of ${parts.length} to send`, tone: "strong", ticking: null, gauge: null, refers: null }] : [],
             offers: [],
         };
     }

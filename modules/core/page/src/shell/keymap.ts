@@ -8,7 +8,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 
 import type { FoldKind } from "../generated/read";
-import { counted, every, foldKind, offsetOf } from "../document/tree";
+import { counted, every, foldKind, nodeAt, offsetOf, type Node } from "../document/tree";
 import { bindIndenting } from "./markdown";
 import { shells, type Shell } from "./shell";
 
@@ -226,6 +226,13 @@ export const commands: Readonly<Record<string, Command>> = {
             shell.window?.review(shell.review());
         },
     },
+    /** Keep the comment or the mark at the cursor back from sends, or let it go: Space h, there or on its line in the review. */
+    "hold": {
+        says: "keep a comment or a mark back from sends, or let it go",
+        run: (shell) => {
+            held(shell);
+        },
+    },
     /** In a picker, choose the line the cursor is on; elsewhere go down a line to its first character, as vim's Enter does. */
     "enter": {
         says: "in a picker, choose the line; elsewhere go down a line",
@@ -406,6 +413,32 @@ function marked(shell: Shell, verb: string): void {
 }
 
 /**
+ * Keep back from sends what's at the cursor, or let it go: in the review, the part its line is; in the document, the
+ * comment the cursor's in, else the mark on the innermost block holding the cursor that has one.
+ */
+function held(shell: Shell): void {
+    if (shell.owner !== null) {
+        marked(shell, "toggle");
+        return;
+    }
+    if (shell.comments.partAt() !== null) {
+        shell.comments.hold(null);
+        return;
+    }
+    let node: Node | null = nodeAt(shell.document.root, shell.view.state.selection.main.head);
+    while (node !== null && shell.marks.on(node) === null) {
+        node = node.parent;
+    }
+    const mark = node === null ? null : shell.marks.on(node);
+    if (mark === null) {
+        shell.say("nothing here to keep back: a comment, or a block marked");
+        return;
+    }
+    const now = shell.marks.hold(mark.id, null);
+    shell.say(now?.held === true ? "kept back: it stays in the draft" : "it goes at the next send");
+}
+
+/**
  * Return the command a binding names: one of the shell's own, or `verb:` and a verb's name, which marks that verb on
  * what offers it where the cursor is; none where it names neither.
  */
@@ -483,6 +516,7 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>d", command: "verb:done", modes: ["normal", "visual"] },
     { keys: "<Space>x", command: "verb:decline", modes: ["normal", "visual"] },
     { keys: "<Space>t", command: "verb:toggle", modes: ["normal", "visual"] },
+    { keys: "<Space>h", command: "hold", modes: ["normal"] },
     { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "<CR>", command: "enter", modes: ["normal"] },
     { keys: "<Space>wh", command: "pane-left", modes: ["normal"] },
