@@ -943,6 +943,14 @@ Behind `lup/runtimes/codex_records.py` and `claude_records.py`, read over the 15
 - **Claude Code's refusals:** a call a hook refused is an `attachment` of `hook_permission_decision`, `decision` `deny`, naming the call (`toolUseID`): 46 in the kept records, each from the second lup's `PermissionRequest` hook, so a `PreToolUse` denial's is unmeasured. What the call returned is its `tool_result`, as for any other.
 - **Claude Code's usage, once a message:** a message of the agent's is written over several `assistant` lines sharing its `message.id` (one to eight in the largest record), each carrying the same `usage`.
 
+### The second lup's ledger (read 2026-11-21 from a copy of the operator's, version 2 of its tables)
+
+Behind `lup/transcripts/ledger.py`: what the operator's words through the second lup came to, and where they are. 10,317 items, 6,218 of lup-next and 4,099 of the second lup's own repository, from 2026-10-14 on; read whole in half a second.
+- **A review is kept once for each conversation it reached:** 526 copies of 500 reviews, each copy holding every comment, letter and remark. Most comments carry an empty `id` (1,068 of 2,440), so a comment is told apart by its review's `made` and its place, not by its id.
+- **The operator's words:** 2,233 comments, each on an agent's item (`item`), nearly all quoting the passage (`quote.text`), the rest on the item whole; 91 letters to a party, 27 remarks on a conversation, 58 messages, 3 answers, and 29 comments on an approval or a held change, on its `inbox:decided` edge (`state.comment`) rather than in an item. About 245 KB.
+- **Agents' items:** 219 questions (each decision with its `lean`), 638 turns' last words (`message` with `ending`), 731 notes, 108 questions and 87 problems sent as messages, 492 frictions, 250 how it felt.
+- **Names:** a main session's isn't in the database, but in `session-names.json` beside it; a subagent's is in its whereabouts (`inbox:conversation:<key>`, `name`), 178 of 4,285.
+
 ### Subagents' records (Claude Code 2.1.301 and 2.1.302 measured, 2026-10-17; Codex read at `rust-v0.163.0`)
 
 What each runtime records of a subagent's spawn, which lup reads to name them and place them under their parent (`docs/launch.md`, *Names*):

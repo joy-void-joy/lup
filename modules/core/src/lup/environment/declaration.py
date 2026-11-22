@@ -34,6 +34,7 @@ from lup.remote.module import Remote
 from lup.running.plan import typed
 from lup.shell.looks import Looks
 from lup.store.records import Edge, Kinds, Node, Recorded
+from lup.transcripts.module import Transcripts
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ class Resolved(Model):
 
 def default() -> list[Module]:
     """List lup's default modules, in their order: what `Modules.default()` starts from."""
-    return [Core(), Gate(), Landing(), Remote(), GitHub(), Private()]
+    return [Core(), Gate(), Landing(), Remote(), GitHub(), Private(), Transcripts()]
 
 
 def shipped() -> list[Module]:

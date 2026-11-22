@@ -92,6 +92,7 @@ lazy from lup import programs
 lazy from lup.core import Core
 lazy from lup.gate.module import Gate
 lazy from lup.landing.module import Landing
+lazy from lup.transcripts.module import Transcripts
 
 __all__ = [
     "Agent",
@@ -165,6 +166,7 @@ __all__ = [
     "Ticking",
     "Tone",
     "Tones",
+    "Transcripts",
     "UncarriedError",
     "UnrunError",
     "Viewing",

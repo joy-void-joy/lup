@@ -236,8 +236,11 @@ class GuidancePromises(Part):
         guided = [each.method for each in told.sections if each.module == Guided.name]
         assert guided == ["GuidedPart.running", "GuidedPart.greeting"]
         text = told.text()
-        at = [text.index(each.text) for each in told.sections]
-        assert at == sorted(at)
+        start = 0
+        for each in told.sections:
+            found = text.find(each.text, start)
+            assert found >= 0
+            start = found + len(each.text)
 
     @lup.promise
     async def a_section_that_cant_render_fails_naming_its_module(
