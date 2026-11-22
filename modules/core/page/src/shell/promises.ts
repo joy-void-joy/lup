@@ -892,3 +892,49 @@ scenario("\\ hides the outline beside the document and shows it again, the keys 
         parent.remove();
     }
 });
+
+scenario("u takes back the last change to the marks and Ctrl+R makes it again, while a mark the draft sent since stays sent", async (by) => {
+    const verb = by.any(fc.constantFrom("done", "decline"));
+    const key = verb === "done" ? "d" : "x";
+    const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", ["done", "decline"]) };
+    const { shell: opened, memory, parent } = shellOn([item]);
+    try {
+        opened.go(0);
+        await press(opened, ["<Space>", key]);
+        expect(memory.draft.marks.map((each) => each.offer.verb)).toEqual([verb]);
+        await press(opened, ["u"]);
+        expect(memory.draft.marks).toEqual([]);
+        await press(opened, ["<C-r>"]);
+        expect(memory.draft.marks.map((each) => each.offer.verb)).toEqual([verb]);
+        await press(opened, ["<C-CR>"]);
+        await press(windowOf(opened), ["<C-CR>"]);
+        expect(memory.sent.map((each) => each.offer.verb)).toEqual([verb]);
+        await press(opened, ["u"]);
+        expect(memory.draft.marks).toEqual([]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("]a goes to the next block waiting on the operator, opening the fold over it, and ]] to the next thing offering something, onto a closed fold's line where one hides it", async (by) => {
+    const waiting: Line = { ...lineOf("asks", "a question"), standing: "waiting", offers: offersOf("asks", ["done"]) };
+    const closed: Fold = { ...foldOf("f", [lineOf("before", "said first"), waiting]), open: false };
+    const plain = lineOf("plain", by.any(fc.constantFrom("nothing to do", "plain")));
+    const { shell: opened, parent } = shellOn([plain, closed]);
+    try {
+        opened.go(0);
+        await press(opened, ["]", "]"]);
+        expect(nodeAt(opened.document.root, opened.view.state.selection.main.head).key).toBe("root/f");
+        expect(opened.isOpen(opened.document.node("root/f") ?? opened.document.root)).toBe(false);
+        opened.go(0);
+        await press(opened, ["]", "a"]);
+        expect(nodeAt(opened.document.root, opened.view.state.selection.main.head).key).toBe("root/f/asks");
+        expect(opened.isOpen(opened.document.node("root/f") ?? opened.document.root)).toBe(true);
+        await press(opened, ["[", "a"]);
+        expect(opened.state().said).toContain("no thing waiting on you before");
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
