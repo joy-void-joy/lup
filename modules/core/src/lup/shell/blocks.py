@@ -13,11 +13,12 @@ module declares (`MarkKind`), and who a comment on a block reaches is a party
 """
 
 import hashlib
+from collections import Counter
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self
 
-from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
+from pydantic import BaseModel, Field, JsonValue, SerializeAsAny, model_validator
 
 from lup.doors.command import CommandDoor
 from lup.doors.door import Annotation, is_model
@@ -231,7 +232,7 @@ class Shown(Model):
     always tell it changed."""
     offers: list[Offer] = []
     """What it offers the operator to do with what it shows, each under its
-    verb's key."""
+    verb's key: one under each verb at most, so a key does one thing on it."""
     reaches: SerializeAsAny[Party] | None = None
     """The party a comment on it reaches; none for whoever the block it's in
     says, and none at all where nothing does, so it takes no comment."""
@@ -247,6 +248,20 @@ class Shown(Model):
     """The fields saying what the block shows itself, apart from what's under
     it, each marked to include, which the version the core works out is a
     digest of."""
+
+    @model_validator(mode="after")
+    def keyed_once(self) -> Self:
+        """Refuse two offers under one verb: Space and the verb's key does one thing on a block, never a choice the page would make."""
+        counted = Counter(each.verb for each in self.offers)
+        twice = sorted(verb for verb, offers in counted.items() if offers > 1)
+        if twice:
+            said = ", ".join(f"`{each}`" for each in twice)
+            message = (
+                f"block `{self.id}` offers more than one action under {said}: a "
+                "verb's key does one thing on a block"
+            )
+            raise BlockError(message, about=[self.id, *twice])
+        return self
 
     def own_version(self) -> str:
         """Return a version of what the block shows itself: a digest of the fields saying it, which changes as they do."""

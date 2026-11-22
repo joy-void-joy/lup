@@ -192,20 +192,6 @@ export const commands: Readonly<Record<string, Command>> = {
             shell.window?.review(shell.review());
         },
     },
-    /** Hold the part of the draft at the cursor back from sends: Space x on a comment, or on its line in the review. */
-    "hold": {
-        says: "hold a part of the draft back from sends",
-        run: (shell) => {
-            (shell.owner ?? shell).comments.hold(true, shell.owner === null ? null : shell.lineId());
-        },
-    },
-    /** Let the part of the draft at the cursor go at the next send: Space d. */
-    "let-go": {
-        says: "let a part of the draft go at the next send",
-        run: (shell) => {
-            (shell.owner ?? shell).comments.hold(false, shell.owner === null ? null : shell.lineId());
-        },
-    },
     /** In a picker, choose the line the cursor is on; elsewhere go down a line to its first character, as vim's Enter does. */
     "enter": {
         says: "in a picker, choose the line; elsewhere go down a line",
@@ -301,9 +287,9 @@ export const commands: Readonly<Record<string, Command>> = {
             }
             const choices = vimBindings
                 .filter((bind) => bind.command !== "palette")
-                .map((bind) => ({ name: `${said(bind.keys).padEnd(14)} ${commands[bind.command]?.says ?? ""}`, value: bind }));
+                .map((bind) => ({ name: `${said(bind.keys).padEnd(14)} ${commandOf(bind.command)?.says ?? ""}`, value: bind }));
             window.pick("Run a command…", choices, (bind) => {
-                const command = commands[bind.command];
+                const command = commandOf(bind.command);
                 if (command === undefined) {
                     return;
                 }
@@ -353,8 +339,58 @@ export const commands: Readonly<Record<string, Command>> = {
     },
 };
 
+/** What a verb's key does to the line of the review it's on: `done` sends the part, `decline` keeps it back, `toggle` flips which. */
+const reviewing: Readonly<Record<string, boolean | null>> = { done: false, decline: true, toggle: null };
+
+/**
+ * Mark `verb` where `shell`'s cursor is, as Space and the verb's key does: in the document, on the innermost block
+ * offering it, or every fold chosen that does; in the review, on the part of the draft its line is, sending it or
+ * keeping it back.
+ */
+function marked(shell: Shell, verb: string): void {
+    const owner = shell.owner;
+    if (owner === null) {
+        shell.marks.toggle(verb);
+        return;
+    }
+    if (owner.window?.shell() !== shell || owner.window.role() !== "review") {
+        shell.say("marks are made in the document");
+        return;
+    }
+    const held = reviewing[verb];
+    const id = shell.lineId();
+    if (held === undefined || id === null) {
+        shell.say(held === undefined ? `${verb} does nothing in the review: Space d sends a part, Space x keeps it back` : "no part of the draft here");
+        return;
+    }
+    if (owner.marks.byId(id) !== null) {
+        const now = owner.marks.hold(id, held);
+        shell.say(now?.held === true ? "kept back: it stays in the draft" : "it goes at the next send");
+        return;
+    }
+    owner.comments.hold(held, id);
+}
+
+/**
+ * Return the command a binding names: one of the shell's own, or `verb:` and a verb's name, which marks that verb on
+ * what offers it where the cursor is; none where it names neither.
+ */
+export function commandOf(name: string): Command | undefined {
+    const own = commands[name];
+    if (own !== undefined || !name.startsWith("verb:")) {
+        return own;
+    }
+    const verb = name.slice("verb:".length);
+    return {
+        says: `mark ${verb} on what offers it here, again to unmark; in the review, ${reviewing[verb] === undefined ? "nothing" : reviewing[verb] === false ? "send the part" : reviewing[verb] === true ? "keep the part back" : "send it or keep it back"}`,
+        run: (shell) => {
+            marked(shell, verb);
+        },
+    };
+}
+
 /** Say `keys` as the palette of commands shows them: Space, Ctrl, Enter and Esc by name, a kind's letter as `‹kind›`. */
-function said(keys: string): string {
+export function said(keys: string): string {
     const named: readonly (readonly [string, string])[] = [
         ["<Space>", "Space "],
         ["<C-CR>", "Ctrl+Enter"],
@@ -410,8 +446,9 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Esc>", command: "choose-none", modes: ["normal"] },
     { keys: "<C-CR>", command: "send", modes: ["normal", "insert"] },
     { keys: "<Space>c", command: "comment-whole", modes: ["normal"] },
-    { keys: "<Space>x", command: "hold", modes: ["normal"] },
-    { keys: "<Space>d", command: "let-go", modes: ["normal"] },
+    { keys: "<Space>d", command: "verb:done", modes: ["normal"] },
+    { keys: "<Space>x", command: "verb:decline", modes: ["normal"] },
+    { keys: "<Space>t", command: "verb:toggle", modes: ["normal"] },
     { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "<CR>", command: "enter", modes: ["normal"] },
     { keys: "<Space>wh", command: "pane-left", modes: ["normal"] },
@@ -444,7 +481,7 @@ export function bindVim(bindings: readonly Bind[]): void {
     }
     bindIndenting();
     for (const bind of bindings) {
-        const run = commands[bind.command]?.run;
+        const run = commandOf(bind.command)?.run;
         if (run === undefined) {
             throw new Error(`a binding names \`${bind.command}\`, which isn't one of the shell's commands`);
         }

@@ -3,7 +3,7 @@
 // token said first, read from the page's address's fragment, which no request carries, and kept for every tab of the
 // dashboard's address.
 
-import type { Blocks, Comment, Delivered, Draft, Opened, Sent, Told, Unanswered, Viewing } from "./generated/read";
+import type { Blocks, Comment, Delivered, Draft, Marked, Opened, Sent, Told, Unanswered, Viewing } from "./generated/read";
 
 const nothing: Blocks = { blocks: [], summary: [], offers: [] };
 import type { Source } from "./shell/shell";
@@ -118,6 +118,10 @@ export class Server implements Source {
 
     write(comment: Comment): void {
         this.#send({ kind: "write", comment });
+    }
+
+    mark(marked: Marked): void {
+        this.#send({ kind: "mark", marked });
     }
 
     erase(id: string): void {

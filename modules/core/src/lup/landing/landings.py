@@ -491,7 +491,7 @@ class Landings(Part, machine=True, shared=True):
             await self.settled(naming.project, landed, said)
             return said
 
-    @lup.command(verb="accept", says="accept it onto the integration branch")
+    @lup.command(verb="done", says="accept it onto the integration branch")
     async def accept(self, naming: Naming, by: Operator) -> str:
         """Accept a branch on trial onto the integration branch, at the tip you reviewed: merge it, push it as you would, and delete the branch on the remote where it's there at that tip.
 
@@ -949,13 +949,16 @@ def landing_fold(project: str, landed: Landed, *, left_out: bool) -> Fold:
         Span(text=f"  wanted by {each.agent.id}: {each.why}", tone="muted")
         for each in landed.wanted
     ]
+    # One action under each verb: Space d says yes to what waits on the operator's
+    # review, and accepts once nothing does, as accepting is refused till then.
     offers = (
         [Offer.of(Landings.yes, reviewing), Offer.of(Landings.drop, naming)]
         if landed.waiting() and landed.reviewed is None
         else [
-            *([Offer.of(Landings.yes, reviewing)] if landed.waiting() else []),
+            Offer.of(Landings.yes, reviewing)
+            if landed.waiting()
+            else Offer.of(Landings.accept, naming),
             Offer.of(Landings.toggle, naming),
-            Offer.of(Landings.accept, naming),
             Offer.of(Landings.drop, naming),
         ]
     )

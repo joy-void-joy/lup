@@ -240,22 +240,40 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             await page.tell(Reviewed(review=self.kept.review))
 
     async def going(self, draft: Draft) -> list[Going]:
-        """Say where each comment of `draft` not held back goes at the next send, or why it can't, each block read once."""
+        """Say where each comment of `draft` not held back goes at the next send, and what each mark does, or why it can't, each block read once."""
         read: dict[str, Placed | str] = {}
         return [
-            await self.goes(comment, read)
-            for comment in draft.comments
-            if not comment.held
+            *[
+                await self.goes(comment, read)
+                for comment in draft.comments
+                if not comment.held
+            ],
+            *[await self.does(mark, read) for mark in draft.marks if not mark.held],
         ]
 
-    async def goes(self, comment: Comment, read: dict[str, Placed | str]) -> Going:
-        """Say where `comment` goes at the next send, or why it can't, what it's on read once for every comment on it (`read`)."""
-        key = comment.on.model_dump_json(
+    async def on(self, quote: Quote, read: dict[str, Placed | str]) -> Placed | str:
+        """Return the block `quote` is on and whom a comment on it reaches, or why it can't be read, read once for every part on it (`read`)."""
+        key = quote.model_dump_json(
             include={"viewing": True, "block": True, "within": True}
         )
         if key not in read:
-            read[key] = await self.placed(comment.on)
-        placed = read[key]
+            read[key] = await self.placed(quote)
+        return read[key]
+
+    async def does(self, mark: Marked, read: dict[str, Placed | str]) -> Going:
+        """Say what `mark` does at the next send, or why it can't: what it's on can't be read, or changed since it was marked."""
+        placed = await self.on(mark.on, read)
+        says = mark.offer.says
+        if isinstance(placed, str):
+            return Going(part=mark.id, to=says, stays=placed)
+        if mark.on.version is not None and placed.block.version != mark.on.version:
+            stays = "what it's on changed since it was marked"
+            return Going(part=mark.id, to=says, stays=stays)
+        return Going(part=mark.id, to=says)
+
+    async def goes(self, comment: Comment, read: dict[str, Placed | str]) -> Going:
+        """Say where `comment` goes at the next send, or why it can't, what it's on read once for every part on it (`read`)."""
+        placed = await self.on(comment.on, read)
         if isinstance(placed, str):
             return Going(part=comment.id, to="to what can't be read", stays=placed)
         taken = self.taking(comment, placed)

@@ -48,6 +48,8 @@ from lup.testing import (
     Delivered,
     Drafted,
     Hello,
+    Mark,
+    Marked,
     Opened,
     Page,
     Quote,
@@ -91,6 +93,8 @@ class NotesPart(Part):
     module: Notes
     heard: list[str] = []
     """What each comment it took said, in the order they came."""
+    cleared: list[int] = []
+    """The number of each note cleared, in the order they were."""
     released: asyncio.Event = Field(default_factory=asyncio.Event)
     """Set once the comments it holds may go through, where its module holds
     them (`Notes.holding`)."""
@@ -149,6 +153,17 @@ class NotesPart(Part):
             summary=[Span(text=f"{of.pile} · {len(self.heard)} comments")],
         )
 
+    @lup.view
+    async def gone(self, of: PileOf) -> Blocks:
+        """Show each note cleared, a line each, in the order they were."""
+        return Blocks.of(
+            *(
+                Line(id=str(at), spans=[Span(text=str(number))])
+                for at, number in enumerate(self.cleared)
+            ),
+            summary=[Span(text=f"{of.pile} · {len(self.cleared)} cleared")],
+        )
+
     def titles(self) -> list[str]:
         """Return the notes' titles, in order."""
         return [
@@ -159,6 +174,7 @@ class NotesPart(Part):
     @lup.command(verb="done", says="clear it")
     async def clear(self, clearing: Clearing, by: lup.Operator) -> str:
         """Clear a note."""
+        self.cleared.append(clearing.number)
         return f"cleared {clearing.number}"
 
     @lup.command(verb="comment", says="comment on it")
@@ -407,6 +423,52 @@ class ShellPromises(Part):
         await page.leave()
 
     @lup.promise
+    async def a_mark_sent_runs_what_its_block_offers_once(self, by: Testing) -> None:
+        """A verb marked on a block shows in the review as what it does, and the send runs the action the block offers under it once, the mark leaving the draft; one held back runs nothing and stays."""
+        notes = by.any(Counted).count
+        started = await by.started(noted(notes))
+        page = await opened(started)
+        marks = [
+            Marked(
+                id=f"m{number}",
+                on=quoted(f"note-{number}"),
+                offer=Offer.of(NotesPart.clear, Clearing(number=number)),
+                held=number == notes,
+            )
+            for number in range(1, notes + 1)
+        ]
+        review = Blocks()
+        for mark in marks:
+            await page.say(Mark(marked=mark))
+            review = await reviewed(page)
+        going = [each.id for each in marks if not each.held]
+        held = [f"m{notes}"]
+        assert list(parts_in(review).values()) == [*([going] if going else []), held]
+        await page.say(Send())
+        drafted = await heard(page)
+        sent = await heard(page)
+        assert isinstance(drafted, Drafted)
+        assert isinstance(sent, Delivered)
+        assert sent.went == going
+        assert [each.id for each in drafted.draft.marks] == [f"m{notes}"]
+        assert await gone(started) == list(range(1, notes))
+        await page.leave()
+
+    @lup.promise
+    async def a_block_offers_one_action_under_each_verb(self, by: Testing) -> None:
+        """A block offering two actions under one verb fails as it's made, naming the verb, since Space and the verb's key does one thing on it."""
+        del by
+        with raises(lup.BlockError) as twice:
+            Line(
+                id="1",
+                offers=[
+                    Offer.of(NotesPart.clear, Clearing(number=1)),
+                    Offer.of(NotesPart.clear, Clearing(number=2)),
+                ],
+            )
+        assert "done" in twice.raised().about
+
+    @lup.promise
     async def a_comment_that_says_nothing_is_never_sent(self, by: Testing) -> None:
         """A comment that says nothing, blank or only spaces, is dropped at the send rather than sent: what it's on never hears of it, and it leaves the draft, while what was said goes trimmed."""
         blank = by.any(Blank).text()
@@ -633,6 +695,12 @@ class Garbage(Model):
     text: str
 
 
+class Counted(Model):
+    """How many notes the pile holds, the last one's mark held back."""
+
+    count: int = Field(ge=1, le=4)
+
+
 class Words(Model):
     """What a comment says."""
 
@@ -704,6 +772,18 @@ async def taken(started: Started) -> list[str]:
     assert isinstance(answered.output, Blocks)
     return [
         "".join(span.text for span in each.spans)
+        for each in answered.output.blocks
+        if isinstance(each, Line)
+    ]
+
+
+async def gone(started: Started) -> list[int]:
+    """Return the number of each note the pile cleared, as its `gone` view shows it."""
+    answered = await started.view("notes", "gone", PileOf(pile="p"), Operator())
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Blocks)
+    return [
+        int("".join(span.text for span in each.spans))
         for each in answered.output.blocks
         if isinstance(each, Line)
     ]

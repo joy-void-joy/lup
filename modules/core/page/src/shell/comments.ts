@@ -231,17 +231,18 @@ export class Comments {
     }
 
     /**
-     * Hold back from sends the part of the draft of id `id`, as its line in the review names it, else the comment at the
-     * cursor, or let it go, as Space x and Space d do there.
+     * Keep back from sends the comment of id `id`, as its line in the review names it, else the comment at the cursor,
+     * or let it go, or toggle which where `held` is none, as Space x, Space d and Space t do on its line in the review.
      */
-    hold(held: boolean, id: string | null = null): void {
+    hold(held: boolean | null, id: string | null = null): void {
         const part = this.partAt(id);
         if (part === null) {
             this.#shell.say("no part of the draft here: a comment, or a line of the review");
             return;
         }
-        this.#rewritten(part.id, { ...part, held });
-        this.#shell.say(held ? "held back from sends: Space d lets it go" : "let go: it goes at the next send");
+        const now = held ?? !part.held;
+        this.#rewritten(part.id, { ...part, held: now });
+        this.#shell.say(now ? "kept back: it stays in the draft" : "it goes at the next send");
     }
 
     /**
@@ -504,16 +505,7 @@ export class Comments {
 
     /** Return the block `quote` is on, as the document lays it out now; none where it isn't. */
     #blockOf(quote: Quote): Node | null {
-        const wanted = viewKey(quote.viewing);
-        for (const node of every(this.#shell.document.root)) {
-            if (node.kind === "section" && node.viewing !== null && viewKey(node.viewing) === wanted) {
-                const found = inSection(node, quote.block);
-                if (found !== null) {
-                    return found;
-                }
-            }
-        }
-        return null;
+        return quotedIn(this.#shell.document.root, quote);
     }
 
     /** Open a comment where vim went into insert mode at `head`: on the passage `refused` covered, else under the cursor's line. */
@@ -740,7 +732,7 @@ function joinedAt(lines: readonly { from: number; to: number }[], first: number,
 }
 
 /** Return the section `node` is in: the answer of the view that laid it out. */
-function sectionOf(node: Node): Node | null {
+export function sectionOf(node: Node): Node | null {
     let at = node.parent;
     while (at !== null && at.kind !== "section") {
         at = at.parent;
@@ -752,7 +744,7 @@ function sectionOf(node: Node): Node | null {
  * Return the folds `section`'s view was read under, innermost first, each as the view whose block it is and its id, so
  * the core finds whom a comment in the section reaches where its own blocks name none.
  */
-function within(section: Node): Within[] {
+export function within(section: Node): Within[] {
     const folds: Within[] = [];
     let at = section.parent;
     while (at !== null) {
@@ -763,6 +755,23 @@ function within(section: Node): Within[] {
         at = outer?.parent ?? null;
     }
     return folds;
+}
+
+/**
+ * Return the block `quote` is on in the document under `root`, as the core finds it at a send: the first block of its
+ * id in its view's answer, in the order they're shown; none where the document doesn't lay it out.
+ */
+export function quotedIn(root: Node, quote: Quote): Node | null {
+    const wanted = viewKey(quote.viewing);
+    for (const node of every(root)) {
+        if (node.kind === "section" && node.viewing !== null && viewKey(node.viewing) === wanted) {
+            const found = inSection(node, quote.block);
+            if (found !== null) {
+                return found;
+            }
+        }
+    }
+    return null;
 }
 
 /** Return the block of id `id` in `section`, its folds' given content among it, but not what a fold under it reads as it opens. */
