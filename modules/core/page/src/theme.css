@@ -112,6 +112,11 @@ body {
     margin-right: 1ch;
 }
 
+/* What a block says aside, apart from its line: its name, its number, its kind, said only here. */
+.lup-where-aside {
+    color: var(--lup-muted);
+}
+
 .lup-outline,
 .lup-main {
     flex: 1;

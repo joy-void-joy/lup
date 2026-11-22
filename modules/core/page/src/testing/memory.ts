@@ -56,6 +56,7 @@ export class Memory implements Source {
             offers: [],
             reaches: null,
             sighted: null, standing: null,
+            aside: [],
             spans: [{ text: `${part.held ? "[ ]" : "[x]"} ${part.text}`, tone: "strong", ticking: null, gauge: null, refers: null }],
         });
         const place = (id: string, summary: string, placed: readonly Part[]): Block => ({
@@ -65,6 +66,7 @@ export class Memory implements Source {
             offers: [],
             reaches: null,
             sighted: null, standing: null,
+            aside: [],
             kind: "sent-to",
             summary: [{ text: summary, tone: "strong", ticking: null, gauge: null, refers: null }],
             open: null,

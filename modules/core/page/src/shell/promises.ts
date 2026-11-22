@@ -276,6 +276,7 @@ scenario("A view answering again keeps what an open fold read under it, the fold
         offers: [],
         reaches: null,
         sighted: null, standing: null,
+        aside: [],
         kind: "note",
         summary: [{ text: "note", tone: "plain", ticking: null, gauge: null, refers: null }],
         open: true,
@@ -467,10 +468,11 @@ scenario("Space s on a comment sends it to the party chosen in the window among 
         offers: [],
         reaches: { party: "pile", repository: "harness", path: name },
         sighted: null, standing: null,
+        aside: [],
         kind: "party",
         summary: [{ text: name, tone: "strong", ticking: null, gauge: null, refers: null }],
         open: null,
-        content: [{ block: "line", id: "said", version: null, offers: [], reaches: null, sighted: null, standing: null, spans: [{ text: "said", tone: "plain", ticking: null, gauge: null, refers: null }] }],
+        content: [{ block: "line", id: "said", version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], spans: [{ text: "said", tone: "plain", ticking: null, gauge: null, refers: null }] }],
     };
     const other: Fold = { ...party, id: "other", reaches: { party: "pile", repository: "harness", path: "other" }, summary: [{ text: "other", tone: "strong", ticking: null, gauge: null, refers: null }] };
     const { shell: opened, memory, parent } = shellOn([other, party]);
@@ -562,6 +564,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
         offers: [],
         reaches: null,
         sighted: null, standing: null,
+        aside: [],
         kind: "note",
         summary: [{ text: summary, tone: "plain", ticking: null, gauge: null, refers: null }],
         open: null,
@@ -583,7 +586,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
 
 /** Return a Markdown block saying `text`, keyed `id`. */
 function written(id: string, text: string): Markdown {
-    return { block: "markdown", id, version: null, offers: [], reaches: null, sighted: null, standing: null, text, tone: "plain" };
+    return { block: "markdown", id, version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], text, tone: "plain" };
 }
 
 /** Return where the Markdown hides marks on the line `number` of `shell`'s text, from 1, as stretches from the line's start. */
@@ -690,7 +693,7 @@ function offersOf(id: string, verbs: readonly string[]): Offer[] {
 
 /** A line saying `text`, of id `id`. */
 function lineOf(id: string, text: string): Line {
-    return { block: "line", id, version: null, offers: [], reaches: null, sighted: null, standing: null, spans: [{ text, tone: "plain", ticking: null, gauge: null, refers: null }] };
+    return { block: "line", id, version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], spans: [{ text, tone: "plain", ticking: null, gauge: null, refers: null }] };
 }
 
 /** An open fold of the kind `note`, of id `id`, holding `content`. */
@@ -703,6 +706,7 @@ function foldOf(id: string, content: Block[]): Fold {
         reaches: null,
         sighted: null,
         standing: null,
+        aside: [],
         kind: "note",
         summary: [{ text: `the fold ${id}`, tone: "plain", ticking: null, gauge: null, refers: null }],
         open: true,
@@ -720,7 +724,7 @@ function offering(made: readonly Block[], pick: (id: string) => readonly string[
 
 scenario("Space d marks done on the innermost block at the cursor that offers it, Space x puts decline in its place there, and the second Ctrl+Enter sends what's marked", async (by) => {
     const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", ["done"]) };
-    const body: Markdown = { block: "markdown", id: "body", version: null, offers: [], reaches: null, sighted: null, standing: null, text: by.any(fc.constantFrom("the body", "a\nb")), tone: "plain" };
+    const body: Markdown = { block: "markdown", id: "body", version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], text: by.any(fc.constantFrom("the body", "a\nb")), tone: "plain" };
     const concern: Fold = { ...foldOf("c", [item, body]), offers: offersOf("c", ["done", "decline"]) };
     const { shell: opened, memory, parent } = shellOn([concern]);
     try {

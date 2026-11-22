@@ -74,14 +74,13 @@ def party_fold(inbox: Inbox, party: PartyRecord, shows: Shows) -> Fold:
 
 
 def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
-    """Return `concern` as a fold: its title, its kind where it's a friction, and its marks; what's in it read as it opens."""
+    """Return `concern` as a fold of its kind, a friction's own where it is one: its title alone, and aside its @name, who left it and whether it was declined; what's in it read as it opens."""
     standing = inbox.standing(concern)
     marks = [
-        "friction" if concern.kind == "inbox:friction" else "",
+        inbox.called(concern),
         f"left by {inbox.called(standing.left_by)}" if standing.left_by else "",
         "declined" if standing.declined is not None else "",
     ]
-    said = ", ".join(each for each in marks if each)
     stands = (
         "done"
         if standing.cleared or standing.declined is not None
@@ -93,13 +92,10 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
     )
     return Fold(
         id=f"concern-{concern.number}",
-        kind="concern",
+        kind="friction" if concern.kind == "inbox:friction" else "concern",
         standing=stands,
-        summary=[
-            Span(text=f"{inbox.called(concern)} ", tone="muted"),
-            Span(text=concern.title, tone="strong"),
-            Span(text=f"  {said}" if said else "", tone="muted"),
-        ],
+        summary=[Span(text=concern.title, tone="strong")],
+        aside=[Span(text=each, tone="muted") for each in marks if each],
         content=Viewing.of(shows.concern, ConcernOf(number=concern.number or 0)),
         reaches=reached(inbox, standing.holder),
         offers=[
@@ -149,12 +145,10 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
     return [
         Line(
             id=f"item-{item.number}",
-            spans=[
-                Span(text=inbox.writer(item), tone="strong"),
-                Span(
-                    text=f" · {item.kind.removeprefix('inbox:')} · @{item.number}",
-                    tone="muted",
-                ),
+            spans=[Span(text=inbox.writer(item), tone="strong")],
+            aside=[
+                Span(text=item.kind.removeprefix("inbox:"), tone="muted"),
+                Span(text=f"@{item.number}", tone="muted"),
             ],
             standing="waiting" if waits else "new" if new else None,
             offers=offers,

@@ -718,7 +718,7 @@ class InboxPromises(Part):
                 started, "party", PartyOf(repository="harness", name="frictions/keys")
             )
         )
-        [slow] = [each for each in keys if each.kind == "concern"]
+        [slow] = [each for each in keys if each.kind == "friction"]
         assert slow.reaches == Pile(repository="harness", path="frictions/keys")
         number = int(gate.id.removeprefix("concern-"))
         words = await viewed(started, "concern_view", ConcernOf(number=number))

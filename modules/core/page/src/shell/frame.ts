@@ -109,6 +109,27 @@ function offeredHere(shell: Shell): Keyed[] {
     });
 }
 
+/** Return what `node`'s block says aside, as the header shows it after its line: muted, each after a dot. */
+function asideOf(node: Node): HTMLElement[] {
+    return (node.block?.aside ?? [])
+        .filter((span) => span.text !== "")
+        .map((span) => {
+            const said = document.createElement("span");
+            said.className = "lup-where-aside";
+            said.textContent = ` · ${span.text}`;
+            return said;
+        });
+}
+
+/** Return the innermost block the cursor of `shell` is in; none where it's in none. */
+function innermostBlock(shell: Shell): Node | null {
+    let node: Node | null = nodeAt(shell.document.root, shell.view.state.selection.main.head);
+    while (node !== null && node.block === null) {
+        node = node.parent;
+    }
+    return node;
+}
+
 /** Draw where `shell`'s cursor is in `header`, and the keys that do something there in `keys`. */
 export function framed(shell: Shell, header: HTMLElement | null, keys: HTMLElement | null): void {
     if (header !== null) {
@@ -132,8 +153,17 @@ export function framed(shell: Shell, header: HTMLElement | null, keys: HTMLEleme
             } else {
                 part.append(letter, said);
             }
+            part.append(...asideOf(node));
             return part;
         });
+        // The block the cursor is on, where it's no fold and says something aside: an item's kind and number.
+        const on = innermostBlock(shell);
+        if (on !== null && foldKind(on) === null && (on.block?.aside.length ?? 0) > 0) {
+            const part = document.createElement("span");
+            part.className = "lup-where-part";
+            part.append(...asideOf(on));
+            parts.push(part);
+        }
         header.replaceChildren(...parts);
     }
     if (keys !== null) {

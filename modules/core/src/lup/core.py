@@ -79,9 +79,19 @@ class Core(Module):
             colour="cyan",
             outlined=True,
         ),
+        FoldKind(
+            name="friction",
+            letter="r",
+            called="friction",
+            level=1,
+            colour="purple",
+            outlined=True,
+        ),
     )
     """The shell's fold kinds: a party's section, a file, a body, a run of
-    unchanged lines; and the inbox's, a concern."""
+    unchanged lines; and the inbox's, a concern, and a friction, a concern
+    opened by what got in an agent's way, its letter and colour in the margin
+    saying which it is."""
     dashboard: Dashboarding = Dashboarding()
     """Whether the machine serves the dashboard, and on which port; read from
     the home repository's declaration with the machine's layer over it."""
