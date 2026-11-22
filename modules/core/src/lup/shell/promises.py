@@ -358,6 +358,48 @@ class ShellPromises(Part):
         await page.leave()
 
     @lup.promise
+    async def a_view_watched_is_told_again_once_it_changes(self, by: Testing) -> None:
+        """A view a page watches is told again once what it shows changes, without the page asking again: a comment the pile takes shows among what it took."""
+        words = f"said {by.any(Words).words}".strip()
+        started = await by.started(noted(1))
+        page = await opened(started)
+        taking = Viewing(module="notes", view="taken", given={"pile": "p"})
+        await page.say(Watch(watch=3, viewing=taking))
+        first = await heard(page)
+        assert isinstance(first, Answered)
+        assert first.blocks.blocks == []
+        await page.say(Write(comment=Comment(id="c", on=quoted("note-1"), words=words)))
+        await page.say(Send())
+        while not isinstance(told := await heard(page), Answered):
+            assert told is not None, "the page was told nothing more of what it watches"
+        assert told.watch == 3
+        said = [
+            "".join(span.text for span in each.spans)
+            for each in told.blocks.blocks
+            if isinstance(each, Line)
+        ]
+        assert said == [words]
+        await page.leave()
+
+    @lup.promise
+    async def what_changes_elsewhere_shows_on_its_own(self, by: Testing) -> None:
+        """A view a page watches is told again once what it shows changes by another's hand, the page doing nothing: what the pile takes from elsewhere shows within the longest wait between reads."""
+        words = f"said {by.any(Words).words}".strip()
+        started = await by.started(noted(1))
+        page = await opened(started)
+        taking = Viewing(module="notes", view="taken", given={"pile": "p"})
+        await page.say(Watch(watch=4, viewing=taking))
+        assert isinstance(await heard(page), Answered)
+        commented = Commented[NoteOf](words=words, on=NoteOf(number=1))
+        taken = await started.run("notes", "comment", commented, Operator())
+        assert isinstance(taken, Accepted)
+        told = await heard(page)
+        assert isinstance(told, Answered)
+        assert told.watch == 4
+        assert len(told.blocks.blocks) == 1
+        await page.leave()
+
+    @lup.promise
     async def a_frame_the_server_cant_read_is_refused_alone(self, by: Testing) -> None:
         """A frame the dashboard can't read is refused on its own, and the page's socket keeps answering what comes after it."""
         garbage = by.any(Garbage).text
