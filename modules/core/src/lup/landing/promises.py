@@ -265,15 +265,17 @@ class Approved(Model):
 
 
 async def machine(by: Testing, at: Places) -> Started:
-    """Start the machine's parts, git run for real, podman left out, with the project at `at` registered and the integration branch's tip approved, as the operator answers at its first run."""
+    """Start the machine's parts, git run for real, podman left out, with the project at `at` registered and the integration branch's tip approved, as the operator answers at its first run: its `remote`, which landing reaches the remote through, holding the project's git directory, ssh stood in for, never run."""
     started = await by.started(
         Repository(declaration=HOME),
         programs={
             "git": RealGit(),
+            "ssh": Scripted(),
             "uv": Scripted(answers=[Answering(output="/srv/python\n")]),
             "checked": Scripted(answers=[Answering(output=TOLD)]),
         },
         machine=True,
+        git=at.project / ".git",
     )
     registered = await started.run(
         "hosting", "register", Registering(common=at.project / ".git"), Operator()

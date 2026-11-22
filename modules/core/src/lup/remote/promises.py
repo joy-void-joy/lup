@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import JsonValue
 
 import lup
-from lup import Agent, Model, Part
+from lup import Agent, Machine, Model, Part
 from lup.testing import Accepted, RealGit, Refused, Repository, Scripted, Testing
 
 if TYPE_CHECKING:
@@ -175,6 +175,30 @@ class RemotePromises(Part):
             assert (error is None) == own
             assert (forge.at(destination) == commit) == own
             assert forge.at("refs/heads/dev") == forge.dev
+
+    @lup.promise
+    async def the_machine_moves_the_integration_branch_by_a_leased_fast_forward(
+        self, by: Testing
+    ) -> None:
+        """The machine's own push, as the operator's accept makes it, moves the integration branch where it's a fast-forward of the tip it's leased on, needing no `force-push`; leased on a tip the branch has moved from, it's refused, and the branch stays."""
+        stale = by.any(bool)
+        with forged() as forge:
+            commit = GIT.committed(forge.work, {"a.md": "a\n"}, "a")
+            started = await started_on(by, forge)
+            leased = commit if stale else forge.dev
+            pushed = await started.serve(
+                "pushed",
+                {
+                    "remote": "origin",
+                    "updates": [{"source": commit, "destination": "refs/heads/dev"}],
+                    "leases": [{"ref": "refs/heads/dev", "expected": leased}],
+                },
+                Machine(),
+            )
+            assert isinstance(pushed, Accepted)
+            [error] = errors(pushed)
+            assert (error is None) != stale
+            assert forge.at("refs/heads/dev") == (forge.dev if stale else commit)
 
     @lup.promise
     async def a_forced_push_is_refused_unless_the_declaration_allows_it(
