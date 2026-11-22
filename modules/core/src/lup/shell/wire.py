@@ -69,8 +69,18 @@ class Send(Model):
     kind: Literal["send"] = "send"
 
 
+class Seen(Model):
+    """Say a block of a view has been on the operator's screen: the server runs what being seen does, as the block offers it when the server reads the view (`Shown.sighted`)."""
+
+    kind: Literal["seen"] = "seen"
+    viewing: Viewing
+    block: str
+    """The block's id."""
+
+
 type Sent = Annotated[
-    Hello | Watch | Unwatch | Write | Mark | Erase | Send, Field(discriminator="kind")
+    Hello | Watch | Unwatch | Write | Mark | Erase | Send | Seen,
+    Field(discriminator="kind"),
 ]
 """What the page sends the server."""
 

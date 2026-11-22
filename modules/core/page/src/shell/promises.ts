@@ -938,3 +938,31 @@ scenario("]a goes to the next block waiting on the operator, opening the fold ov
         parent.remove();
     }
 });
+
+scenario("A block offering what being seen does is said seen once it has shown, once, and one a closed fold hides only once it's opened", async (by) => {
+    const seeing = (id: string): Offer => ({ command: "see", module: null, given: { id }, verb: "seen", says: "seen", draws: null });
+    const shown: Line = { ...lineOf("shown", "new to you"), sighted: seeing("shown") };
+    const hidden: Line = { ...lineOf("hidden", "new, folded"), sighted: seeing("hidden") };
+    const closed: Fold = { ...foldOf("f", [hidden]), open: false };
+    const content = [shown, lineOf("plain", by.any(fc.constantFrom("nothing new", "plain"))), closed];
+    const memory = new Memory();
+    memory.set(root, answer(content));
+    const parent = document.createElement("div");
+    document.body.append(parent);
+    const opened = new Shell(parent, root, looks, memory, { dwell: 0 });
+    const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 5));
+    try {
+        await settled();
+        expect(memory.sighted.map((each) => each.split("\n").at(-1))).toEqual(["shown"]);
+        memory.set(root, answer(content));
+        await settled();
+        expect(memory.sighted).toHaveLength(1);
+        opened.go(offsetOf(opened.document.node("root/f") ?? opened.document.root));
+        await press(opened, ["z", "o"]);
+        await settled();
+        expect(memory.sighted.map((each) => each.split("\n").at(-1))).toEqual(["shown", "hidden"]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});

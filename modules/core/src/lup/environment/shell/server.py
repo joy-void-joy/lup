@@ -59,6 +59,7 @@ from lup.shell.wire import (
     Opened,
     Read,
     Reviewed,
+    Seen,
     Send,
     Sent,
     Unanswered,
@@ -633,10 +634,29 @@ class Session(MutableModel, arbitrary_types_allowed=True):
                 case Erase(id=part):
                     kept = self.dashboard.kept
                     await self.dashboard.changed(kept.draft.erased(part), by=self)
+                case Seen(viewing=viewing, block=block):
+                    answering.create_task(self.sighted(viewing, block))
                 case Send():
                     await self.tell(await self.dashboard.sent())
                     woken, self.acted = self.acted, asyncio.Event()
                     woken.set()
+
+    async def sighted(self, viewing: Viewing, block: str) -> None:
+        """Run what being seen does for the block of id `block`, as `viewing` answers it at the time, where it says anything; then read every view watched again, what it changed shown at once. A block gone, or saying nothing, runs nothing."""
+        dashboard = self.dashboard
+        around = await dashboard.around(viewing, block)
+        if isinstance(around, str):
+            return
+        sighted = around[0].sighted
+        if sighted is None:
+            return
+        module = sighted.module or viewing.module or ""
+        refused = await dashboard.ran(module, sighted.command, sighted.given)
+        if refused is not None:
+            log.warning("what being seen does for %s refused: %s", block, refused)
+            return
+        woken, self.acted = self.acted, asyncio.Event()
+        woken.set()
 
     def unwatched(self, watch: int) -> None:
         """Stop reading the view watched under `watch`, where one is."""
