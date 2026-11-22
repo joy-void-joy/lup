@@ -43,7 +43,7 @@ from lup.doors.events import Event, Heeded, Starting, Stopping
 from lup.doors.on import OnDoor
 from lup.doors.parties import Codebase, Machine, Party, said
 from lup.doors.parts import Given, Part, Parts, Runs
-from lup.doors.service import CARRYING, Carrier, ServiceDoor
+from lup.doors.service import CARRYING, WITHIN, Carrier, ServiceDoor
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.types import Model, MutableModel
 
@@ -539,9 +539,19 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
 
         Raise `RefusedError` where it's refused.
         """
+        name = method.taken.qualified
+        project = WITHIN.get()
+        if project is not None and not isinstance(self.caller, Machine):
+            message = (
+                f"`{name}` was called within {project}, which only the machine's "
+                "own parts may name: a project's code calls its own project's parts"
+            )
+            raise RefusedError(message, about=[name])
         found = [entry for entry in self.doors.entries() if entry.method is method]
+        elsewhere = not found or self.instance(found[0]) is None
+        if elsewhere and project is not None and self.beyond is not None:
+            return await self.beyond.carried(method, value)
         if not found:
-            name = method.taken.qualified
             message = f"`{name}` isn't served by any module of this project"
             raise RefusedError(message, about=[name])
         if self.instance(found[0]) is None and self.beyond is not None:

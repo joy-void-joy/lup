@@ -17,6 +17,7 @@ from lup import (
     Codebase,
     Data,
     Line,
+    Machine,
     Model,
     Module,
     Modules,
@@ -27,7 +28,7 @@ from lup import (
     Secret,
     Span,
 )
-from lup.testing import Accepted, Testing
+from lup.testing import Accepted, Refused, Testing
 
 
 class Note(Model):
@@ -50,6 +51,12 @@ class Ledger(Part):
         """Note something."""
         return Noted(text=note.text)
 
+    @lup.tool
+    async def forwarded(self, note: Note) -> Noted:
+        """Seal a note through another project's vault."""
+        with lup.within("story"):
+            return await Vault.sealed(note)
+
     @lup.view
     async def noting(self, note: Note) -> Blocks:
         """Show a note as a line."""
@@ -67,8 +74,9 @@ class Vault(Part):
     key: Secret
 
     @lup.service
-    async def sealed(self, note: Note) -> Noted:
-        """Seal a note with the key."""
+    async def sealed(self, note: Note, by: Codebase | Machine) -> Noted:
+        """Seal a note with the key, for the project's code or the machine's own parts."""
+        del by
         return Noted(text=f"{note.text}:{len(self.key.value)}")
 
 
@@ -263,3 +271,26 @@ class RunningPromises(Part):
         pinned = await started.serve("pinned", note, Codebase(repository=repository))
         assert isinstance(pinned, Accepted)
         assert pinned.output == Noted(text=note.text)
+
+
+class Naming(Model):
+    """Whose code a promise runs a part's tool as: a project's, or the machine's own."""
+
+    machine: bool
+
+
+class WithinPromises(Part):
+    """What a project can count on of a call naming another project: only the machine's own parts may."""
+
+    @lup.promise
+    async def only_the_machines_code_names_a_project(self, by: Testing) -> None:
+        """A service call made within a project another than the caller's own (`lup.within`) is refused where a project's code makes it, and carried where the machine's own parts make it: a project's code calls its own project's parts alone."""
+        naming = by.any(Naming)
+        note = by.any(Note)
+        started = await by.started(
+            couriered(), secrets={"key": by.any(str)}, machine=naming.machine
+        )
+        called = await started.call("forwarded", note, by.any(Agent))
+        assert isinstance(called, Accepted) == naming.machine
+        if isinstance(called, Refused):
+            assert "Vault.sealed" in called.rejection.about

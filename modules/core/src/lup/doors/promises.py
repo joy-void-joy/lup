@@ -8,7 +8,7 @@ project's code reaches lup where pyright doesn't hold it (`README.md` here,
 """
 
 import asyncio
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import Field
 
@@ -782,3 +782,79 @@ class PartsPromises(Part):
         assert any("-1" in each for each in started.ran("ls"))
         missing = await started.call("missing", Asking(), by.any(Agent))
         assert isinstance(missing, Refused)
+
+
+class Rang(lup.Event):
+    """A bell rang, refused where it says so: an event its methods answer."""
+
+    answered: ClassVar[bool] = True
+    refuse: bool = False
+
+
+class Tolled(lup.Event):
+    """Another bell tolled: an event none of `Bells`' methods but one run at."""
+
+    answered: ClassVar[bool] = True
+
+
+class Bells(Part):
+    """Methods run at a bell, answering words, blanks, nothing, or refusing."""
+
+    @lup.on(Rang)
+    async def first(self, rang: Rang) -> str | None:
+        """Answer first."""
+        del rang
+        return "first"
+
+    @lup.on(Rang)
+    async def blank(self, rang: Rang) -> str | None:
+        """Answer nothing but blanks."""
+        del rang
+        return "   "
+
+    @lup.on(Rang)
+    async def silent(self, rang: Rang) -> str | None:
+        """Answer nothing."""
+        del rang
+
+    @lup.on(Tolled)
+    async def tolled(self, tolled: Tolled) -> str | None:
+        """Answer the other bell alone."""
+        del tolled
+        return "tolled"
+
+    @lup.on(Rang)
+    async def refusing(self, rang: Rang) -> str | None:
+        """Refuse a bell that says to."""
+        if rang.refuse:
+            message = "refused"
+            raise lup.RefusedError(message)
+        return None
+
+    @lup.on(Rang)
+    async def after(self, rang: Rang) -> str | None:
+        """Answer last."""
+        del rang
+        return "after"
+
+
+class Belfry(Module):
+    """Bells, rung."""
+
+    name = "belfry"
+    parts: Parts = Parts.of(Bells)
+
+
+class EventsPromises(Part):
+    """What a module can count on of an event its methods run at."""
+
+    @lup.promise
+    async def an_event_is_answered_by_its_own_methods_in_order(
+        self, by: Testing
+    ) -> None:
+        """An event runs the methods run at its class alone, one after another in their order, and answers each one's words, blanks and nothing left out; a method refusing it stops the rest, its words the refusal."""
+        refuse = by.any(bool)
+        started = await by.started(Project(modules=Modules.default().add(Belfry())))
+        heeded = await started.happened(Rang(refuse=refuse))
+        assert heeded.told == (["first"] if refuse else ["first", "after"])
+        assert heeded.refused == ("refused" if refuse else None)
