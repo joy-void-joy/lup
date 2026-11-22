@@ -3,7 +3,7 @@
 // every comment that says something and isn't held back, and dropping those that say nothing; and its review, as the
 // server's (`lup.environment.shell.review`), each part a line of its id.
 
-import type { Block, Blocks, Comment, Delivered, Draft, Looks, Viewing } from "../generated/read";
+import type { Block, Blocks, Comment, Delivered, Draft, Looks, Marked, Viewing } from "../generated/read";
 import { viewKey } from "../document/tree";
 import declared from "../generated/core-looks.json";
 import type { Source } from "../shell/shell";
@@ -17,6 +17,8 @@ export class Memory implements Source {
     readonly #reviews = new Set<(review: Blocks) => void>();
     /** The draft, as the core keeps it. */
     draft: Draft = { comments: [], marks: [] };
+    /** Every mark sent, in the order sends sent them: the actions the core ran. */
+    sent: Marked[] = [];
 
     /** Set what `viewing` answers, and push it to every watch of it. */
     set(viewing: Viewing, blocks: Blocks): void {
@@ -27,18 +29,36 @@ export class Memory implements Source {
         }
     }
 
-    /** Return the review of the draft as the server lays it out, but each place a part goes said by whom it's chosen to reach alone. */
+    /**
+     * Return the review of the draft as the server lays it out, each part a line under where it goes, then what's held
+     * back: but each place a comment goes said by whom it's chosen to reach alone, and a mark's by what it does.
+     */
     review(): Blocks {
-        const line = (comment: Comment): Block => ({
+        interface Part {
+            readonly id: string;
+            readonly text: string;
+            readonly held: boolean;
+            readonly to: string;
+        }
+        const parts: Part[] = [
+            ...this.draft.comments.map((each) => ({
+                id: each.id,
+                text: each.words.split("\n")[0] ?? "",
+                held: each.held,
+                to: each.to === null ? "to what it's on" : `to ${JSON.stringify(each.to)}`,
+            })),
+            ...this.draft.marks.map((each) => ({ id: each.id, text: each.offer.says, held: each.held, to: "marked" })),
+        ];
+        const line = (part: Part): Block => ({
             block: "line",
-            id: comment.id,
+            id: part.id,
             version: null,
             offers: [],
             reaches: null,
             sighted: null, standing: null,
-            spans: [{ text: comment.words.split("\n")[0] ?? "", tone: "strong", ticking: null, gauge: null, refers: null }],
+            spans: [{ text: part.text, tone: "strong", ticking: null, gauge: null, refers: null }],
         });
-        const place = (id: string, summary: string, comments: readonly Comment[]): Block => ({
+        const place = (id: string, summary: string, placed: readonly Part[]): Block => ({
             block: "fold",
             id,
             version: null,
@@ -48,17 +68,16 @@ export class Memory implements Source {
             kind: "sent-to",
             summary: [{ text: summary, tone: "strong", ticking: null, gauge: null, refers: null }],
             open: null,
-            content: comments.map(line),
+            content: placed.map(line),
         });
-        const sending = this.draft.comments.filter((each) => !each.held);
-        const held = this.draft.comments.filter((each) => each.held);
-        const where = (comment: Comment): string => (comment.to === null ? "to what it's on" : `to ${JSON.stringify(comment.to)}`);
-        const places = [...new Set(sending.map(where))].map((to) =>
-            place(`to ${to}`, to, sending.filter((each) => where(each) === to)),
+        const sending = parts.filter((each) => !each.held);
+        const held = parts.filter((each) => each.held);
+        const places = [...new Set(sending.map((each) => each.to))].map((to) =>
+            place(to === "marked" ? to : `to ${to}`, to, sending.filter((each) => each.to === to)),
         );
         return {
             blocks: [...places, ...(held.length > 0 ? [place("held", "held back", held)] : [])],
-            summary: this.draft.comments.length > 0 ? [{ text: `draft · ${sending.length} to send`, tone: "strong", ticking: null, gauge: null, refers: null }] : [],
+            summary: parts.length > 0 ? [{ text: `draft · ${sending.length} to send`, tone: "strong", ticking: null, gauge: null, refers: null }] : [],
             offers: [],
         };
     }
@@ -93,6 +112,15 @@ export class Memory implements Source {
         this.#reviewed();
     }
 
+    mark(marked: Marked): void {
+        const kept = this.draft.marks.some((each) => each.id === marked.id);
+        this.draft = {
+            ...this.draft,
+            marks: kept ? this.draft.marks.map((each) => (each.id === marked.id ? marked : each)) : [...this.draft.marks, marked],
+        };
+        this.#reviewed();
+    }
+
     erase(id: string): void {
         this.draft = { comments: this.draft.comments.filter((each) => each.id !== id), marks: this.draft.marks.filter((each) => each.id !== id) };
         this.#reviewed();
@@ -100,11 +128,16 @@ export class Memory implements Source {
 
     send(): void {
         const held = this.draft.comments.filter((each) => each.held);
-        const went = this.draft.comments.filter((each) => !each.held && each.words.trim() !== "").map((each) => each.id);
-        this.draft = { comments: held, marks: this.draft.marks.filter((each) => each.held) };
+        const marksHeld = this.draft.marks.filter((each) => each.held);
+        const went = [
+            ...this.draft.comments.filter((each) => !each.held && each.words.trim() !== "").map((each) => each.id),
+            ...this.draft.marks.filter((each) => !each.held).map((each) => each.id),
+        ];
+        this.sent = [...this.sent, ...this.draft.marks.filter((each) => !each.held)];
+        this.draft = { comments: held, marks: marksHeld };
         this.told(this.draft);
         for (const delivered of this.#delivered) {
-            delivered({ kind: "delivered", went, stayed: [], held: held.map((each) => each.id) });
+            delivered({ kind: "delivered", went, stayed: [], held: [...held, ...marksHeld].map((each) => each.id) });
         }
     }
 

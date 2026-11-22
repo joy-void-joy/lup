@@ -115,16 +115,23 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
 def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
     """Return `item` as its heading, who wrote it, of what kind, its number, whether it's new or waits, then its words; then, for a module's own kind of item, the fold its kind lays out, opening on the module's view.
 
-    Each of its blocks offers a comment on it, and what its kind offers beside.
+    Each of its blocks offers a comment on it, and what its kind offers beside;
+    clearing it where its kind offers nothing under that verb, so Space d on an
+    item clears the item, never the concern around it.
     """
     new = inbox.unseen(item)
     waits = item in inbox.waits_on_operator()
     writer = inbox.by(item)
     number = item.number or 0
     laid = item.laid()
+    kind = [] if laid is None else laid.offers
+    clearing = Offer.of(
+        shows.clear, Clearing(repository=inbox.repository, what=str(number))
+    )
     offers = [
         Offer.of(shows.comment, OnItem(item=number)),
-        *([] if laid is None else laid.offers),
+        *([] if any(each.verb == clearing.verb for each in kind) else [clearing]),
+        *kind,
     ]
     folded: list[Block] = (
         []

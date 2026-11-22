@@ -8,12 +8,13 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { expect, test } from "vitest";
 
-import type { Blocks, Fold, Markdown, Viewing } from "../generated/read";
+import type { Block, Blocks, Fold, Line, Markdown, Offer, Viewing } from "../generated/read";
 import { every, foldKind, nodeAt, offsetOf, section } from "../document/tree";
 import { blocks, fold } from "../testing/blocks";
 import { press } from "../testing/keys";
 import { Memory, looks } from "../testing/memory";
 import { law, scenario, type Machine } from "../testing/promise";
+import { quotedIn } from "./comments";
 import { bindVim, vimBindings } from "./keymap";
 import { hiddenOn } from "./markdown";
 import { beside, cursorFolds, type Beside } from "./margin";
@@ -45,7 +46,7 @@ const keys = fc.constantFrom(
     ["u"],
     ["<C-r>"],
     [":w"],
-    ...["fn", "fb", "Fn", "Fb", "fz", "c", "x", "d"].map((typed) => ["<Space>", ...typed]),
+    ...["fn", "fb", "Fn", "Fb", "fz", "c", "x", "d", "t"].map((typed) => ["<Space>", ...typed]),
 );
 
 /** The keys that leave insert mode: vim's own, and Ctrl+Enter, which ends the comment being written. */
@@ -413,18 +414,34 @@ scenario("Ctrl+Enter opens the window on the review of what the draft sends, Esc
     }
 });
 
-scenario("Space x holds a comment back, so a send leaves it in the draft as it is, and Space d on its line in the review lets it go", async (by) => {
+/** Put `inner`'s cursor on the line of the review that's the part of the draft of id `id`, under the place keyed `place`. */
+function onPart(inner: Shell, place: string, id: string): boolean {
+    const part = inner.document.node(`root/${place}/${id}`);
+    expect(part).not.toBeNull();
+    if (part === null) {
+        return false;
+    }
+    // vim's own motions there need the page laid out, which the harness isn't.
+    inner.go(offsetOf(part));
+    return true;
+}
+
+scenario("Space x on a comment's line in the review keeps it back, so a send leaves it in the draft as it is, and Space d there sends it", async (by) => {
     const content = by.any(blocks(1, kinds).filter((made) => made.some((block) => block.block === "line")));
     const { shell: opened, memory, parent } = shellOn(content);
     try {
-        await press(opened, ["G", "o", "k", "e", "e", "p", "<Esc>", "<Space>", "x"]);
+        await press(opened, ["G", "o", "k", "e", "e", "p", "<Esc>", "<C-CR>"]);
+        const id = memory.draft.comments[0]?.id ?? "";
+        if (!onPart(windowOf(opened), "to to what it's on", id)) {
+            return;
+        }
+        await press(windowOf(opened), ["<Space>", "x"]);
         expect(memory.draft.comments.map((each) => each.held)).toEqual([true]);
-        await press(opened, ["<C-CR>"]);
         await press(windowOf(opened), ["<C-CR>"]);
         expect(memory.draft.comments.map((each) => [each.words, each.held])).toEqual([["keep", true]]);
         await press(opened, ["<C-CR>"]);
         const inner = windowOf(opened);
-        const part = inner.document.node(`root/held/${memory.draft.comments[0]?.id ?? ""}`);
+        const part = inner.document.node(`root/held/${id}`);
         expect(part).not.toBeNull();
         if (part === null) {
             return;
@@ -665,3 +682,142 @@ scenario("A table's rows stay a line each, as the view answered them, its column
         parent.remove();
     }
 });
+
+/** What a block offers under each of `verbs`: a command of the root view's module, given the block's id. */
+function offersOf(id: string, verbs: readonly string[]): Offer[] {
+    return verbs.map((verb) => ({ command: `${verb}-it`, module: null, given: { id }, verb, says: `${verb} ${id}`, draws: null }));
+}
+
+/** A line saying `text`, of id `id`. */
+function lineOf(id: string, text: string): Line {
+    return { block: "line", id, version: null, offers: [], reaches: null, sighted: null, standing: null, spans: [{ text, tone: "plain", ticking: null, gauge: null, refers: null }] };
+}
+
+/** An open fold of the kind `note`, of id `id`, holding `content`. */
+function foldOf(id: string, content: Block[]): Fold {
+    return {
+        block: "fold",
+        id,
+        version: null,
+        offers: [],
+        reaches: null,
+        sighted: null,
+        standing: null,
+        kind: "note",
+        summary: [{ text: `the fold ${id}`, tone: "plain", ticking: null, gauge: null, refers: null }],
+        open: true,
+        content,
+    };
+}
+
+/** Return `made` with each block offering what `pick` says for it, folds' given content among them. */
+function offering(made: readonly Block[], pick: (id: string) => readonly string[]): Block[] {
+    return made.map((block) => {
+        const offered = { ...block, offers: offersOf(block.id, pick(block.id)) };
+        return offered.block === "fold" && Array.isArray(offered.content) ? { ...offered, content: offering(offered.content, pick) } : offered;
+    });
+}
+
+scenario("Space d marks done on the innermost block at the cursor that offers it, Space x puts decline in its place there, and the second Ctrl+Enter sends what's marked", async (by) => {
+    const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", ["done"]) };
+    const body: Markdown = { block: "markdown", id: "body", version: null, offers: [], reaches: null, sighted: null, standing: null, text: by.any(fc.constantFrom("the body", "a\nb")), tone: "plain" };
+    const concern: Fold = { ...foldOf("c", [item, body]), offers: offersOf("c", ["done", "decline"]) };
+    const { shell: opened, memory, parent } = shellOn([concern]);
+    try {
+        const at = (key: string): void => {
+            const node = opened.document.node(key);
+            expect(node).not.toBeNull();
+            opened.go(node === null ? 0 : offsetOf(node));
+        };
+        at("root/c/item");
+        await press(opened, ["<Space>", "d"]);
+        expect(memory.draft.marks.map((each) => [each.on.block, each.offer.verb])).toEqual([["item", "done"]]);
+        await press(opened, ["<Space>", "d"]);
+        expect(memory.draft.marks).toEqual([]);
+        at("root/c/body");
+        await press(opened, ["<Space>", "d"]);
+        expect(memory.draft.marks.map((each) => [each.on.block, each.offer.verb])).toEqual([["c", "done"]]);
+        const id = memory.draft.marks[0]?.id;
+        await press(opened, ["<Space>", "x"]);
+        expect(memory.draft.marks.map((each) => [each.id, each.on.block, each.offer.verb])).toEqual([[id, "c", "decline"]]);
+        await press(opened, ["<Space>", "t"]);
+        expect(memory.draft.marks.map((each) => each.offer.verb)).toEqual(["decline"]);
+        await press(opened, ["<C-CR>"]);
+        expect(opened.window?.role()).toBe("review");
+        expect(memory.sent).toEqual([]);
+        await press(windowOf(opened), ["<C-CR>"]);
+        expect(memory.sent.map((each) => [each.on.block, each.offer.command])).toEqual([["c", "decline-it"]]);
+        expect(memory.draft.marks).toEqual([]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("Space x on a mark's line in the review keeps it back from the send, and Space t there sends it the next time", async (by) => {
+    const verb = by.any(fc.constantFrom("done", "decline"));
+    const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", [verb]) };
+    const { shell: opened, memory, parent } = shellOn([item]);
+    try {
+        opened.go(offsetOf(opened.document.node("root/item") ?? opened.document.root));
+        await press(opened, ["<Space>", verb === "done" ? "d" : "x", "<C-CR>"]);
+        const id = memory.draft.marks[0]?.id ?? "";
+        if (!onPart(windowOf(opened), "marked", id)) {
+            return;
+        }
+        await press(windowOf(opened), ["<Space>", "x", "<C-CR>"]);
+        expect(memory.sent).toEqual([]);
+        expect(memory.draft.marks.map((each) => each.held)).toEqual([true]);
+        await press(opened, ["<C-CR>"]);
+        if (!onPart(windowOf(opened), "held", id)) {
+            return;
+        }
+        await press(windowOf(opened), ["<Space>", "t", "<C-CR>"]);
+        expect(memory.sent.map((each) => each.id)).toEqual([id]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+/** The shell over blocks each offering some of the core's verbs, which Space and their keys mark. */
+const marking: Machine<Running, { readonly marks: readonly { readonly block: string; readonly verb: string; readonly offered: boolean }[] }, Event> = {
+    name: "the shell, its blocks offering verbs",
+    start(by) {
+        const memory = new Memory();
+        const made = offering(by.any(blocks(2, kinds)), () => by.any(fc.subarray(["done", "decline", "toggle"])));
+        memory.set(root, answer(made));
+        const parent = document.createElement("div");
+        document.body.append(parent);
+        return { shell: new Shell(parent, root, looks, memory), memory, parent };
+    },
+    events: fc
+        .constantFrom(..."j k G gg za zR zM zfn".split(" ").map((typed) => [...typed]), ...["d", "x", "t", "fn", "Fn", "Fb"].map((typed) => ["<Space>", ...typed]), ["<Esc>"])
+        .map((typed): Event => ({ keys: typed })),
+    async apply(running, event) {
+        if ("keys" in event) {
+            await press(running.shell, event.keys);
+        }
+    },
+    state(running) {
+        return {
+            marks: running.memory.draft.marks.map((each) => {
+                // The block the core acts on at the send: the first of the mark's id in its view's answer.
+                const node = quotedIn(running.shell.document.root, each.on);
+                return {
+                    block: node?.key ?? "",
+                    verb: each.offer.verb,
+                    offered: node?.block?.offers.some((offer) => offer.verb === each.offer.verb) === true,
+                };
+            }),
+        };
+    },
+    end(running) {
+        running.shell.destroy();
+        running.parent.remove();
+    },
+};
+
+law(marking, "A verb is only ever marked on a block that offers it, and a block holds one mark at most", (step) =>
+    step.after.marks.every((each) => each.offered) && new Set(step.after.marks.map((each) => each.block)).size === step.after.marks.length,
+);

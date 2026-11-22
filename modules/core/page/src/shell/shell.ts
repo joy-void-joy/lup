@@ -8,11 +8,12 @@ import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSp
 import { Decoration, EditorView, ViewPlugin, WidgetType, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 
-import type { Blocks, Comment, Delivered, Draft, Looks, Standing, Viewing } from "../generated/read";
+import type { Blocks, Comment, Delivered, Draft, Looks, Marked, Standing, Viewing } from "../generated/read";
 import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, opening, section, viewKey, type Change, type Node } from "../document/tree";
 import { fromCore, redrawn } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
+import { glyphOf, Marks } from "./marks";
 import { markdown, sourced, sourcesOf, unindented } from "./markdown";
 import { standings } from "./palette";
 import { framed } from "./frame";
@@ -26,6 +27,8 @@ export interface Source {
     watch(viewing: Viewing, answered: (blocks: Blocks) => void): () => void;
     /** Keep `comment` in the draft, in place of the one of its id where there's one. */
     write(comment: Comment): void;
+    /** Keep `marked` in the draft, in place of the mark of its id where there's one. */
+    mark(marked: Marked): void;
     /** Take the comment or mark of id `id` out of the draft. */
     erase(id: string): void;
     /** Send the draft. */
@@ -85,6 +88,8 @@ export class Shell {
     readonly kinds: Kinds;
     readonly source: Source;
     readonly comments: Comments;
+    /** The verbs marked on the document's blocks, waiting in the draft. */
+    readonly marks: Marks;
     /** The document's shell, where this one draws its window; none for the document's own. */
     readonly owner: Shell | null;
     /** The page's window, under the document: none for a window's own shell. */
@@ -118,6 +123,7 @@ export class Shell {
         this.owner = placing.owner ?? null;
         this.document = new Document(section("root", root, { blocks: [], summary: [], offers: [] }));
         this.comments = new Comments(this);
+        this.marks = new Marks(this);
         this.#header = placing.header ?? null;
         this.#keys = placing.keys ?? null;
         const extensions = placing.extensions ?? [];
@@ -181,6 +187,7 @@ export class Shell {
             }),
         });
         this.comments.start();
+        this.marks.start();
         let inserting = false;
         getCM(this.view)?.on("vim-mode-change", (event: { mode: string }) => {
             const was = inserting;
@@ -216,6 +223,7 @@ export class Shell {
         this.outline?.shell.destroy();
         this.#stopReviews();
         this.comments.destroy();
+        this.marks.destroy();
         this.#stop();
         for (const watched of this.#watching.values()) {
             watched.stop();
@@ -528,6 +536,14 @@ const drawing = ViewPlugin.fromClass(
                     if (heading && node.block !== null && shell.marked.has(node.block.id)) {
                         classes.push("lup-marked");
                     }
+                    const verb = start === line.from && node.block !== null ? shell.marks.on(node) : null;
+                    if (verb !== null) {
+                        classes.push("lup-verb");
+                        attributes["data-verb"] = `${glyphOf(verb.offer.verb)} ${verb.offer.says}${verb.held ? " (held back)" : ""}`;
+                        if (verb.reason !== null) {
+                            attributes["data-said"] = verb.reason;
+                        }
+                    }
                     const colour =
                         heading && kind !== null
                             ? shell.kinds.folds.get(kind)?.colour
@@ -654,6 +670,9 @@ export const look = EditorView.theme(
             boxShadow: "inset 2px 0 0 var(--lup-comment)",
         },
         ".lup-comment-first::before": { content: '"» "', color: "var(--lup-muted)" },
+        // A verb marked on a block, at its first line's end: what the send will do, in what the operator wrote's colour.
+        ".lup-verb::after": { content: '"  " attr(data-verb)', color: "var(--lup-comment)", fontWeight: "700" },
+        ".lup-verb[data-said]::after": { content: '"  " attr(data-verb) "  ◂ " attr(data-said)', color: "var(--lup-trouble)", fontWeight: "700" },
         ".lup-standing-waiting": { fontWeight: "700" },
         ".lup-quoted": { textDecoration: "underline 2px var(--lup-comment)", textUnderlineOffset: "3px" },
         ".lup-placeholder .lup-counted": { color: "var(--lup-comment)" },

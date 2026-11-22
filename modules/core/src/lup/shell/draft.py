@@ -71,8 +71,9 @@ class Comment(Model):
     it was written: the next send sends it as it is. Writing it again starts
     over."""
     held: bool = False
-    """Whether the operator holds it back from sends (Space x): it stays in the
-    draft, as it is, until they let it go (Space d)."""
+    """Whether the operator keeps it back from sends (Space x on its line in
+    the review): it stays in the draft, as it is, until they let it go (Space
+    d there)."""
 
 
 class Outcome(Model):
@@ -91,13 +92,16 @@ class Marked(Model):
     id: str
     """The page's id for the mark."""
     on: Quote
+    """The block it's on, whole, quoting its first line, which the review names
+    it by."""
     offer: Offer
     reason: str | None = None
     """Why it stayed in the draft at the last send; none where it hasn't been
     sent, or nothing kept it."""
     held: bool = False
-    """Whether the operator holds it back from sends (Space x): it stays in the
-    draft, as it is, until they let it go (Space d)."""
+    """Whether the operator keeps it back from sends (Space x on its line in
+    the review): it stays in the draft, as it is, until they let it go (Space
+    d there)."""
 
 
 class Draft(Model):

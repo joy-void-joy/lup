@@ -6,6 +6,7 @@
 import { getCM } from "@replit/codemirror-vim";
 
 import { foldKind, nodeAt, type Node } from "../document/tree";
+import { said, vimBindings } from "./keymap";
 import { standings } from "./palette";
 import type { Shell } from "./shell";
 
@@ -35,8 +36,8 @@ export function keysHere(shell: Shell): Keyed[] {
     const role = owner.window?.shell() === shell ? owner.window.role() : null;
     if (role === "review") {
         return [
-            { keys: "Space x", does: "hold back" },
-            { keys: "Space d", does: "let go" },
+            { keys: "Space d", does: "send it" },
+            { keys: "Space x", does: "keep it back" },
             { keys: "Space s", does: "send elsewhere" },
             { keys: "Ctrl+Enter", does: "send" },
             { keys: "Esc", does: "close" },
@@ -61,7 +62,6 @@ export function keysHere(shell: Shell): Keyed[] {
             { keys: "i", does: "write" },
             { keys: "dd", does: "take a line out" },
             { keys: "Space s", does: "send to" },
-            { keys: "Space x", does: "hold back" },
             { keys: "]n", does: "next comment" },
             { keys: "Ctrl+Enter", does: "review the draft" },
             every,
@@ -71,12 +71,30 @@ export function keysHere(shell: Shell): Keyed[] {
     const atSummary = fold !== null && nodeAt(shell.document.root, shell.view.state.selection.main.head) === fold;
     return [
         ...(atSummary ? [{ keys: "za", does: shell.isOpen(fold) ? "close" : "open" }] : []),
+        ...offeredHere(shell),
         { keys: "o", does: "comment" },
         { keys: "c", does: "comment on a passage" },
         { keys: "Space f", does: "choose a fold" },
         { keys: "Ctrl+Enter", does: "review the draft" },
         every,
     ];
+}
+
+/** Return each verb's key that marks something where `shell`'s cursor is, saying what it does there, or that it unmarks it. */
+function offeredHere(shell: Shell): Keyed[] {
+    return vimBindings.flatMap((bind) => {
+        if (!bind.command.startsWith("verb:")) {
+            return [];
+        }
+        const verb = bind.command.slice("verb:".length);
+        const node = shell.marks.offeringHere(verb);
+        const offer = node?.block?.offers.find((each) => each.verb === verb) ?? null;
+        if (node === null || offer === null) {
+            return [];
+        }
+        const marked = shell.marks.on(node)?.offer.verb === verb;
+        return [{ keys: said(bind.keys).trim(), does: marked ? `unmark ${offer.says}` : offer.says }];
+    });
 }
 
 /** Draw where `shell`'s cursor is in `header`, and the keys that do something there in `keys`. */
