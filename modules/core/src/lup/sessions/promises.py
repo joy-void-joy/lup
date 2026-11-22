@@ -690,6 +690,20 @@ class SessionsPromises(Part):
             assert carried.call.by == Agent.of(session).model_dump(mode="json")
 
     @lup.promise
+    async def a_room_holds_the_machines_own_lup_whole(self, by: Testing) -> None:
+        """A session's room holds the machine's own lup whole, read-only at its own paths, for its first program, its hooks and its tool server to import: the machine's environment, and the directory `lup` is imported from where that's beside the environment, as an editable install's source tree is."""
+        async with machined(by) as machine:
+            session = await machine.begun(by.any(Named).name)
+            command = machine.room(session)
+        environment = Path(sys.prefix)
+        source = Path(lup.__file__).parents[1]
+        whole = [environment, *([] if source.is_relative_to(environment) else [source])]
+        for directory in whole:
+            [mount] = mounted(command, directory)
+            assert "ro=true" in mount
+            assert source_of(mount) == directory.resolve()
+
+    @lup.promise
     async def a_subagents_call_to_lups_tools_is_stamped(self, by: Testing) -> None:
         """A call about to run, as a session's hook says it, is read with the session's runtime: a subagent's call to one of lup's own tools is answered with what it's given and lup's stamp of their conversation beside it; the session's own conversation's call, or a call to another tool, runs as it is, unstamped; a hook from the room of a session lup never started is refused."""
         called, stranger = by.any(Called), by.any(Agent)

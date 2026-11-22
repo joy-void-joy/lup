@@ -17,6 +17,7 @@ which a room kept nothing of.
 import csv
 import hashlib
 import io
+import sys
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Literal
@@ -82,6 +83,22 @@ class Bind(Model):
     def destination(self) -> Path:
         """Return where it appears in the container."""
         return self.source if self.target is None else self.target
+
+
+def imported() -> list[Path]:
+    """Return each directory this process imports its code from, outside its environment and the interpreter: a source tree an editable install points at, as a commit's environment the machine runs from does. A container running the machine's own code mounts each beside the environment, or `lup` isn't whole there. Never the working directory, which no container of the machine's must import from."""
+    here = Path.cwd()
+    prefix = Path(sys.prefix)
+    base = Path(sys.base_prefix)
+    return [
+        path
+        for each in sys.path
+        if each
+        and (path := Path(each)).is_dir()
+        and path != here
+        and not path.is_relative_to(prefix)
+        and not path.is_relative_to(base)
+    ]
 
 
 class Spec(Model):

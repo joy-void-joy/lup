@@ -23,7 +23,7 @@ from lup.doors.door import RefusedError
 from lup.doors.parties import Machine
 from lup.doors.parts import Data, Part, Program
 from lup.hosting.carrying import Carrying, Naming
-from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec
+from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec, imported
 from lup.programs.git.running import Git
 from lup.remote.rooms import configured, launcher
 from lup.rooms.layout import InRoom, Kept, digest
@@ -454,7 +454,15 @@ class Rooms(Part, machine=True, shared=True):
         sockets: Path,
         interpreters: Path,
     ) -> Spec:
-        """Return a session's room, its runtime's command to come: the repository read-write, its git `config` and `hooks/` read-only, lup's own files, homes and CLIs, its variables."""
+        """Return a session's room, its runtime's command to come: the repository read-write, its git `config` and `hooks/` read-only, lup's own files, homes and CLIs, its variables.
+
+        The machine's own lup is mounted whole, read-only at its own paths:
+        its environment, and every directory it imports its code from beside
+        it (`imported`), the source tree a commit's environment points at as
+        an editable install among them. Without that tree, the room's first
+        program, its hooks and its tool server can't import `lup`, and the
+        room ends as it starts.
+        """
         tree = room.common.parent if room.common.name == ".git" else room.common
         hooks = room.common / "hooks"
         hooks.mkdir(exist_ok=True)
@@ -468,6 +476,7 @@ class Rooms(Part, machine=True, shared=True):
             Bind(source=hooks),
             Bind(source=rooms, read_only=False),
             Bind(source=lup_environment.resolve(), target=lup_environment),
+            *[Bind(source=each.resolve(), target=each) for each in imported()],
             Bind(source=interpreters.resolve(), target=interpreters),
             Bind(source=placed.session),
             Bind(source=placed.runtime, read_only=False),
