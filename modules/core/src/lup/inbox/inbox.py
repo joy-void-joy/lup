@@ -29,6 +29,7 @@ from lup.inbox.records import (
     Done,
     Ended,
     Felt,
+    Filed,
     Friction,
     In,
     Item,
@@ -280,8 +281,9 @@ class Inbox(Model, arbitrary_types_allowed=True):
         *,
         friction: bool = False,
         name: str | None = None,
+        also: list[PartyRecord] | None = None,
     ) -> Concern:
-        """Open a concern titled `title`, under `under`, with `by`'s `words` its first item, told to the operator: a `Friction` where `friction` says so.
+        """Open a concern titled `title`, under `under`, with `by`'s `words` its first item, for the operator and each of `also`: a `Friction` where `friction` says so.
 
         It's named `name`, or after its title where none is given (`slug`),
         with a number after where another node holds that name.
@@ -302,25 +304,29 @@ class Inbox(Model, arbitrary_types_allowed=True):
             )
         )
         self.edge(Under, under, concern, by)
-        self.said(by, concern, words)
+        self.filed(by, concern, words, also)
         return concern
 
-    def said(
-        self, by: PartyRecord, concern: Concern, words: str, tone: Tone = "note"
-    ) -> Message:
-        """Keep `by`'s `words` in `concern`, told to the operator, and return them."""
-        message = self.database.kept(
-            Message(
+    def filed(
+        self,
+        by: PartyRecord,
+        concern: Concern,
+        words: str,
+        also: list[PartyRecord] | None = None,
+    ) -> Item:
+        """Keep `by`'s `words` filed in `concern`, for the operator and each of `also`, and return them: in a friction a note, news as any is; in a concern words read with it, never news."""
+        kind = Message if isinstance(concern, Friction) else Filed
+        item = self.database.kept(
+            kind(
                 repository=self.repository,
                 by=by.key,
                 at=self.now(),
-                to=[self.operator().key],
+                to=[self.operator().key, *(each.key for each in also or [])],
                 text=words,
-                tone=tone,
             )
         )
-        self.edge(In, concern, message, by)
-        return message
+        self.edge(In, concern, item, by)
+        return item
 
     def free(self, name: str | None) -> str | None:
         """Return `name`, or `name` with the first number after it that no node of the repository holds; none for none."""
@@ -399,7 +405,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
         def acts() -> Iterator[str]:
             if said.text is not None:
-                self.said(agent, concern, said.text)
+                self.filed(agent, concern, said.text)
                 yield "your words are in it"
             if said.body is not None:
                 self.rewritten(agent, concern, said.body)
@@ -880,6 +886,61 @@ class Inbox(Model, arbitrary_types_allowed=True):
 
     # What stands
 
+    def told_as(self, item: Item, party: PartyRecord) -> str:
+        """Return `item` as it's told to `party`: whole, but words filed in a friction, told to someone who neither wrote it nor holds it, as a subagent's parent is, as one line saying who filed what, where."""
+        places = self.database.drawn_from(item.key, In, current=True)
+        friction = None if not places else self.database.found(places[-1].target)
+        if (
+            not isinstance(friction, Friction)
+            or item.by == party.key
+            or self.holder(friction).key == party.key
+        ):
+            return item.text
+        pile = self.under(friction)
+        where = "" if pile is None else f" in {self.called(pile)}"
+        return (
+            f"{self.writer(item)} filed a friction, @{friction.number}{where}: "
+            f"{friction.title}"
+        )
+
+    def settled_by(self, question: Item) -> list[Item] | None:
+        """Return what answers `question`, oldest first, where something does; none where nothing does yet. Withdrawn, it's settled with nothing to say."""
+        answers = self.answered_by(question)
+        withdrawn = any(
+            isinstance(edge, Withdrawn)
+            for edge in self.database.drawn_to(question.key, Edge)
+        )
+        return answers if answers or withdrawn else None
+
+    def answer_said(self, question: Item, answers: list[Item]) -> str:
+        """Say what answers `question`, as its asker reads it: each answer's rulings and words, each comment's words; that it was withdrawn where nothing answers it."""
+
+        def said(answer: Item) -> str:
+            match answer:
+                case Answer():
+                    rulings = [
+                        f"{each.number}. {each.verdict or 'no verdict'}"
+                        + (f": {each.comment}" if each.comment else "")
+                        for each in answer.rulings
+                    ]
+                    words = [answer.text] if answer.text else []
+                    return "\n".join(
+                        [
+                            f"The operator answered @{question.number} (@{answer.number}):",
+                            *rulings,
+                            *words,
+                        ]
+                    )
+                case _:
+                    return (
+                        f"{self.writer(answer)} on @{question.number} "
+                        f"(@{answer.number}): {answer.text}"
+                    )
+
+        if not answers:
+            return f"@{question.number} is withdrawn."
+        return "\n\n".join(said(each) for each in answers)
+
     def answered_by(self, item: Item) -> list[Item]:
         """Return each item answering `item`, oldest first."""
         keys = [
@@ -912,15 +973,25 @@ class Inbox(Model, arbitrary_types_allowed=True):
         ]
         return [*items, *concerns]
 
+    def unseen(self, item: Item) -> bool:
+        """Say whether `item` is someone else's that the operator hasn't had on their screen, nor cleared: whoever it was for, since they read every exchange."""
+        return (
+            item.by != self.operator().key
+            and not self.database.drawn_to(item.key, Shown)
+            and not self.is_cleared(item)
+        )
+
     def new_to_operator(self) -> list[Item]:
-        """Return each item the operator hasn't had on their screen, nor cleared, oldest first: whoever it was for, since they read every exchange."""
+        """Return the news the operator hasn't had on their screen, nor cleared, oldest first: each unseen item but words filed in a concern, which mark the concern instead."""
         return [
             each
             for each in self.database.nodes(self.repository, Item)
-            if each.by != self.operator().key
-            and not self.database.drawn_to(each.key, Shown)
-            and not self.is_cleared(each)
+            if not isinstance(each, Filed) and self.unseen(each)
         ]
+
+    def fresh(self, concern: Concern) -> bool:
+        """Say whether something in `concern` hasn't been on the operator's screen: its line is new to them until they've opened it."""
+        return any(self.unseen(each) for each in self.said_in(concern))
 
     def shown(self, items: list[Item]) -> None:
         """Say `items` have been on the operator's screen: none of them is new to them after."""
@@ -971,6 +1042,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
                     if standing.left_by is None
                     else self.called(standing.left_by),
                     said=len(self.said_in(each)),
+                    new=self.fresh(each),
                     done=standing.done is not None,
                     cleared=standing.cleared,
                     declined=standing.declined is not None,
