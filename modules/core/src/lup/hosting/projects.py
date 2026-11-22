@@ -451,7 +451,16 @@ class Projects(Part, machine=True, shared=True):
         interpreters: Path,
         sockets: Path,
     ) -> Spec:
-        """Return the container named `name` of the part one for the whole machine `part`: the machine's tree, environment and interpreters read-only at their own paths, its data the directory it kept on the machine, its sockets in memory."""
+        """Return the container named `name` of the part one for the whole machine `part`: the machine's tree, environment and interpreters read-only at their own paths, its data the directory it kept on the machine, its sockets in memory.
+
+        Its Python runs isolated (`-I`), from `/`, so no tree it starts in,
+        the installed `lup`'s `lup/hosting/` among them, is searched for
+        modules: there, `secrets.py` would stand in for the standard
+        library's, and the part would end as it starts. Every directory the
+        machine imports its code from is mounted beside its environment, a
+        source tree an editable install points at among them, so `lup` is
+        whole there.
+        """
         data = sharing.data / part.named()
         data.mkdir(parents=True, exist_ok=True)
         imported = [
@@ -464,7 +473,7 @@ class Projects(Part, machine=True, shared=True):
             image=self.image(sharing.repository, part.packages),
             command=[
                 str(sharing.environment / "bin" / "python"),
-                "-P",
+                "-I",
                 "-m",
                 "lup.environment.running",
             ],

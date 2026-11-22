@@ -3,12 +3,15 @@
 Each is checked through the harness, the machine's parts started as the
 machine's own (`machine=True`), every program they run stood in for as the
 promise scripts it, so the gate checks what lup asks podman to do without
-running it (`README.md` here, *Promises*).
+running it (`README.md` here, *Promises*). One runs a container's own program,
+Python, for real, where its container would start it: what fails there is
+Python's finding its modules, which no stand-in shows.
 """
 
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Literal, get_args
@@ -16,6 +19,7 @@ from typing import Literal, get_args
 from pydantic import Field, JsonValue
 
 import lup
+import lup.hosting
 import lup.testing
 from lup import Agent, Codebase, Machine, Model, Part
 from lup.testing import (
@@ -1791,7 +1795,7 @@ class MachinewidePromises(Part):
         [command] = [
             each for each in podman_ran(started, "run") if f"--name={container}" in each
         ]
-        assert "-P" in command
+        assert "-I" in command
         assert "--workdir=/" in command
         mounts = [each for each in command if each.startswith("--mount=")]
         environment = [
@@ -1820,6 +1824,50 @@ class MachinewidePromises(Part):
         )
         assert isinstance(hosted, Accepted)
         assert json.loads(hosted.answer())["to"] is not None
+
+    @lup.promise
+    async def a_machinewide_container_starts_whatever_its_tree_holds(
+        self, by: Testing
+    ) -> None:
+        """The program a container of a part one for the whole machine runs starts the machine's own lup whatever the tree it starts in holds: run where its container would start it, in the installed `lup`'s tree, whose `secrets.py` would stand in for the standard library's, it plans the installed `lup`'s declaration."""
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": OPENING_PODMAN, "uv": UV},
+            machine=True,
+        )
+        tree = Path(lup.hosting.__file__).parent
+        environment = Path(sys.prefix)
+        plan = plan_of(Planned(module="chat", part="Desk", shared=True, tools=["note"]))
+        with tempfile.TemporaryDirectory() as state:
+            sharing: JsonValue = {
+                "repository": "lup",
+                "root": str(tree),
+                "declaration": "installed.py",
+                "environment": str(environment),
+                "data": str(Path(state) / "data"),
+                "plan": plan,
+            }
+            shared = await started.serve("machinewide", sharing, Machine())
+        assert isinstance(shared, Accepted)
+        [container] = json.loads(shared.answer())["containers"]
+        [command] = [
+            each for each in podman_ran(started, "run") if f"--name={container}" in each
+        ]
+        [workdir] = [
+            each.removeprefix("--workdir=")
+            for each in command
+            if each.startswith("--workdir=")
+        ]
+        program = command[command.index(str(environment / "bin" / "python")) :]
+        planning = {"format": 1, "kind": "plan", "root": str(tree)}
+        ran = lup.programs.run(
+            *program,
+            cwd=Path(workdir),
+            stdin=json.dumps({**planning, "declaration": "installed.py"}),
+            checked=False,
+        )
+        assert ran.status == 0, ran.said()
+        assert json.loads(ran.text())["parts"]
 
 
 class Aim(Model):
