@@ -4,7 +4,8 @@ The page opens the socket and says the token it was handed in its address's
 fragment, which no request carries; the server then tells it the document's root
 view and the project's kinds (`Opened`), and answers each view the page watches
 (`Watch`), as the operator reads it, with its blocks or why it can't (`Answered`,
-`Unanswered`), and again once what it shows changes. One socket for every watch, since
+`Unanswered`), and again once what it shows changes, which it finds by reading
+it again (`Session.watched`). One socket for every watch, since
 a browser keeps few connections to a host; a frame the server can't read is
 refused alone, never closing the socket (`README.md` in `lup/shell/`, *The server*).
 
@@ -21,6 +22,7 @@ import json
 import logging
 import secrets
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 lazy import socket
@@ -225,6 +227,16 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     repository: str | None = None
     """The repository the dashboard serves, whose No agent pile takes a comment
     on what reaches no party; none where nothing takes one."""
+    again: timedelta = timedelta(seconds=2)
+    """How soon a view watched is read again after what it shows changed, to
+    tell the page what it shows next: each read finding it the same waits twice
+    as long as the one before, up to `quiet`."""
+    quiet: timedelta = timedelta(seconds=15)
+    """The longest between two reads of a view watched, while what it shows
+    stays the same: how late at most the page shows what an agent said."""
+    refused: timedelta = timedelta(minutes=2)
+    """The longest between two reads of a view that can't be answered, so one
+    refused as absent costs a read every two minutes, never a stream of them."""
 
     async def changed(self, draft: Draft, by: Session | None = None) -> None:
         """Keep `draft` in place of the draft, tell every page open but `by`, the page that wrote the change, which holds it already, and lay the review out again for every page.
@@ -553,19 +565,27 @@ class Carried(Socket, Model, arbitrary_types_allowed=True):
         await self.websocket.close(code=code, reason=reason)
 
 
-class Session(Model, arbitrary_types_allowed=True):
-    """One page's socket: what it watches, answered."""
+class Session(MutableModel, arbitrary_types_allowed=True):
+    """One page's socket: what it watches, answered, and again as it changes; mutable, as the page watches and stops watching views."""
 
     dashboard: Dashboard
     socket: Socket
     sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    watching: dict[int, asyncio.Task[None]] = {}
+    """What reads each view the page watches, by the number it watches it
+    under."""
+    acted: asyncio.Event = Field(default_factory=asyncio.Event)
+    """Set once the operator's send ran, so every view watched is read again at
+    once, what the send changed shown without waiting; made anew each time."""
 
     async def run(self) -> None:
-        """Read the page's frames until it goes, each answered or refused alone, every view watched answered at once, so a slow one holds up no other."""
+        """Read the page's frames until it goes, each answered or refused alone, every view watched read as a task of its own, so a slow one holds up no other; once it's gone, stop reading them."""
         kept = self.dashboard.kept
         try:
             async with asyncio.TaskGroup() as answering:
                 await self.read(answering)
+                for each in self.watching.values():
+                    each.cancel()
         finally:
             kept.pages = [page for page in kept.pages if page is not self]
 
@@ -602,9 +622,12 @@ class Session(Model, arbitrary_types_allowed=True):
                     await self.tell(Drafted(draft=kept.draft))
                     await self.tell(Reviewed(review=kept.review))
                 case Watch(watch=watch, viewing=viewing):
-                    answering.create_task(self.answered(watch, viewing))
-                case Unwatch():
-                    pass
+                    self.unwatched(watch)
+                    self.watching[watch] = answering.create_task(
+                        self.watched(watch, viewing)
+                    )
+                case Unwatch(watch=watch):
+                    self.unwatched(watch)
                 case Write(comment=comment):
                     kept = self.dashboard.kept
                     await self.dashboard.changed(kept.draft.written(comment), by=self)
@@ -616,10 +639,43 @@ class Session(Model, arbitrary_types_allowed=True):
                     await self.dashboard.changed(kept.draft.erased(part), by=self)
                 case Send():
                     await self.tell(await self.dashboard.sent())
+                    woken, self.acted = self.acted, asyncio.Event()
+                    woken.set()
 
-    async def answered(self, watch: int, viewing: Viewing) -> None:
-        """Answer the view watched under `watch`, and tell the page."""
-        await self.tell(await self.dashboard.answer(watch, viewing))
+    def unwatched(self, watch: int) -> None:
+        """Stop reading the view watched under `watch`, where one is."""
+        reading = self.watching.pop(watch, None)
+        if reading is not None:
+            reading.cancel()
+
+    async def watched(self, watch: int, viewing: Viewing) -> None:
+        """Answer the view watched under `watch`, and read it again and again, telling the page each time what it shows changed.
+
+        No module says when its view changes, so the view is read again:
+        `again` after it changed, each read finding it the same waiting twice
+        as long, up to `quiet`, or `refused` where it can't be answered; and at
+        once after the operator's send, which changes what it acts on.
+        """
+        dashboard = self.dashboard
+        told: str | None = None
+        wait = dashboard.again
+        while True:
+            answer = await dashboard.answer(watch, viewing)
+            said = answer.model_dump_json()
+            if said != told:
+                await self.tell(answer)
+                told = said
+                wait = dashboard.again
+            else:
+                longest = (
+                    dashboard.quiet
+                    if isinstance(answer, Answered)
+                    else dashboard.refused
+                )
+                wait = min(wait * 2, longest)
+            acting = asyncio.ensure_future(self.acted.wait())
+            await asyncio.wait([acting], timeout=wait.total_seconds())
+            acting.cancel()
 
     async def tell(
         self, told: Opened | Answered | Unanswered | Drafted | Delivered | Reviewed
