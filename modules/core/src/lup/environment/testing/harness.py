@@ -1,22 +1,27 @@
-"""The harness as the gate runs it: lup started in this process, its doors called through `Doors`, every law checked over each slice of each call, and values drawn by hypothesis.
+"""The harness as the gate runs it: lup started in this process, its doors called through `Doors`, every invariant checked over each slice of each call, and values drawn by hypothesis.
 
-A law reads its module's state through a door of the module that only reads:
-a tool marked `reads=True` answering the state its step names, taking nothing
-it must be given and no `by`, since a module's state is the same whoever asks
-(`lup/testing/README.md`, *Laws*).
+An invariant reads its module's state from a part's field typed `State[…]`,
+copied as it's read; or, for a state too big to copy at each slice, through a
+door of the module that only reads: a tool marked `reads=True` answering the
+state its step names, taking nothing it must be given, read as the party its
+`by` names where one is made with nothing given, the operator above all
+(`lup/testing/README.md`, *Invariants*).
 """
 
 import asyncio
+import copy
 import tempfile
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar, copy_context
 from pathlib import Path
-from typing import override
+from typing import get_args, get_origin, override
 lazy from datetime import timedelta
 
 from hypothesis import strategies as st
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic.fields import FieldInfo
 
 from lup.core import Core
 from lup.declaration.errors import ProjectError
@@ -24,8 +29,17 @@ from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.declaration.module import Module
 from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
+from lup.doors.events import Event, Heeded
 from lup.doors.parties import Agent, Party
-from lup.doors.parts import Finished, Parts, Program, Runs, SshAgent, UnrunError
+from lup.doors.parts import (
+    Finished,
+    Parts,
+    Program,
+    Runs,
+    SshAgent,
+    State,
+    UnrunError,
+)
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
@@ -34,19 +48,22 @@ from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
 from lup.environment.shell.server import Dashboard, Over, Session, Socket
 from lup.environment.told import rendered
+from lup.running.plan import Plan
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
 from lup.testing.harness import (
     Acting,
     Broken,
-    BrokenLawError,
+    BrokenInvariantError,
     Call,
     Crossing,
+    Happening,
     Heard,
     Kept,
     Opening,
     Page,
+    Planning,
     ProgramRun,
     Ran,
     Reaching,
@@ -83,7 +100,10 @@ st.register_type_strategy(JsonValue, JSON)
 class Run(MutableModel, arbitrary_types_allowed=True):
     """What one run of a promise did: the values it drew, the calls it made and the order their slices ran in, kept to say what broke it."""
 
-    drawn: list[JsonValue] = []
+    # lup: ignore("bare-object", why="a value drawn is of whatever kind its promise asked the harness for, bytes and sets among them, which no one type holds")
+    drawn: list[object] = []
+    error: Exception | None = None
+    """What broke the promise in this run; none where it held."""
     calls: list[Call] = []
     slices: list[Call] = []
     checking: Callable[[Project, Module, str | None], list[Kept | Broken]] | None = None
@@ -105,31 +125,55 @@ class Run(MutableModel, arbitrary_types_allowed=True):
         self.kept = []
 
 
-class Law(Model, arbitrary_types_allowed=True):
-    """A law a module holds, with the door its state is read through, on lup as it runs."""
+class Stating(ABC):
+    """Where an invariant reads its module's state: a part's field typed `State[…]`, or a door of the module that only reads."""
+
+    @abstractmethod
+    def read(self, running: Running) -> BaseModel:
+        """Return the state as it stands on lup as it runs, at once: it's read between two slices, where nothing else may run."""
+
+
+class Held(Model, Stating, arbitrary_types_allowed=True):
+    """A part's field typed `State[…]`, read as the part made here holds it, a copy, so what a slice changes in place leaves the state read before it as it was."""
+
+    serves: Serves
+    name: str
+
+    @override
+    def read(self, running: Running) -> BaseModel:
+        """Return a copy of the field's value, on the part made here.
+
+        Raise `DoorError` where the part runs elsewhere, or holds no model.
+        """
+        named = self.serves.named()
+        made = next(
+            (each.made for each in running.made if each.serves.named() == named), None
+        )
+        if made is None:
+            message = f"{self.serves.said()} runs elsewhere, not here"
+            raise DoorError(message, about=[named])
+        value = getattr(made, self.name)
+        if not isinstance(value, BaseModel):
+            message = f"`{named}.{self.name}` holds no model"
+            raise DoorError(message, about=[named])
+        return copy.deepcopy(value)
+
+
+class Answered(Model, Stating, arbitrary_types_allowed=True):
+    """A door of the module that only reads, answering its state: for a state too big to copy at each slice, as a whole database."""
 
     entry: Entry
-    state: Entry
-    running: Running
 
-    @property
-    def method(self) -> Method:
-        """The law's method."""
-        return self.entry.method
-
-    def said(self) -> str:
-        """Name the law, as a broken one is named: `CounterPromises.never_goes_back`."""
-        return self.method.taken.qualified
-
-    def read(self) -> BaseModel:
-        """Return the module's state, as its door that only reads answers it, at once: it's read between two slices, where nothing else may run.
+    @override
+    def read(self, running: Running) -> BaseModel:
+        """Return what the door answers, as the party it names that's made with nothing given, or no one where it names none.
 
         Raise `DoorError` where the door waits on something rather than
-        answering.
+        answering, or answers no model.
         """
-        state = self.state.method
+        state = self.entry.method
         reading = state.called(
-            self.running.part(self.state), state.validated({}), Reader()
+            running.part(self.entry), state.validated({}), reader(state) or Reader()
         )
         try:
             reading.send(None)
@@ -138,8 +182,8 @@ class Law(Model, arbitrary_types_allowed=True):
         else:
             reading.close()
             message = (
-                f"`{state.taken.qualified}`, which the law `{self.said()}` reads "
-                "its state through, waits rather than answering at once"
+                f"`{state.taken.qualified}`, which an invariant reads its state "
+                "through, waits rather than answering at once"
             )
             raise DoorError(message)
         if not isinstance(answered, BaseModel):
@@ -147,52 +191,69 @@ class Law(Model, arbitrary_types_allowed=True):
             raise DoorError(message)
         return answered
 
-    def holds(self, step: Step[BaseModel]) -> bool:
-        """Say whether the law holds over `step`."""
-        verdict = self.method.function(self.running.part(self.entry), step)
+
+class Invariant(Model, arbitrary_types_allowed=True):
+    """An invariant a module holds, with where its state is read."""
+
+    entry: Entry
+    state: Stating
+
+    @property
+    def method(self) -> Method:
+        """The invariant's method."""
+        return self.entry.method
+
+    def said(self) -> str:
+        """Name the invariant, as a broken one is named: `CounterPromises.never_goes_back`."""
+        return self.method.taken.qualified
+
+    def holds(self, running: Running, step: Step[BaseModel]) -> bool:
+        """Say whether the invariant holds over `step`, on lup as it runs."""
+        verdict = self.method.function(running.part(self.entry), step)
         if not isinstance(verdict, bool):
-            message = f"the law `{self.said()}` answers no verdict"
+            message = f"the invariant `{self.said()}` answers no verdict"
             raise DoorError(message)
         return verdict
 
 
 class Calling(MutableModel, arbitrary_types_allowed=True):
-    """A call in flight: what it is, the laws checked over each of its slices, and what came of it so far."""
+    """A call in flight: what it is, the invariants checked over each of its slices, and what came of it so far."""
 
     call: Call
-    laws: list[Law]
+    invariants: list[Invariant]
+    running: Running
     run: Run
     states: list[BaseModel] = []
-    """Each law's state, read before the slice that's running."""
+    """Each invariant's state, read before the slice that's running."""
     answered: Accepted | Refused | None = None
     """What the call answered, once it has."""
-    broken: BrokenLawError | None = None
-    """The first law a slice of it broke, raised from the call when it ends."""
+    broken: BrokenInvariantError | None = None
+    """The first invariant a slice of it broke, raised from the call when it ends."""
 
     def before(self) -> None:
-        """Read each law's state before a slice of the call runs."""
+        """Read each invariant's state before a slice of the call runs."""
         self.run.slices.append(self.call)
-        self.states = [law.read() for law in self.laws]
+        self.states = [each.state.read(self.running) for each in self.invariants]
 
     def after(self) -> None:
-        """Check each law over the slice that just ran, keeping the first it broke."""
+        """Check each invariant over the slice that just ran, keeping the first it broke."""
         steps = [
             (
-                law,
+                each,
                 Step[BaseModel](
                     before=before,
                     call=self.call,
                     answered=self.answered,
-                    after=law.read(),
+                    after=each.state.read(self.running),
                 ),
             )
-            for law, before in zip(self.laws, self.states, strict=True)
+            for each, before in zip(self.invariants, self.states, strict=True)
         ]
         broken = next(
             (
-                BrokenLawError(law.said(), step)
-                for law, step in steps
-                if not law.holds(step)
+                BrokenInvariantError(each.said(), step)
+                for each, step in steps
+                if not each.holds(self.running, step)
             ),
             None,
         )
@@ -205,7 +266,7 @@ starts too."""
 
 
 def watched(handle: asyncio.Handle) -> Callable[[], None] | None:
-    """Read the state before a slice of a call runs, and return what checks its laws after it; none for a slice of no call."""
+    """Read the state before a slice of a call runs, and return what checks its invariants after it; none for a slice of no call."""
     calling = handle.get_context().get(CALLING)
     if calling is None:
         return None
@@ -217,71 +278,86 @@ class Reader(Party):
     """The harness reading a module's state, through a door that takes no `by`, so no method sees it."""
 
 
-class Lawful(Model, arbitrary_types_allowed=True):
-    """A law a module holds, with the door of its module its state is read through."""
+def invariants(doors: Doors) -> list[Invariant]:
+    """Return every invariant the modules `doors` serve hold, each with where its state is read.
 
-    law: Entry
-    state: Entry
-
-
-def laws(running: Running) -> list[Law]:
-    """Return every law the modules `running` serves hold, each with the door its state is read through, on lup as it runs.
-
-    Raise `ProjectError` where a module holding a law has no door that reads
-    its state (`readers`).
+    Raise `ProjectError` where a module holding an invariant has nowhere its
+    state is read (`stating`).
     """
     return [
-        Law(entry=each.law, state=each.state, running=running)
-        for each in readers(running.doors)
-    ]
-
-
-def readers(doors: Doors) -> list[Lawful]:
-    """Return every law the modules `doors` serve hold, each with the door of its module its state is read through.
-
-    Raise `ProjectError` where a module holding a law has no door that reads,
-    answering the state the law's step names, taking nothing it must be given
-    and no `by`.
-    """
-    return [
-        Lawful(law=entry, state=state)
+        Invariant(entry=entry, state=state)
         for entry in doors.entries()
-        if (state := reader_of(entry, doors)) is not None
+        if (state := stating(entry, doors)) is not None
     ]
 
 
-def reader_of(entry: Entry, doors: Doors) -> Entry | None:
-    """Return the door the law behind `entry` reads its module's state through; none where it's no law.
+def stating(entry: Entry, doors: Doors) -> Stating | None:
+    """Return where the invariant behind `entry` reads its module's state: a part's field typed `State[…]` of it, else a door of the module that only reads it; none where it's no invariant.
 
-    Raise `ProjectError` where its module has none.
+    Raise `ProjectError` where its module has neither.
     """
     door = entry.method.door
-    state = door.law(entry.method.taken) if isinstance(door, PromiseDoor) else None
+    state = (
+        door.invariant(entry.method.taken) if isinstance(door, PromiseDoor) else None
+    )
     if state is None:
         return None
     module = entry.serves.module.name
-    reading = [
-        each
+    held: list[Stating] = [
+        Held(serves=serves, name=name)
+        for serves in doors.served
+        if serves.module.name == module
+        for name, info in serves.part.model_fields.items()
+        if stated(info) is state
+    ]
+    answered: list[Stating] = [
+        Answered(entry=each)
         for each in doors.through(ToolDoor)
         if each.serves.module.name == module and reads(each, state)
     ]
-    if not reading:
+    found = [*held, *answered]
+    if not found:
         message = (
-            f"the law `{entry.method.taken.qualified}` reads `{state.__name__}`, "
-            f"which no door of `{module}` that only reads answers: a tool marked "
-            "`reads=True`, taking nothing it must be given and no `by`"
+            f"the invariant `{entry.method.taken.qualified}` reads "
+            f"`{state.__name__}`, which no part of `{module}` holds as a field "
+            f"typed `State[{state.__name__}]`, and no door of it that only reads "
+            "answers"
         )
-        raise ProjectError(message)
-    return reading[0]
+        raise ProjectError(message, about=[entry.method.taken.qualified])
+    return found[0]
+
+
+def stated(field: FieldInfo) -> type | None:
+    """Return the state a part's field says it holds, `Tally` for one typed `State[Tally]`; none where it's no `State`."""
+    if get_origin(field.annotation) is not State:
+        return None
+    [state] = get_args(field.annotation)
+    return state if isinstance(state, type) else None
+
+
+def reader(method: Method) -> Party | None:
+    """Return the party the harness reads an invariant's state through `method` as: the first its `by` names that's made with nothing given, as `Operator` is; none where it takes no `by`, or names no such party."""
+    if method.taken.by is None:
+        return None
+    made = (made_alone(party) for party in method.parties())
+    return next((each for each in made if each is not None), None)
+
+
+def made_alone(party: type[Party]) -> Party | None:
+    """Return `party` made with nothing given; none where it needs something."""
+    try:
+        return party()
+    except ValidationError:
+        return None
 
 
 def reads(entry: Entry, state: type[BaseModel]) -> bool:
-    """Say whether `entry` reads `state` as a law needs: a tool marked `reads=True` answering it, needing nothing given."""
+    """Say whether `entry` reads `state` as an invariant needs: a tool marked `reads=True` answering it, needing nothing given, by no one or by a party made with nothing given."""
     door = entry.method.door
     taken = entry.method.taken
     if not (isinstance(door, ToolDoor) and door.reads and taken.returned is state):
         return False
-    if taken.by is not None:
+    if taken.by is not None and reader(entry.method) is None:
         return False
     try:
         entry.method.validated({})
@@ -291,13 +367,13 @@ def reads(entry: Entry, state: type[BaseModel]) -> bool:
 
 
 class Reached(Model, Reaching, arbitrary_types_allowed=True):
-    """A started lup's doors, called through `Doors`, every law its modules hold checked over each call."""
+    """A started lup's doors, called through `Doors`, every invariant its modules hold checked over each call."""
 
     project: Project
     modules: list[Module]
     running: Running
     looks: Looks
-    laws: list[Law]
+    invariants: list[Invariant]
     run: Run
 
     @property
@@ -310,12 +386,14 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
         return self.running.tools()
 
     async def answered(self, call: Call) -> Accepted | Refused:
-        """Make `call` through its door, as a task of its own, every law checked over each slice of it.
+        """Make `call` through its door, as a task of its own, every invariant checked over each slice of it.
 
-        Raise `BrokenLawError` where a law doesn't hold over a slice of it,
+        Raise `BrokenInvariantError` where an invariant doesn't hold over a slice of it,
         once it's ended.
         """
-        calling = Calling(call=call, laws=self.laws, run=self.run)
+        calling = Calling(
+            call=call, invariants=self.invariants, running=self.running, run=self.run
+        )
         context = copy_context()
         context.run(CALLING.set, calling)
         self.run.calls.append(call)
@@ -328,7 +406,7 @@ class Reached(Model, Reaching, arbitrary_types_allowed=True):
         return answered
 
     async def ran(self, calling: Calling) -> Accepted | Refused:
-        """Make the call, keeping what it answered for the laws checked over its last slice."""
+        """Make the call, keeping what it answered for the invariants checked over its last slice."""
         answered = await self.reached(calling.call)
         calling.answered = answered
         return answered
@@ -457,21 +535,65 @@ class Teller(Model, Telling, arbitrary_types_allowed=True):
         return await rendered(self.running, by)
 
 
-class Dashboards(Model, Opening, arbitrary_types_allowed=True):
-    """A started lup's one dashboard, as the harness opens its pages: every page on the same draft."""
+class Happen(Model, Happening, arbitrary_types_allowed=True):
+    """A started lup's methods run at an event, run on its parts as made in this process, a session's room's among them."""
 
-    dashboard: Dashboard
+    running: Running
+
+    async def happened(self, event: Event) -> Heeded:
+        """Run every method run at `event` of the parts started, and say what they answered."""
+        return await self.running.heard(event)
+
+
+class Planner(MutableModel, Planning, arbitrary_types_allowed=True):
+    """A started lup's plan, made once, where it's first asked for."""
+
+    project: Project
+    made: Plan | None = None
+
+    @override
+    def plan(self) -> Plan:
+        """Return the project's plan, making it the first time."""
+        if self.made is None:
+            self.made = plan_of(resolve(self.project), [])
+        return self.made
+
+
+class Dashboards(MutableModel, Opening, arbitrary_types_allowed=True):
+    """A started lup's one dashboard, as the harness opens its pages: made as the first opens, every page on the same draft."""
+
+    running: Running
+    looks: Looks
+    planner: Planner
+    root: Viewing | None
+    """The document's root view, as the core module names it."""
+    repository: str
+    made: Dashboard | None = None
+
+    def dashboard(self) -> Dashboard:
+        """Return the dashboard, making it the first time."""
+        if self.made is None:
+            self.made = Dashboard(
+                answerer=Over(
+                    running=self.running, looks=self.looks, plan=self.planner.plan()
+                ),
+                looks=self.looks,
+                root=self.root,
+                repository=self.repository,
+            )
+        return self.made
 
     @override
     async def page(self) -> Page:
         """Open a page of the dashboard, its socket in memory, served as the server serves one."""
+        dashboard = self.dashboard()
         inbound: asyncio.Queue[str | None] = asyncio.Queue()
         outbound: asyncio.Queue[str | None] = asyncio.Queue()
         socket = Queued(inbound=inbound, outbound=outbound)
-        session = Session(dashboard=self.dashboard, socket=socket)
+        session = Session(dashboard=dashboard, socket=socket)
         serving = asyncio.get_running_loop().create_task(session.run())
         return Paged(
-            token=self.dashboard.token,
+            token=dashboard.token,
             inbound=inbound,
             outbound=outbound,
             serving=serving,
@@ -548,7 +670,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class made once and started.
 
         Raise `ProjectError` where it doesn't load or resolve, where a secret a
-        class holds isn't given, or where a law its modules hold has no door to
+        class holds isn't given, or where an invariant its modules hold has nowhere to
         read its state through.
         """
         project = declared if isinstance(declared, Project) else loaded(declared)
@@ -557,25 +679,22 @@ class Harness(Testing, arbitrary_types_allowed=True):
         reached = await self.reached(
             project, secrets, repository, stand, machine=machine, git=git
         )
+        planner = Planner(project=project)
         return Started(
             modules=reached.modules,
             specs=reached.tools(),
-            plan=plan_of(resolve(project), []),
+            planning=planner,
             doors=reached,
             crossing=Crosser(running=reached.running, looks=reached.looks),
             heard=heard,
             telling=Teller(running=reached.running),
+            happening=Happen(running=reached.running),
             dashboards=Dashboards(
-                dashboard=Dashboard(
-                    answerer=Over(
-                        running=reached.running,
-                        looks=reached.looks,
-                        plan=plan_of(resolve(project), []),
-                    ),
-                    looks=reached.looks,
-                    root=document_of(reached.modules),
-                    repository=repository,
-                )
+                running=reached.running,
+                looks=reached.looks,
+                planner=planner,
+                root=document_of(reached.modules),
+                repository=repository,
             ),
         )
 
@@ -589,7 +708,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         machine: bool = False,
         git: Path | None = None,
     ) -> Reached:
-        """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every law its modules hold checked over each call.
+        """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every invariant its modules hold checked over each call.
 
         Each secret a class holds is `secrets`'s, or drawn where they're left
         out. What the operator's machine lends is given, never drawn, since a
@@ -634,14 +753,14 @@ class Harness(Testing, arbitrary_types_allowed=True):
             modules=resolved.modules,
             running=running,
             looks=resolved.looks,
-            laws=laws(running),
+            invariants=invariants(running.doors),
             run=self.run,
         )
 
     def any[T](self, kind: type[T]) -> T:
         """Return a value of `kind`, drawn by hypothesis, which shrinks one that breaks the promise."""
         value = self.data.draw(st.from_type(kind))
-        self.run.drawn.append(TypeAdapter(kind).dump_python(value, mode="json"))
+        self.run.drawn.append(copy.deepcopy(value))
         return value
 
 

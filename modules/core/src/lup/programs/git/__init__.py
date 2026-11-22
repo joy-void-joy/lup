@@ -15,9 +15,10 @@ any part passes none, and git runs through `lup.programs`. Its reasons are in
 from lup.programs.git.objects import Entry, Kind, named_by
 from lup.programs.git.running import Git, GitError
 from lup.programs.git.stores import Merged, Store, UnverifiedError
-from lup.programs.git.worktrees import Worktree
+from lup.programs.git.worktrees import Changed, Worktree
 
 __all__ = [
+    "Changed",
     "Entry",
     "Git",
     "GitError",

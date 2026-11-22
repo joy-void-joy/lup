@@ -6,7 +6,7 @@ in a temporary directory, its pyright as strict as lup's, read with the
 environment the check runs in, and checked in one run of the engine:
 - a flagged example gets a finding of its rule and of no other of lup's;
 - its rewrite gets none of lup's, pyright's or ruff's, ruff configured as the
-  worktree configures it;
+  worktree configures it, and a rule for tests' read as a test, which asserts;
 - a near miss gets none of its rule's.
 """
 
@@ -16,7 +16,7 @@ from typing import Literal
 
 from lup import Program
 from lup.code_rules.engine import Engine, Source
-from lup.code_rules.reports import FileReport, Finding, RuleInfo
+from lup.code_rules.reports import FileReport, Finding, Reads, RuleInfo
 from lup.code_rules.ruff import ruff_findings
 from lup.types import Model
 
@@ -25,6 +25,7 @@ class Example(Model):
     """One example of a rule, as a file of the examples' package."""
 
     rule: str
+    reads: Reads
     kind: Literal["flags", "rewritten", "passes"]
     index: int
     path: str
@@ -66,6 +67,9 @@ class Examples(Model):
     """pyright's findings about the environment rather than the code, which a
     rewrite leaves to whoever installs what it imports: `rich-progress`
     steers to a library this repository doesn't install."""
+    asserting: list[str] = ["S101"]
+    """ruff's codes about asserting, which a test's point is: a rule for tests'
+    rewrite asserts, as the worktree's promises do."""
     docstring: str = '"""An example."""\n\n'
     """What each example's file starts with, so it's a module as ruff wants one."""
     pyproject: str = (
@@ -134,6 +138,7 @@ class Examples(Model):
         """Return `rule`'s example of `kind`, the `index`th, as a file named by the rule's place in the table."""
         return Example(
             rule=rule.id,
+            reads=rule.reads,
             kind=kind,
             index=index,
             path=f"example/rule_{number}_{kind}_{index}.py",
@@ -153,7 +158,14 @@ class Examples(Model):
                 got = lups
             case "rewritten":
                 read = [each for each in found if each.rule not in self.unread]
-                got = [*read, *(each for each in ruffs if each.path == example.path)]
+                asserts = example.reads == "tests"
+                ruffed = [
+                    each
+                    for each in ruffs
+                    if each.path == example.path
+                    and not (asserts and each.rule in self.asserting)
+                ]
+                got = [*read, *ruffed]
                 met = not got
             case "passes":
                 got = [each for each in lups if each.rule == example.rule]

@@ -44,9 +44,20 @@ class Checked(Model):
 
 
 class Exemptions(Model):
-    """Where lup's rules don't read, as patterns from the worktree's root: tests, whose shapes are a test's own. pyright and ruff still read them."""
+    """Where lup's rules for code don't read, as patterns from the worktree's root: tests, whose shapes are a test's own; and where its rules for tests do, tests and promises. pyright and ruff read every file."""
 
     patterns: list[str] = []
+    tests: list[str] = []
+    """Where lup's rules for tests read: a test's files and a module's
+    promises."""
+
+    def reads(self, rule: RuleInfo | None, path: str) -> bool:
+        """Say whether lup's `rule` reads the file at `path`: a rule for code wherever it isn't exempt, a rule for tests where a test's or a promise's checks are; a rule the table doesn't hold, one a check makes itself, everywhere."""
+        if rule is None:
+            return True
+        if rule.reads == "tests":
+            return any(PurePosixPath(path).full_match(each) for each in self.tests)
+        return not self.exempt(path)
 
     def exempt(self, path: str) -> bool:
         """Say whether lup's rules leave the file at `path` alone.
@@ -118,17 +129,21 @@ class Settling(Model):
     def settled(self, report: FileReport, ruffs: list[Finding]) -> Checked:
         """Return the file `report` reports on, with `ruffs` beside its findings, settled: each finding categorised, those an `ignore` keeps set apart, and what's wrong with its `# lup:` comments found.
 
-        A file the exemptions cover gets none of lup's rules' findings. An
+        A file the exemptions cover gets none of lup's rules for code's
+        findings, and only a test's or a promise's file its rules for tests'. An
         `ignore` that keeps nothing is itself a finding, `unused-ignore`, which
         the gate's `--fix` removes; a malformed comment is
         `malformed-directive`. pyright's unused import is left out where
         ruff's, which its safe fix removes, is on the same line.
         """
-        exempt = self.exemptions.exempt(report.path)
         found = [
             each.model_copy(update={"category": self.table.category(each)})
             for each in [*report.findings, *ruffs]
-            if not (exempt and each.owner == "lup") and each.rule not in self.duplicated
+            if (
+                each.owner != "lup"
+                or self.exemptions.reads(self.table.rules.get(each.rule), report.path)
+            )
+            and each.rule not in self.duplicated
         ]
         fixed = [
             each.span.start.line

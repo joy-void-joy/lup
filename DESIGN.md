@@ -74,7 +74,7 @@ A concern is something to keep an eye on: a feature to build, a problem met, a d
 
 **Pausing.** The operator can pause any agent, and that wins over the agent's own preferences.
 
-**Quiet.** An agent can ask not to be interrupted: no findings or messages after their calls. The operator's messages wait too, unless they mark one urgent. When the quiet ends, the agent gets one summary of what waited. It lasts until the agent lifts it or their work has completely ended, not when a turn stops.
+**Quiet.** An agent can ask not to be interrupted: no findings or messages after their calls, and no write held: what would hold lands flagged, and their landing waits on it. The operator's messages wait too, unless they mark one urgent. When the quiet ends, the agent gets one summary of what waited. It lasts until the agent lifts it or their work has completely ended, not when a turn stops.
 
 **Said once.** A finding or a message is told once, never repeated.
 

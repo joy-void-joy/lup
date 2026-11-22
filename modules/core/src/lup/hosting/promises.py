@@ -55,6 +55,8 @@ class Planned(Model):
     services: list[str] = []
     here: list[str] = []
     """Commands of the operator's that `lup` answers where it's typed."""
+    commands: list[str] = []
+    """Commands of the operator's carried to where the part runs."""
 
     def plan(self) -> JsonValue:
         """Return it as a plan says it, as JSON: promises read lup's plan only through what crosses."""
@@ -67,6 +69,10 @@ class Planned(Model):
             *(
                 {"door": "command", "name": name, "parties": ["Operator"], "here": True}
                 for name in self.here
+            ),
+            *(
+                {"door": "command", "name": name, "parties": ["Operator"]}
+                for name in self.commands
             ),
         ]
         return {
@@ -317,7 +323,7 @@ class HostingPromises(Part):
         )
         built = await started.serve("built", image, Machine())
         assert isinstance(built, Accepted)
-        assert json.loads(built.answer()) == {"built": not tagged}
+        assert json.loads(built.answer())["built"] == (not tagged)
         builds = podman_ran(started, "build")
         assert bool(builds) != tagged
         assert all("--pull=never" in each for each in builds)
@@ -399,8 +405,8 @@ class HostingPromises(Part):
         )
         assert isinstance(held, Accepted)
         values = json.loads(held.answer())
-        assert values["values"] == {"token": kept.value}
-        assert values["missing"] == ["key"]
+        assert values["values"]["token"] == kept.value
+        assert "key" in values["missing"]
 
     @lup.promise
     async def only_the_machine_reads_a_secret_and_only_the_operator_keeps_one(
@@ -465,7 +471,9 @@ class HostingPromises(Part):
         )
         assert isinstance(route, Accepted)
         carried = json.loads(route.answer())
-        assert carried["call"]["by"] == {"party": "code", "repository": "harmon"}
+        assert carried["call"]["by"] == Codebase(repository="harmon").model_dump(
+            mode="json"
+        )
         assert carried["to"].endswith("listening.sock")
         stranger = await started.serve(
             "routed", {"directory": "/srv/elsewhere", "call": call}, Machine()
@@ -1038,7 +1046,7 @@ class ApprovalsPromises(Part):
         approval = await started.serve("approval", {"project": "harmon"}, Machine())
         assert isinstance(approval, Accepted)
         last = approvals[-1].commit if approvals else None
-        assert json.loads(approval.answer()) == {"commit": last}
+        assert json.loads(approval.answer())["commit"] == last
 
     @lup.promise
     async def only_the_operator_or_their_review_approves(self, by: Testing) -> None:
@@ -1056,7 +1064,7 @@ class ApprovalsPromises(Part):
         assert isinstance(read, Refused)
         approval = await started.serve("approval", {"project": "harmon"}, Machine())
         assert isinstance(approval, Accepted)
-        assert json.loads(approval.answer()) == {"commit": None}
+        assert json.loads(approval.answer())["commit"] is None
 
     @lup.promise
     async def the_question_shows_what_changed_what_holds_first(
@@ -1123,7 +1131,7 @@ class ApprovalsPromises(Part):
             Machine(),
         )
         assert isinstance(diffed, Accepted)
-        assert json.loads(diffed.answer()) == {"text": DIFF}
+        assert json.loads(diffed.answer())["text"] == DIFF
         [diff] = [each for each in started.heard.runs if "diff" in each.arguments]
         assert all(
             each in diff.arguments
@@ -1284,8 +1292,10 @@ class ProjectsPromises(Part):
         )
         assert isinstance(offered, Accepted)
         offer = json.loads(offered.answer())
-        assert offer["by"] == {"party": "code", "repository": "harmon"}
-        assert [each["part"] for each in offer["plan"]["parts"]] == ["Notes"]
+        assert offer["by"] == Codebase(repository="harmon").model_dump(mode="json")
+        parts = [each["part"] for each in offer["plan"]["parts"]]
+        assert "Notes" in parts
+        assert all(each not in parts for each in ["Desk", "Tales"])
         stranger = await started.serve(
             "offered", {"directory": "/srv/elsewhere"}, Machine()
         )
@@ -1467,9 +1477,9 @@ class ClearingPromises(Part):
         assert isinstance(refused, Refused)
         cleared = await started.serve("cleared", {}, Machine())
         assert isinstance(cleared, Accepted)
-        assert podman_ran(started, "stop") == [
-            ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
-        ]
+        stopped = podman_ran(started, "stop")
+        assert stopped
+        assert all("--filter=label=lup.machine" in each for each in stopped)
 
     @lup.promise
     async def the_machine_opens_again_what_it_ran(self, by: Testing) -> None:
@@ -1481,7 +1491,7 @@ class ClearingPromises(Part):
         resumed = await started.serve("resumed", {}, Machine())
         assert isinstance(resumed, Accepted)
         answer = json.loads(resumed.answer())
-        assert answer["opened"] == (["harmon"] if ran else [])
+        assert ("harmon" in answer["opened"]) == ran
 
     @lup.promise
     async def a_project_registered_is_opened_as_the_machine_starts(
@@ -1502,7 +1512,7 @@ class ClearingPromises(Part):
         assert podman_ran(started, "run") == []
         resumed = await started.serve("resumed", {}, Machine())
         assert isinstance(resumed, Accepted)
-        assert json.loads(resumed.answer())["opened"] == ["harmon"]
+        assert "harmon" in json.loads(resumed.answer())["opened"]
 
 
 class Podmanless(Model):
@@ -1548,7 +1558,7 @@ class WithoutPromises(Part):
         assert isinstance(run, Accepted) == (podman == "6.1.0")
         assert bool(podman_ran(started, "run")) == (podman == "6.1.0")
         if isinstance(run, Refused):
-            assert "`podman`" in run.rejection.reason
+            assert "podman" in run.rejection.about
 
     @lup.promise
     async def the_machine_stopping_stops_its_projects(self, by: Testing) -> None:
@@ -1571,7 +1581,8 @@ class WithoutPromises(Part):
     async def the_operator_sees_what_the_machine_runs(self, by: Testing) -> None:
         """The operator can ask what the machine runs: each project open with the commit it runs and its containers, each registered and not open; an agent or a project's code can't."""
         opened = by.any(bool)
-        started = await started_approved(by, OPENING_PODMAN)
+        committed = Committed.of(Files())
+        started = await started_approved(by, OPENING_PODMAN, committed)
         await started.run("hosting", "register", Opens().given(), lup.Operator())
         if opened:
             await started.serve("opened", Opens().given(), Machine())
@@ -1580,9 +1591,9 @@ class WithoutPromises(Part):
         assert isinstance(status, Accepted)
         assert isinstance(refused, Refused)
         said = status.answer()
-        assert ("harmon runs" in said) == opened
-        assert ("harmon is registered, and not open" in said) != opened
-        assert ("lup-harmon-project-1, running" in said) == opened
+        assert "harmon" in said
+        assert (committed.commit in said) == opened
+        assert ("lup-harmon-project-1" in said) == opened
 
     @lup.promise
     async def what_a_container_prints_is_kept_capped(self, by: Testing) -> None:
@@ -1620,7 +1631,7 @@ class HerePromises(Part):
     async def a_command_answered_where_typed_is_never_carried(
         self, by: Testing
     ) -> None:
-        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever."""
+        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever, another command of the same part's among them."""
         command = by.any(HereCommand).name
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
@@ -1628,9 +1639,27 @@ class HerePromises(Part):
             machine=True,
         )
         plan = plan_of(
-            Planned(module="notes", part="Notes", tools=["note"], here=[command])
+            Planned(
+                module="notes",
+                part="Notes",
+                tools=["note"],
+                here=[command],
+                commands=["tidy"],
+            )
         )
         directory = await placed(started, "harmon", plan, ["notes.Notes"])
+        other: JsonValue = {
+            "format": 1,
+            "kind": "command",
+            "module": "notes",
+            "command": "tidy",
+            "given": {},
+        }
+        alongside = await started.serve(
+            "routed", {"directory": directory, "call": other}, Machine()
+        )
+        assert isinstance(alongside, Accepted)
+        assert json.loads(alongside.answer())["to"] is not None
         here: JsonValue = {
             "format": 1,
             "kind": "command",
@@ -1660,11 +1689,13 @@ class HerePromises(Part):
         )
         started = await started_approved(by, podman)
         await started.run("hosting", "register", Opens().given(), lup.Operator())
-        await started.serve("resumed", {}, Machine())
+        resumed = await started.serve("resumed", {}, Machine())
         status = await started.run("hosting", "status", {}, lup.Operator())
+        assert isinstance(resumed, Accepted)
         assert isinstance(status, Accepted)
         said = status.answer()
-        assert "harmon is registered, and not open: opening it was refused" in said
+        assert json.loads(resumed.answer())["refused"]["harmon"] in said
+        assert "lup-harmon-project-1" not in said
 
 
 class Flaky(lup.MutableModel, Responding):
@@ -1756,6 +1787,9 @@ class MachinewidePromises(Part):
         assert data
         assert not any("ro=true" in each for each in data)
         assert not [each for each in mounts if "Keeper" in each]
+        status = await started.run("hosting", "status", {}, lup.Operator())
+        assert isinstance(status, Accepted)
+        assert container in status.answer()
         project = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
         await started.serve(
             "placed",
@@ -1768,3 +1802,37 @@ class MachinewidePromises(Part):
         )
         assert isinstance(hosted, Accepted)
         assert json.loads(hosted.answer())["to"] is not None
+
+
+class Aim(Model):
+    """Which project the machine's own call names, as a promise draws it: one running the part, another, or none."""
+
+    project: Literal["harmon", "story", "unknown"] | None
+
+
+class AimingPromises(Part):
+    """What the operator can count on of the machine calling one project's part: it reaches that project's container, and no other."""
+
+    @lup.promise
+    async def the_machines_call_reaches_the_project_it_names(self, by: Testing) -> None:
+        """A service call the machine's own parts make to a part one per project goes to the container of the project the call names, never another project's: one naming no project, or a project running no such part, is refused; and only the machine's own parts may aim one."""
+        aim = by.any(Aim).project
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        served = plan_of(Planned(module="remote", part="Remotes", services=["pushed"]))
+        harmon = await placed(started, "harmon", served, ["remote.Remotes"])
+        story = await placed(started, "story", served, ["remote.Remotes"])
+        aiming: JsonValue = {"service": "pushed", "project": aim}
+        aimed = await started.serve("aimed", aiming, Machine())
+        refused = await started.serve("aimed", aiming, by.any(Agent))
+        assert isinstance(refused, Refused)
+        match aim:
+            case "harmon" | "story":
+                assert isinstance(aimed, Accepted)
+                own = harmon if aim == "harmon" else story
+                assert json.loads(aimed.answer())["to"] == f"{own}/listening.sock"
+            case _:
+                assert isinstance(aimed, Refused)

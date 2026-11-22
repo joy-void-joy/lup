@@ -21,7 +21,7 @@ lazy from datetime import timedelta
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Named, Selection
@@ -53,6 +53,15 @@ class Secret(Model):
 
     value: str = Field(repr=False, exclude=True)
     """The secret itself."""
+
+
+type State[T: BaseModel] = T
+"""What a part keeps while it runs that its module's invariants read: a field typed `State[Tally]`, with its default, read and changed as a `Tally`.
+
+The harness copies it before and after each slice of a call, and an invariant
+over `Step[Tally]` of the part's module holds over the two
+(`lup/testing/README.md`, *Invariants*).
+"""
 
 
 class Data(Model):

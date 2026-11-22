@@ -24,7 +24,7 @@ from lup.declaration.layout import MachineLayout
 from lup.doors.door import Accepted, Answer, Method, RefusedError
 from lup.doors.events import Event, Heeded
 from lup.doors.parties import Machine
-from lup.doors.service import Carrier
+from lup.doors.service import WITHIN, Carrier
 from lup.environment.declaration import load, resolve
 from lup.environment.running.container import (
     REPLIES,
@@ -38,6 +38,7 @@ from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import Served, started
 from lup.errors import LupError
 from lup.hosting.carrying import (
+    Aiming,
     Arrival,
     Carrying,
     Forwards,
@@ -160,14 +161,11 @@ class Binder(MutableModel, Listens, arbitrary_types_allowed=True):
 
 
 class Inward(MutableModel, Carrier, arbitrary_types_allowed=True):
-    """What carries a service's call the machine's own parts make to a part one for the whole machine that runs in a container of its own: as the machine's, the one call that crosses saying so."""
+    """What carries a service's call the machine's own parts make to a part that doesn't run on the machine, as `Carrying` aims it: a part one for the whole machine, or one project's part, as `lup.within` names it; as the machine's, the one call that crosses saying so."""
 
-    running: Running | None = None
-    """The machine's parts, whose doors say which part serves a method: set
-    once they've started."""
     carrying: Carrying | None = None
-    """What knows where each part one for the whole machine runs: set once
-    the machine's parts have started."""
+    """What knows where each part runs: set once the machine's parts have
+    started."""
     limit: int = 16 * 2**20
     """The longest answer read, in bytes."""
 
@@ -181,32 +179,19 @@ class Inward(MutableModel, Carrier, arbitrary_types_allowed=True):
     async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:
         """Send the call to the container of the part serving it, as the machine's, and return what it answered as JSON.
 
-        Raise `RefusedError` where that part isn't running in a container, or
-        its container refuses or can't be reached.
+        Raise `RefusedError` where no container runs that part, as the call
+        names it, or its container refuses or can't be reached.
         """
         name = method.taken.qualified
-        entry = (
-            None
-            if self.running is None
-            else next(
-                (
-                    each
-                    for each in self.running.doors.entries()
-                    if each.method is method
-                ),
-                None,
-            )
-        )
-        placement = (
-            None
-            if entry is None or self.carrying is None
-            else self.carrying.holding(entry.serves.named())
-        )
-        if placement is None:
-            message = (
-                f"`{name}` runs neither on the machine nor in a container of its own"
-            )
+        if self.carrying is None:
+            message = f"`{name}` isn't run on the machine, and nothing carries it yet"
             raise RefusedError(message, about=[name])
+        try:
+            aiming = Aiming(service=method.taken.name, project=WITHIN.get())
+        except ValidationError as wrong:
+            message = f"`{name}` names no project lup runs: {wrong}"
+            raise RefusedError(message, about=[name]) from wrong
+        aimed = await self.carrying.aimed(aiming, Machine())
         call = ServiceCalled(
             service=method.taken.name,
             given=value.model_dump(mode="json"),
@@ -214,7 +199,7 @@ class Inward(MutableModel, Carrier, arbitrary_types_allowed=True):
         )
         try:
             text = await asked(
-                placement.listening(), call.model_dump_json().encode(), limit=self.limit
+                aimed.to, call.model_dump_json().encode(), limit=self.limit
             )
             reply = read(text, REPLIES)
         except (OSError, ValueError, LupError, ValidationError) as lost:
@@ -279,7 +264,6 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
             "`Carrying` carries every call: the home repository's must"
         )
         raise ProjectError(message)
-    inward.running = running
     inward.carrying = carrying
     resolved = resolve(load(host.root / host.declaration))
     binder = Binder(running=running, looks=resolved.looks, limit=limit)
@@ -345,4 +329,9 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
         if dashboard is not None:
             await dashboard.stopped()
         binder.closed()
-        await running.stopped()
+        try:
+            await running.stopped()
+        except LupError as unstopped:
+            log.warning(
+                "lup's machine stopped, leaving something running: %s", unstopped
+            )
