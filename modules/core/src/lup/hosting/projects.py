@@ -18,9 +18,16 @@ what another imports or reads what another keeps.
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from pydantic import Field, TypeAdapter, ValidationError
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_fixed,
+)
 
 import lup
 from lup.doors.door import RefusedError
@@ -139,6 +146,10 @@ class Sharing(Model):
     environment: Path
     """The Python environment the machine runs in, mounted read-only: a part
     one for the whole machine runs the machine's own code, approved."""
+    paths: list[Path] = []
+    """Every directory the machine imports its code from beyond the
+    environment, mounted read-only at its own path: a source tree an editable
+    install points at, as a workspace's environment's do."""
     data: Path
     """Where the machine keeps its parts' data: each part's own directory
     there is mounted at its own path, so it keeps what it kept before."""
@@ -150,6 +161,9 @@ class Shared(Model):
 
     containers: list[str] = []
     waiting: list[str] = []
+    failed: dict[str, str] = {}
+    """Each part whose container didn't come up listening, by `module.Part`,
+    and why."""
 
 
 class Statusing(Model):
@@ -223,6 +237,13 @@ class Projects(Part, machine=True, shared=True):
     unopened: dict[str, str] = {}
     """Why each project registered isn't open, by its repository, where
     opening it was refused, as the operator's `status` says."""
+    ready: timedelta = timedelta(minutes=1)
+    """How long a container of a part one for the whole machine may take to
+    listen on its socket, past which it's stopped and said to have failed: it
+    runs the machine's own environment, with nothing to sync, so it listens
+    in seconds."""
+    pace: timedelta = timedelta(seconds=0.5)
+    """How often such a container is looked at for its socket, as it starts."""
     generation: int = 0
     """How many times a project was opened since the machine's parts started:
     each opening's containers are named with it, so they start beside those
@@ -332,15 +353,54 @@ class Projects(Part, machine=True, shared=True):
             for each in parts
             if each.named() not in waiting
         ]
+        failed = {
+            name: why
+            for each in placements
+            for name in each.parts
+            if (why := await self.unready(each)) is not None
+        }
+        listening = [
+            each
+            for each in placements
+            if not any(name in failed for name in each.parts)
+        ]
         await Carrying.sharing(
             Placing(
-                repository=sharing.repository, plan=sharing.plan, placements=placements
+                repository=sharing.repository, plan=sharing.plan, placements=listening
             )
         )
         self.machinewides = Shared(
-            containers=[each.container for each in placements], waiting=waiting
+            containers=[each.container for each in listening],
+            waiting=waiting,
+            failed=failed,
         )
         return self.machinewides
+
+    async def unready(self, placement: Placement) -> str | None:
+        """Wait for the container of `placement` to listen on its socket, `ready` at most, and say why it isn't where it doesn't, it stopped then; none where it listens."""
+        socket = placement.listening()
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(int(self.ready / self.pace)),
+                wait=wait_fixed(self.pace.total_seconds()),
+                retry=retry_if_exception_type(FileNotFoundError),
+                reraise=True,
+            ):
+                with attempt:
+                    socket.lstat()
+        except FileNotFoundError:
+            alive = (await Containers.alive(Clearing())).names
+            state = (
+                "is running and doesn't listen"
+                if placement.container in alive
+                else "ended as it started"
+            )
+            await Containers.stopped(Named(name=placement.container))
+            return (
+                f"its container {placement.container} {state} within {self.ready}: "
+                f"what it printed is in {self.output(placement.container)}"
+            )
+        return None
 
     async def shared_at(
         self,
@@ -393,13 +453,21 @@ class Projects(Part, machine=True, shared=True):
     ) -> Spec:
         """Return the container named `name` of the part one for the whole machine `part`: the machine's tree, environment and interpreters read-only at their own paths, its data the directory it kept on the machine, its sockets in memory.
 
-        Its Python runs isolated (`-I`), so the tree it starts in, the
-        installed `lup`'s `lup/hosting/` among them, isn't searched for
+        Its Python runs isolated (`-I`), from `/`, so no tree it starts in,
+        the installed `lup`'s `lup/hosting/` among them, is searched for
         modules: there, `secrets.py` would stand in for the standard
-        library's, and the part would end as it starts.
+        library's, and the part would end as it starts. Every directory the
+        machine imports its code from is mounted beside its environment, a
+        source tree an editable install points at among them, so `lup` is
+        whole there.
         """
         data = sharing.data / part.named()
         data.mkdir(parents=True, exist_ok=True)
+        imported = [
+            Bind(source=each.resolve(), target=each)
+            for each in dict.fromkeys(sharing.paths)
+            if each not in [sharing.root, sharing.environment, interpreters]
+        ]
         return Spec(
             name=name,
             image=self.image(sharing.repository, part.packages),
@@ -409,11 +477,12 @@ class Projects(Part, machine=True, shared=True):
                 "-m",
                 "lup.environment.running",
             ],
-            workdir=sharing.root,
+            workdir=Path("/"),
             binds=[
                 Bind(source=sharing.root.resolve(), target=sharing.root),
                 Bind(source=sharing.environment.resolve(), target=sharing.environment),
                 Bind(source=interpreters.resolve(), target=interpreters),
+                *imported,
                 Bind(source=data.resolve(), target=data, read_only=False),
                 Bind(source=sockets, target=Path("/run/lup"), read_only=False),
             ],
@@ -546,20 +615,24 @@ class Projects(Part, machine=True, shared=True):
 
     @lup.on(Stopping)
     async def closed(self, stopping: Stopping) -> None:
-        """Stop each container of each project running, as the machine's parts stop: nothing would route calls to it.
+        """Stop each container of each project running, and of each part one for the whole machine, as the machine's parts stop: nothing would route calls to it.
 
         Each is asked to stop, whichever another failed to; raise
         `ContainerError` naming each that didn't.
         """
         del stopping
+        names = [
+            *(name for opened in self.projects.values() for name in opened.containers),
+            *self.machinewides.containers,
+        ]
         refusals: list[str] = []
-        for opened in self.projects.values():
-            for name in opened.containers:
-                try:
-                    await Containers.stopped(Named(name=name))
-                except RefusedError as refused:
-                    refusals = [*refusals, str(refused)]
+        for name in names:
+            try:
+                await Containers.stopped(Named(name=name))
+            except RefusedError as refused:
+                refusals = [*refusals, str(refused)]
         self.projects = {}
+        self.machinewides = Shared()
         if refusals:
             raise ContainerError("; ".join(refusals))
 
@@ -602,8 +675,12 @@ class Projects(Part, machine=True, shared=True):
                     else ""
                 ),
                 *(container(name) for name in shared.containers),
+                *(
+                    f"  {part} didn't come up: {why}"
+                    for part, why in shared.failed.items()
+                ),
             ]
-            if shared.containers or shared.waiting
+            if shared.containers or shared.waiting or shared.failed
             else []
         )
         closed = [
