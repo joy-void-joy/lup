@@ -283,7 +283,11 @@ class Doors(Model):
             ],
             beyond=beyond,
             unrun=[
-                Unrun(part=name, why="; ".join(check.why for check in found))
+                Unrun(
+                    part=name,
+                    why="; ".join(check.why for check in found),
+                    about=[check.name for check in found],
+                )
                 for name, found in unfit.items()
                 if found
             ],
@@ -298,6 +302,8 @@ class Unrun(Model):
     part: str
     """The part, `module.Part`."""
     why: str
+    about: list[str] = []
+    """The programs it lacks, by name, which a call to it refused names."""
 
 
 class Made(Model, arbitrary_types_allowed=True):
@@ -453,7 +459,7 @@ class Running(MutableModel, Carrier, arbitrary_types_allowed=True):
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` isn't "
                 f"running: {unrun.why}"
             )
-            return refused(given, reason, named)
+            return refused(given, reason, [*named, *unrun.about])
         if instance is None:
             reason = (
                 f"`{method.taken.qualified}` of `{entry.serves.module.name}` runs "

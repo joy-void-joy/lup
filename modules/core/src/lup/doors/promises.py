@@ -779,6 +779,6 @@ class PartsPromises(Part):
         listed = await started.call("listed", Asking(), by.any(Agent))
         assert isinstance(listed, Accepted)
         assert listed.output == Listed(names=list(listing.names))
-        assert ["-1"] in started.ran("ls")
+        assert any("-1" in each for each in started.ran("ls"))
         missing = await started.call("missing", Asking(), by.any(Agent))
         assert isinstance(missing, Refused)

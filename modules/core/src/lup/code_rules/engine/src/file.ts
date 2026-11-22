@@ -23,6 +23,8 @@ import { TextRange } from 'pyright/common/textRange';
 import {
     ArgCategory,
     ArgumentNode,
+    AssertNode,
+    BinaryOperationNode,
     CallNode,
     CaseNode,
     ClassNode,
@@ -46,6 +48,7 @@ import {
     SliceNode,
     StatementListNode,
     StatementNode,
+    StringListNode,
     StringNode,
     SuiteNode,
     TupleNode,
@@ -254,6 +257,17 @@ export interface ItemRead {
     text: string;
 }
 
+// A comparison an `assert` makes: `a == b` and `a != b`, whose sides are alike; `a in
+// b`, `a not in b`, `b.startswith(a)` and `b.endswith(a)`, which look for `a` in `b`.
+export interface Asserted {
+    node: ExpressionNode;
+    kind: 'equals' | 'contains';
+    // For `contains`, what's looked for.
+    left: ExpressionNode;
+    // For `contains`, where it's looked for.
+    right: ExpressionNode;
+}
+
 // Every node of the kinds the helpers read, gathered in one walk, string
 // annotations included.
 class Gathered extends ParseTreeWalker {
@@ -273,6 +287,8 @@ class Gathered extends ParseTreeWalker {
     readonly suites: SuiteNode[] = [];
     readonly patterns: PatternClassNode[] = [];
     readonly sequences: (ListNode | TupleNode)[] = [];
+    readonly operations: BinaryOperationNode[] = [];
+    readonly strings: StringListNode[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -352,6 +368,14 @@ class Gathered extends ParseTreeWalker {
     }
     override visitCase(node: CaseNode) {
         this.cases.push(node);
+        return true;
+    }
+    override visitBinaryOperation(node: BinaryOperationNode) {
+        this.operations.push(node);
+        return true;
+    }
+    override visitStringList(node: StringListNode) {
+        this.strings.push(node);
         return true;
     }
     // A string standing alone as a statement is a docstring: a module's, a class's,
@@ -1309,6 +1333,70 @@ export class File {
         });
     }
 
+    // Every comparison an `assert` makes in its test, wherever it sits there: under a
+    // `not`, in an `all(…)`'s generator (`Asserted`).
+    asserted(): Asserted[] {
+        const compared = this.nodes.operations.flatMap((node): Asserted[] => {
+            const { leftExpr: left, rightExpr: right, operator } = node.d;
+            if (!isAsserted(node)) {
+                return [];
+            }
+            if (operator === OperatorType.Equals || operator === OperatorType.NotEquals) {
+                return [{ node, kind: 'equals', left, right }];
+            }
+            if (operator === OperatorType.In || operator === OperatorType.NotIn) {
+                return [{ node, kind: 'contains', left, right }];
+            }
+            return [];
+        });
+        const tested = this.methodCalls(['startswith', 'endswith']).flatMap((call): Asserted[] => {
+            const sought = call.argument('prefix', 0);
+            return sought && isAsserted(call.node)
+                ? [{ node: call.node, kind: 'contains', left: sought, right: call.receiver }]
+                : [];
+        });
+        return [...compared, ...tested];
+    }
+
+    // The text of every string literal outside an `assert` and a docstring, its escapes
+    // read, f-strings left out: what a test writes for itself as data, rather than
+    // checks or says.
+    writtenOutsideAsserts(): string[] {
+        const docstrings = new Set(this.nodes.docstrings.flatMap((node) => (node.parent ? [node.parent] : [])));
+        return this.nodes.strings.flatMap((node) => {
+            const text = this.literalText(node);
+            const asserting = ParseTreeUtils.isNodeContainedWithinNodeType(node, ParseNodeType.Assert);
+            return text === undefined || asserting || docstrings.has(node) ? [] : [text];
+        });
+    }
+
+    // Whether some member of the expression's type is an instance of one of `classes`,
+    // or of a class deriving from one, by their full names.
+    isInstance(node: ExpressionNode, classes: string[]): boolean {
+        return this.lineages(node).some((lineage) => lineage.some((name) => classes.includes(name)));
+    }
+
+    // What a name is bound to where it's read, each binding's: the expression it's
+    // assigned, or, as `item`, what it's one item of, for a loop's or a comprehension's
+    // name or one unpacked (`for each in runs`, `[command] = runs`). None where a binding
+    // is anything else: a parameter, an import, a name in a tuple a loop unpacks.
+    boundTo(name: NameNode): { node: ExpressionNode; item: boolean }[] | undefined {
+        const declarations = this.evaluator.getDeclInfoForNameNode(name)?.decls ?? [];
+        const bound = declarations.map((declaration) => {
+            if (declaration.type !== DeclarationType.Variable || declaration.node.nodeType !== ParseNodeType.Name) {
+                return undefined;
+            }
+            const source = declaration.inferredTypeSource;
+            const within = declaration.node.parent?.nodeType;
+            const unpacked = within === ParseNodeType.List || within === ParseNodeType.Tuple;
+            if (source?.nodeType === ParseNodeType.For || source?.nodeType === ParseNodeType.ComprehensionFor) {
+                return unpacked ? undefined : { node: source.d.iterableExpr, item: true };
+            }
+            return source && isExpressionNode(source) ? { node: source, item: unpacked } : undefined;
+        });
+        return bound.length > 0 && bound.every((each) => each !== undefined) ? bound : undefined;
+    }
+
     printType(node: ExpressionNode): string {
         const type = this.evaluator.getType(node);
         return type ? this.evaluator.printType(type) : 'an unknown type';
@@ -1421,7 +1509,7 @@ function isPlainLiteral(node: ExpressionNode): boolean {
 }
 
 // Methods that keep text text, and methods that test it for a part.
-const keepsText = ['lower', 'upper', 'casefold', 'strip', 'lstrip', 'rstrip'];
+export const keepsText = ['lower', 'upper', 'casefold', 'strip', 'lstrip', 'rstrip'];
 const testsText = ['startswith', 'endswith', 'find', 'rfind', 'index', 'rindex', 'count', '__contains__'];
 
 // What an exception's text is used as: itself, an item of it, or what a method
@@ -1464,6 +1552,12 @@ function deciding(node: ExpressionNode): boolean {
 
 function boundsOf(slice: SliceNode) {
     return { start: slice.d.startValue, end: slice.d.endValue, step: slice.d.stepValue };
+}
+
+// Whether a node sits in an `assert`'s test, rather than in its message.
+function isAsserted(node: ParseNode): boolean {
+    const statement = ParseTreeUtils.getParentNodeOfType<AssertNode>(node, ParseNodeType.Assert);
+    return statement !== undefined && ParseTreeUtils.isNodeContainedWithin(node, statement.d.testExpr);
 }
 
 // Whether an `if` is an `elif`: the `else` of the `if` before it.

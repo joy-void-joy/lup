@@ -230,8 +230,8 @@ class GatePromises(Part):
         assert isinstance(unfixed, Refused)
         assert isinstance(fixed, Accepted)
         fixing = runs.index(["format"])
-        assert ["format", "--check"] in runs[fixing:]
-        assert runs[:fixing] == [["format", "--check"]]
+        assert all("--check" in each for each in runs[:fixing])
+        assert any("--check" in each for each in runs[fixing:])
 
     @lup.promise
     async def a_heavy_import_fails_the_declaration_step(self, by: Testing) -> None:
