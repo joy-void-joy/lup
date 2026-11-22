@@ -777,7 +777,7 @@ class SessionsPromises(Part):
                 for each in buffer.output.blocks
                 if isinstance(each, lup.Markdown) and each.id == f"item-{new}-text"
             ]
-            assert any("turn-end" in span.text for span in heading.spans)
+            assert any("turn-end" in span.text for span in heading.aside)
             assert text.text == words
 
     @lup.promise
