@@ -8,7 +8,6 @@ the commit the operator approved (`README.md` here, *Where it runs*).
 
 import asyncio
 import hashlib
-import shutil
 import tempfile
 from itertools import groupby
 from pathlib import Path
@@ -18,9 +17,11 @@ from lup.declaration.layout import MachineLayout, RepositoryLayout
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Operator
 from lup.doors.parts import Declared, Part, Program, UnrunError
+from lup.gate.findings import Finding, read, variable
 from lup.gate.layout import GateLayout
 from lup.gate.settings import GateSettings
 from lup.gate.steps import Step, Steps
+from lup.programs.git import Git
 from lup.types import Model
 
 
@@ -45,6 +46,9 @@ class Ran(Model):
     said: str = ""
     """What it printed, then what it said on its standard error; or why it
     couldn't be run."""
+    findings: list[Finding] = []
+    """What it found without failing, as it wrote them to the file the gate
+    gave it (`lup.gate.findings`)."""
 
     def passed(self) -> bool:
         """Say whether it passed: its program ran and ended with status 0."""
@@ -69,6 +73,8 @@ class Stepped(Model):
     said: str = ""
     """What it printed and said, where it failed or tells what it prints;
     nothing otherwise."""
+    findings: list[Finding] = []
+    """What it found without failing, to be filed."""
 
 
 class Run(Model):
@@ -91,6 +97,7 @@ class Run(Model):
                     passed=each.passed(),
                     seconds=each.seconds,
                     said=each.said if not each.passed() or each.step.tells else "",
+                    findings=each.findings,
                 )
                 for each in ran
             ],
@@ -120,20 +127,21 @@ class Gating(Part):
         """
         start = asyncio.get_running_loop().time()
         within = checking.directory or Path.cwd()
-        layout = await RepositoryLayout.located(self.git, within)
-        if layout is None:
+        worktree = await Git.located(within, self.git)
+        if worktree is None:
             message = (
                 f"{within} is in no git worktree, so the gate has no files to check"
             )
             raise RefusedError(message)
+        layout = RepositoryLayout.of(worktree)
         steps = self.declared.held(Steps)
         fixed = (
             [await self.ran(step, step.fix, layout.root) for step in steps if step.fix]
             if checking.fix
             else []
         )
-        recorded = await self.recorded(layout)
-        tree = await self.tree(layout.root)
+        recorded = GateLayout(common=worktree.common)
+        tree = await worktree.staged()
         key = keyed(tree, layout.local)
         if not checking.again and passed(recorded, key) is not None:
             return (
@@ -159,7 +167,7 @@ class Gating(Part):
         )
 
     async def ran(self, step: Step, words: list[str], root: Path) -> Ran:
-        """Run `words`, `step`'s check or its fix, from `root`, and say how it ended, however it did."""
+        """Run `words`, `step`'s check or its fix, from `root`, and say how it ended, however it did, with what it found, written to a file of its own the gate names in its environment (`lup.gate.findings`)."""
         loop = asyncio.get_running_loop()
         start = loop.time()
         [name, *arguments] = words
@@ -172,63 +180,25 @@ class Gating(Part):
                 "install": "",
             }
         )
-        try:
-            finished = await program.ran(*arguments, cwd=root)
-        except UnrunError as unrun:
-            return Ran(
-                step=step, status=None, seconds=loop.time() - start, said=str(unrun)
-            )
+        with tempfile.TemporaryDirectory(prefix="lup-findings-") as scratch:
+            file = Path(scratch) / "findings"
+            try:
+                finished = await program.ran(
+                    *arguments, cwd=root, env={variable(): str(file)}
+                )
+            except UnrunError as unrun:
+                return Ran(
+                    step=step, status=None, seconds=loop.time() - start, said=str(unrun)
+                )
+            found = read(file)
         said = finished.text() + finished.error.decode(errors="replace")
         return Ran(
-            step=step, status=finished.status, seconds=loop.time() - start, said=said
+            step=step,
+            status=finished.status,
+            seconds=loop.time() - start,
+            said=said,
+            findings=found,
         )
-
-    async def recorded(self, layout: RepositoryLayout) -> GateLayout:
-        """Return where the repository at `layout` keeps its passes: in the git directory every worktree shares."""
-        common = await self.git.ran(
-            "-C",
-            str(layout.root),
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-common-dir",
-        )
-        if common.status != 0:
-            message = (
-                f"git can't say where {layout.root} keeps its history: {common.said()}"
-            )
-            raise RefusedError(message)
-        return GateLayout(common=Path(common.text().strip()))
-
-    async def tree(self, root: Path) -> str:
-        """Return the tree git would commit the worktree at `root`'s files as, every change and every file it doesn't ignore added, its own index left as it is."""
-        index = await self.git.ran(
-            "-C",
-            str(root),
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "index",
-        )
-        with tempfile.TemporaryDirectory() as scratch:
-            kept = Path(scratch) / "index"
-            if index.status == 0:
-                copied(Path(index.text().strip()), kept)
-            apart = {"GIT_INDEX_FILE": str(kept)}
-            added = await self.git.ran("-C", str(root), "add", "--all", env=apart)
-            written = await self.git.ran("-C", str(root), "write-tree", env=apart)
-        if added.status != 0 or written.status != 0:
-            message = (
-                f"git can't read {root}'s files as it would commit them: "
-                f"{added.said() or written.said()}"
-            )
-            raise RefusedError(message)
-        return written.text().strip()
-
-
-def copied(index: Path, to: Path) -> None:
-    """Copy the worktree's own index to `to`, where it has one, so git reads the files it holds unchanged from it rather than each again; a worktree with none starts from nothing."""
-    if index.is_file():
-        shutil.copyfile(index, to)
 
 
 def keyed(tree: str, local: Path) -> str:
@@ -308,6 +278,11 @@ def reported(fixed: list[Ran], ran: list[Ran], took: float) -> str:
             if not each.passed() or each.step.tells
             else each.line(width)
             for each in ran
+        ),
+        *(
+            f"found by {each.step.name}, about {finding.about}: {finding.title}"
+            for each in ran
+            for finding in each.findings
         ),
     ]
     failed = [each.step.name for each in ran if not each.passed()]

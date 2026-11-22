@@ -24,6 +24,7 @@ from lup.declaration.module import Module
 from lup.doors.door import RefusedError
 from lup.doors.parties import Operator
 from lup.doors.parts import Checked, Finished, Part, Parts, Program
+from lup.programs.git import Git
 from lup.running.plan import CORE, typed
 from lup.setup.skeleton import Skeleton, declared
 from lup.types import Model
@@ -133,7 +134,7 @@ class Setup(Part):
         overwrites: nothing is written then.
         """
         del by
-        layout = await RepositoryLayout.located(self.git, initializing.directory)
+        layout = await RepositoryLayout.found(initializing.directory, self.git)
         if layout is None:
             message = (
                 f"{initializing.directory} is in no git worktree: `lup new <name>` "
@@ -183,7 +184,7 @@ class Setup(Part):
 
     async def built(self, root: Path, own: Skeleton) -> SetUp:
         """Make the project at `root`, its directory made, with `own` as its module."""
-        self.succeeded(await self.git.ran("-C", str(root), "init"), "git init")
+        await Git.initialised(root, self.git)
         self.succeeded(
             await self.uv.ran(
                 "--directory",
@@ -316,9 +317,15 @@ class Setup(Part):
             commit = installed.vcs_info.commit_id
         else:
             checkout = Path.from_uri(installed.url)
-            head = await self.git.ran("-C", str(checkout), "rev-parse", "HEAD")
-            self.succeeded(head, "git rev-parse")
-            commit = head.text().strip()
+            worktree = await Git.located(checkout, self.git)
+            head = None if worktree is None else await worktree.head()
+            if head is None:
+                message = (
+                    f"lup's core was installed from {checkout}, which holds no "
+                    "commit to pin it at"
+                )
+                raise RefusedError(message)
+            commit = head
         return f"lup-core @ git+{self.source}@{commit}#subdirectory={self.within}"
 
     def succeeded(self, finished: Finished, ran: str) -> None:

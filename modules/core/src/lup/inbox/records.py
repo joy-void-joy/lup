@@ -158,6 +158,15 @@ class Decision(Model):
     lean: str
 
 
+class Filed(Item):
+    """Words filed in a concern with `concern`, opening it or adding to it: read with the concern, whose line is new to the operator until they've opened it, and never counted as news.
+
+    Words filed in a friction are a `Message`, news as any note is.
+    """
+
+    kind: str = "inbox:filed"
+
+
 class Question(Item):
     """A question for the operator, with numbered decisions, each with the asker's lean, or answered in words."""
 
@@ -349,6 +358,7 @@ NODES: list[type[Node]] = [
     Friction,
     Item,
     Message,
+    Filed,
     Question,
     Answer,
     Felt,

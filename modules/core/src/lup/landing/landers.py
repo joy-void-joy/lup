@@ -59,11 +59,20 @@ class Landers(Part):
                 released=self.module.released,
             )
         )
+        deferrals = (
+            "".join(f"\n- {each.said()}" for each in landed.deferrals)
+            if landed.deferrals
+            else " It adds and removes no `# lup: defer`."
+        )
+        changed = (
+            "\n\nThe `# lup: defer` comments it changes:" if landed.deferrals else ""
+        )
         return (
             f"{landed.branch} at {landed.tip} waits on the operator's review. Their "
             "answer reaches you as a message: a yes puts it on trial, a comment "
             "is theirs to you. A commit you add from here lands with your next "
-            "`land`."
+            f"`land`.{changed}{deferrals}"
+            + "".join(f"\n\n{each}" for each in landed.filed)
         )
 
     @lup.tool

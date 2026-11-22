@@ -79,7 +79,7 @@ def source_of(part: type, root: Path | None) -> str | None:
 
 
 def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPlan:
-    """Return one part's plan, its methods being `entries`: what it holds, the file it's defined in, each method it serves behind a door a party calls, and each event its methods run at."""
+    """Return one part's plan, its methods being `entries`: what it holds, the file it's defined in, each method it serves behind a door a party calls, each event its methods run at, and the packages its programs are in."""
     return PartPlan(
         module=serves.module.name,
         part=serves.part.__name__,
@@ -91,6 +91,13 @@ def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPl
                 entry.method.door.event.__name__
                 for entry in entries
                 if isinstance(entry.method.door, OnDoor)
+            )
+        ),
+        packages=list(
+            dict.fromkeys(
+                program.package
+                for program in serves.part.programs().values()
+                if program.package is not None
             )
         ),
     )

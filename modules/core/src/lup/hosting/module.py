@@ -11,12 +11,17 @@ from lup.doors.parts import Parts
 from lup.hosting.approvals import Approvals
 from lup.hosting.carrying import Carrying
 from lup.hosting.containers import Containers
+from lup.hosting.logins import Logins
 from lup.hosting.projects import Projects
 from lup.hosting.promises import (
+    AimingPromises,
     ApprovalsPromises,
+    BuildingPromises,
     ClearingPromises,
     HerePromises,
     HostingPromises,
+    LendingPromises,
+    MachinewidePromises,
     ProjectsPromises,
     TreesPromises,
     WithoutPromises,
@@ -32,6 +37,7 @@ class Hosting(Module):
     parts: Parts = Parts.of(
         Containers,
         Secrets,
+        Logins,
         Trees,
         Approvals,
         Carrying,
@@ -40,7 +46,11 @@ class Hosting(Module):
         TreesPromises,
         ApprovalsPromises,
         ProjectsPromises,
+        LendingPromises,
         ClearingPromises,
         WithoutPromises,
         HerePromises,
+        BuildingPromises,
+        MachinewidePromises,
+        AimingPromises,
     )

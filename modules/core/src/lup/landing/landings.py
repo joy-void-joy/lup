@@ -12,25 +12,37 @@ a project's containers (`README.md` here).
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import TypeAdapter
 
 import lup
+from lup.code_rules import Defer, changed_deferrals
 from lup.declaration.layout import local_layer
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part, Program
 from lup.gate.checking import Run, keyed, last, passed
+from lup.gate.findings import Finding
 from lup.gate.layout import GateLayout
 from lup.hosting.approvals import Approvals, Approving, Asking
-from lup.hosting.git import Git
 from lup.hosting.projects import Opening, Projects
-from lup.hosting.trees import Commit, Entry, Objects
+from lup.hosting.trees import Commit
 from lup.inbox.part import Inboxes
 from lup.inbox.records import Item, Laid
-from lup.inbox.said import Posting, Settling
+from lup.inbox.said import FrictionSaid, Posting, Settling, Spoken
 from lup.landing.merging import Composed, Unmerged, apart
+from lup.programs.git import Entry, Git, Store
+from lup.remote import remotes
+from lup.remote.remotes import (
+    Fetching,
+    Lease,
+    Listing,
+    Remotes,
+    Update,
+    Updates,
+)
 from lup.running.plan import Name
 from lup.shell.blocks import (
     Blocks,
@@ -73,6 +85,30 @@ class Wanted(Model):
     why: str
 
 
+class Deferred(Model):
+    """A `# lup: defer` a landing adds, removes or rewords: the work left undone that lands with it, in its file."""
+
+    path: str
+    """The file, from the repository's root."""
+    how: Literal["adds", "removes", "rewords"]
+    defer: Defer
+    """The deferral as the branch's tip says it; as the integration branch did,
+    where the branch removes it."""
+
+    def said(self) -> str:
+        """Say it in a line: what the branch does to it, where, what tracks it, and why.
+
+        >>> Deferred(path="a.py", how="adds", defer=Defer(line=3, column=1, why="later", issue=12)).said()
+        'adds a.py:3, #12: later'
+        """
+        tracked = (
+            f"#{self.defer.issue}"
+            if isinstance(self.defer.issue, int)
+            else self.defer.issue or f"when {self.defer.when}"
+        )
+        return f"{self.how} {self.path}:{self.defer.line}, {tracked}: {self.defer.why}"
+
+
 class Landed(Model):
     """A branch landed, as this part keeps it."""
 
@@ -93,6 +129,15 @@ class Landed(Model):
     item: int | None = None
     """The number of the item that waits on the operator in the agent's
     conversation for its last landing; none before it's posted."""
+    deferrals: list[Deferred] = []
+    """The `# lup: defer` comments its tip adds, removes and rewords against
+    the integration branch's tip it holds, in its Python files."""
+    findings: list[Finding] = []
+    """What the gate's steps found without failing on its tip, which its
+    landing files as frictions."""
+    filed: list[str] = []
+    """What came of filing each of `findings` as its landing came, a line
+    each: kept with nothing, said to the agent landing it."""
 
     def waiting(self) -> bool:
         """Say whether it waits on the operator's review: landed at a tip they haven't said yes to."""
@@ -227,23 +272,50 @@ class Landings(Part, machine=True, shared=True):
         writing.write_bytes(TRIALS.dump_json(trial))
         writing.replace(file)
 
-    def repository(self, opening: Opening) -> Git:
-        """Return git on the project at `opening`'s repository."""
-        return Git(program=self.git, common=opening.common)
+    def repository(self, opening: Opening) -> Store:
+        """Return the store of the project at `opening`'s repository, git pinned to it, read hash-checked."""
+        return Git.pinned(opening.common, through=self.git)
 
-    async def remote_tip(self, git: Git, trial: Trial) -> Commit:
-        """Return the integration branch's tip on the remote, fetched into the repository's store: the remote's word, never a ref a room writes.
+    async def remote_tip(self, project: str, trial: Trial) -> Commit:
+        """Return the integration branch's tip on the remote, fetched into the repository's store: the remote's word, never a ref a room writes, read through the project's `remote`, which holds the operator's credentials.
 
-        Raise `RefusedError` where the remote hasn't the branch.
+        Raise `RefusedError` where the remote hasn't the branch, or `remote`
+        can't reach it.
         """
-        url = await git.url(trial.remote)
         ref = f"refs/heads/{trial.integration}"
-        tip = await git.remote_tip(url, ref)
+        with lup.within(project):
+            listed = await Remotes.listed(Listing(remote=trial.remote, for_push=True))
+        tip = next((each.object for each in listed.refs if each.name == ref), None)
         if tip is None:
             message = f"{trial.remote} has no branch {trial.integration} to land on"
             raise RefusedError(message)
-        await git.fetched(url, ref)
+        with lup.within(project):
+            await Remotes.fetched(
+                Fetching(
+                    remote=trial.remote, wanted=[remotes.Wanted(object=tip, name=ref)]
+                )
+            )
         return tip
+
+    async def pushed(
+        self, project: str, remote: str, update: Update, lease: str
+    ) -> None:
+        """Push `update` through the project's `remote`, as the machine's, leased on the tip `lease` it read, so it's refused where the remote moved since.
+
+        Raise `RefusedError` where it's refused or fails, saying why.
+        """
+        with lup.within(project):
+            pushed = await Remotes.pushed(
+                Updates(
+                    remote=remote,
+                    updates=[update],
+                    leases=[Lease(ref=update.destination, expected=lease)],
+                )
+            )
+        failed = [each.error for each in pushed.updates if each.error is not None]
+        if failed:
+            message = "\n".join([*([pushed.said] if pushed.said else []), *failed])
+            raise RefusedError(message)
 
     @lup.service
     async def lands(self, landing: LandingAsked, by: Codebase) -> Landed:
@@ -286,7 +358,7 @@ class Landings(Part, machine=True, shared=True):
                     "released": landing.released,
                 }
             )
-            onto = await self.remote_tip(git, trial)
+            onto = await self.remote_tip(project, trial)
             if not await git.holds(onto, tip):
                 message = (
                     f"{landing.integration} moved since {landing.branch} last held it: "
@@ -294,10 +366,11 @@ class Landings(Part, machine=True, shared=True):
                     "run the gate (`lup gate check`), and land again"
                 )
                 raise RefusedError(message)
-            tree = await Objects(git=self.git, common=opening.common).tree(tip)
+            tree = await git.tree(tip)
             main = opening.common if await git.bare() else opening.common.parent
             local = local_layer(main, opening.declaration)
-            if passed(GateLayout(common=opening.common), keyed(tree, local)) is None:
+            run = passed(GateLayout(common=opening.common), keyed(tree, local))
+            if run is None:
                 message = (
                     f"the gate hasn't passed on {landing.branch}'s files at {tip}: commit "
                     "everything, run `lup gate check` in its worktree, and land again"
@@ -318,6 +391,8 @@ class Landings(Part, machine=True, shared=True):
                 agent=landing.agent,
                 message=landing.message,
                 at=datetime.now(UTC),
+                deferrals=await deferred(git, onto, tip),
+                findings=[found for step in run.steps for found in step.findings],
                 reviewed=None if before is None else before.reviewed,
                 picked=True if before is None else before.picked,
                 wanted=[] if before is None else before.wanted,
@@ -335,7 +410,10 @@ class Landings(Part, machine=True, shared=True):
             )
             landed = landed.model_copy(update={"item": posted.number})
             self.keep(project, trial.with_landing(landed))
-            return landed
+            filed = [
+                await filed_as(project, each, landing.agent) for each in landed.findings
+            ]
+            return landed.model_copy(update={"filed": filed})
 
     @lup.service
     async def wants(self, wanting: Wanting, by: Codebase) -> str:
@@ -440,7 +518,7 @@ class Landings(Part, machine=True, shared=True):
                 raise RefusedError(message, about=[naming.branch])
             opening = await Projects.registered(Asking(project=naming.project))
             git = self.repository(opening)
-            dev = await self.remote_tip(git, trial)
+            dev = await self.remote_tip(naming.project, trial)
             if not await git.holds(landed.onto, dev):
                 message = (
                     f"{trial.integration} doesn't hold {landed.onto}, which "
@@ -454,13 +532,17 @@ class Landings(Part, machine=True, shared=True):
                 else await self.merged(opening, trial, landed, dev)
             )
             if merge != dev:
-                url = await git.url(trial.remote)
-                await git.pushed(url, merge, f"refs/heads/{trial.integration}", dev)
+                await self.pushed(
+                    naming.project,
+                    trial.remote,
+                    Update(source=merge, destination=f"refs/heads/{trial.integration}"),
+                    dev,
+                )
             trial = trial.with_landing(
                 landed.model_copy(update={"ended": "accepted"})
             ).model_copy(update={"accepted": merge})
             self.keep(naming.project, trial)
-            cleaned = await self.cleaned(git, trial, landed, merge)
+            cleaned = await self.cleaned(naming.project, git, trial, landed, merge)
             said = await self.ran(
                 naming.project,
                 trial,
@@ -505,9 +587,9 @@ class Landings(Part, machine=True, shared=True):
                     )
 
     async def cleaned(
-        self, git: Git, trial: Trial, landed: Landed, merge: Commit
+        self, project: str, git: Store, trial: Trial, landed: Landed, merge: Commit
     ) -> str:
-        """Move the repository's tracking ref of the integration branch to `merge`, as `git push` would, and delete `landed`'s branch on the remote where it's there at its reviewed tip; say what of it failed, the accept standing."""
+        """Move the repository's tracking ref of the integration branch to `merge`, as `git push` would, and delete `landed`'s branch on the remote through the project's `remote` where it's there at its reviewed tip, leased on it; say what of it failed, the accept standing."""
         said: list[str] = []
         try:
             await git.moved(f"refs/remotes/{trial.remote}/{trial.integration}", merge)
@@ -515,9 +597,20 @@ class Landings(Part, machine=True, shared=True):
             said = [*said, f"; the tracking ref stays where it was: {unmoved}"]
         branch = f"refs/heads/{landed.branch}"
         try:
-            url = await git.url(trial.remote)
-            if await git.remote_tip(url, branch) == landed.reviewed:
-                await git.pushed(url, "", branch, landed.reviewed or landed.tip)
+            with lup.within(project):
+                listed = await Remotes.listed(
+                    Listing(remote=trial.remote, for_push=True)
+                )
+            there = next(
+                (each.object for each in listed.refs if each.name == branch), None
+            )
+            if there is not None and there == landed.reviewed:
+                await self.pushed(
+                    project,
+                    trial.remote,
+                    Update(source=None, destination=branch),
+                    there,
+                )
         except RefusedError as kept:
             said = [*said, f"; {landed.branch} stays on {trial.remote}: {kept}"]
         return "".join(said)
@@ -540,7 +633,7 @@ class Landings(Part, machine=True, shared=True):
         opening = await Projects.registered(Asking(project=project))
         git = self.repository(opening)
         try:
-            base = await self.remote_tip(git, trial)
+            base = await self.remote_tip(project, trial)
             live = await self.live(opening, trial, base)
         except RefusedError as uncomputed:
             return f"{said}. What runs stays as it was: {uncomputed}"
@@ -658,16 +751,15 @@ class Landings(Part, machine=True, shared=True):
         trial = self.kept(naming.project)
         landed = trial.landing(naming.branch)
         opening = await Projects.registered(Asking(project=naming.project))
-        objects = Objects(git=self.git, common=opening.common)
         git = self.repository(opening)
         main = opening.common if await git.bare() else opening.common.parent
         local = local_layer(main, opening.declaration)
         run = last(
             GateLayout(common=opening.common),
-            keyed(await objects.tree(landed.tip), local),
+            keyed(await git.tree(landed.tip), local),
         )
-        before = {str(each.path): each for each in await objects.held(landed.onto)}
-        after = {str(each.path): each for each in await objects.held(landed.tip)}
+        before = {str(each.path): each for each in await git.held(landed.onto)}
+        after = {str(each.path): each for each in await git.held(landed.tip)}
         changed = sorted(
             path
             for path in before.keys() | after.keys()
@@ -677,7 +769,7 @@ class Landings(Part, machine=True, shared=True):
         async def side(entry: Entry | None) -> FileText | FileBytes | None:
             if entry is None or entry.kind != "blob":
                 return None
-            [content] = await objects.verified("blob", [entry.object])
+            [content] = await git.verified("blob", [entry.object])
             try:
                 return FileText(text=content.decode())
             except UnicodeDecodeError:
@@ -685,6 +777,7 @@ class Landings(Part, machine=True, shared=True):
 
         return Blocks.of(
             *gate_lines(run),
+            *deferral_lines(landed.deferrals),
             *[
                 Diff(
                     id=path,
@@ -697,6 +790,72 @@ class Landings(Part, machine=True, shared=True):
         )
 
 
+async def filed_as(project: str, finding: Finding, by: Agent) -> str:
+    """File what the gate found on a landing's tip as a friction of the agent landing it, in `project`, under `frictions/` and the finding's subject, and say what came of it in a line; where it can't be filed, why, the landing standing."""
+    said = FrictionSaid(
+        text=finding.text,
+        title=finding.title,
+        under=f"frictions/{finding.about}",
+        repository=project,
+    )
+    try:
+        await Inboxes.friction(Spoken(agent=by, said=said))
+    except RefusedError as unfiled:
+        return f"What the gate found, {finding.title}, isn't filed: {unfiled}"
+    return (
+        f"What the gate found is filed under frictions/{finding.about}: {finding.title}"
+    )
+
+
+async def deferred(git: Store, onto: Commit, tip: Commit) -> list[Deferred]:
+    """Return the `# lup: defer` comments `tip` adds, removes and rewords against `onto`, in each Python file it changes, read from each object's own bytes; a deferral moved to another line is neither."""
+    before = {str(each.path): each for each in await git.held(onto)}
+    after = {str(each.path): each for each in await git.held(tip)}
+    changed = [
+        path
+        for path in sorted(before.keys() | after.keys())
+        if PurePosixPath(path).suffix == ".py" and before.get(path) != after.get(path)
+    ]
+
+    async def text(entry: Entry | None) -> str | None:
+        if entry is None or entry.kind != "blob":
+            return None
+        [content] = await git.verified("blob", [entry.object])
+        return content.decode(errors="replace")
+
+    async def of(path: str) -> list[Deferred]:
+        deferrals = changed_deferrals(
+            await text(before.get(path)), await text(after.get(path))
+        )
+        return [
+            *(Deferred(path=path, how="adds", defer=each) for each in deferrals.added),
+            *(
+                Deferred(path=path, how="removes", defer=each)
+                for each in deferrals.removed
+            ),
+            *(
+                Deferred(path=path, how="rewords", defer=each.after)
+                for each in deferrals.reworded
+            ),
+        ]
+
+    per = [await of(path) for path in changed]
+    return [each for found in per for each in found]
+
+
+def deferral_lines(deferrals: list[Deferred]) -> list[Line]:
+    """Return the work left undone a landing adds, removes and rewords, a line each, or that it touches none."""
+    if not deferrals:
+        return [Line.of("deferrals", "It adds and removes no `# lup: defer`.", "muted")]
+    return [
+        Line.of("deferrals", "The `# lup: defer` comments it changes:", "strong"),
+        *(
+            Line.of(f"deferral-{index}", each.said())
+            for index, each in enumerate(deferrals)
+        ),
+    ]
+
+
 def gate_lines(run: Run | None) -> list[Line | Markdown]:
     """Return how the gate went on a landing's tip, a line each step, what a step that failed or tells said under it, indented as code; or that it never ran there."""
     if run is None:
@@ -704,6 +863,15 @@ def gate_lines(run: Run | None) -> list[Line | Markdown]:
     outcome = "passed" if run.passed else "failed"
     return [
         Line.of("gate", f"The gate {outcome} on these files.", "strong"),
+        *(
+            Line.of(
+                f"gate-found-{index}",
+                f"found, about {each.about}: {each.title}. {each.text}",
+            )
+            for index, each in enumerate(
+                found for step in run.steps for found in step.findings
+            )
+        ),
         *(
             block
             for each in run.steps

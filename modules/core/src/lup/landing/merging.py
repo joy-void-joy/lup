@@ -22,8 +22,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
-from lup.hosting.git import Git, GitError, initialised
-from lup.hosting.trees import Objects
+from lup.programs.git import Git, GitError, Store
 from lup.types import Model, MutableModel
 
 if TYPE_CHECKING:
@@ -76,26 +75,22 @@ def written(
 class Apart(MutableModel):
     """A store of its own for one repository's merges, for as long as `apart` holds it."""
 
-    repository: Git
-    """git on the repository."""
-    store: Git
-    """git on the store apart, which nothing else writes."""
+    repository: Store
+    """The repository's store, read hash-checked."""
+    store: Store
+    """The store apart, which nothing else writes."""
     held: dict[str, int] = {}
     """Each blob the store holds, read hash-checked from the repository's, with
     its size."""
     trees: dict[str, str] = {}
     """The tree the store made of each commit it was given."""
 
-    def objects(self, git: Git) -> Objects:
-        """Return the store `git` runs on, read hash-checked."""
-        return Objects(git=git.program, common=git.common)
-
     async def tree(self, commit: str) -> str:
         """Return the store's tree of `commit`, reading each file it doesn't hold yet from the repository's store, hashed against its id."""
         made = self.trees.get(commit)
         if made is not None:
             return made
-        reading = self.objects(self.repository)
+        reading = self.repository
         entries = await reading.held(commit)
         wanted = list(
             dict.fromkeys(
@@ -159,7 +154,7 @@ class Apart(MutableModel):
         Made from the entries alone, so no tree the repository's store holds
         has a say. Raise `GitError` where the ids differ.
         """
-        reading = self.objects(self.store)
+        reading = self.store
         entries = await reading.files(tree)
         for each in entries:
             if each.kind == "blob" and each.object not in self.held:
@@ -181,7 +176,7 @@ class Apart(MutableModel):
         any ref. Raise `GitError` where it doesn't read back.
         """
         commit = await self.repository.commit(written(tree, parents, who, message, at))
-        if await self.objects(self.repository).tree(commit) != tree:
+        if await self.repository.tree(commit) != tree:
             said = f"{commit} doesn't read back as the tree it's made of, {tree}"
             raise GitError(said)
         return commit
@@ -190,8 +185,8 @@ class Apart(MutableModel):
 @asynccontextmanager
 async def apart(program: Program, common: Path) -> AsyncGenerator[Apart]:
     """Hold a store apart for the merges of the repository whose common git directory is `common`, removed as the context closes."""
-    repository = Git(program=program, common=common)
+    repository = Git.pinned(common, through=program)
     object_format = await repository.object_format()
     with tempfile.TemporaryDirectory(prefix="lup-apart-") as scratch:
-        store = await initialised(program, Path(scratch), object_format)
+        store = await Git.apart(Path(scratch), object_format, through=program)
         yield Apart(repository=repository, store=store)

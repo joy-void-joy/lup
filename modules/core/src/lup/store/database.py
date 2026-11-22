@@ -26,6 +26,7 @@ from strings and the queries can't drift from the tables.
 """
 
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -192,6 +193,9 @@ class Database(MutableModel, arbitrary_types_allowed=True):
     """How many writes it has taken, each node kept, edge drawn or plain record
     rewritten: a reader holding what it made of the store compares it, to know
     whether to make it again."""
+    watchers: list[Callable[[], None]] = []
+    """Each told of every write, as it's made, in the thread making it: what
+    waits on the store changing, as a held question waits on its answer."""
 
     @classmethod
     def opened(cls, database: Path | str, kinds: Kinds, schema: int = 1) -> Database:
@@ -257,7 +261,8 @@ class Database(MutableModel, arbitrary_types_allowed=True):
 
         Within another, it's a savepoint of that one: what's written inside is
         undone alone where it raises, and kept or rolled back with the rest
-        where the outer one ends.
+        where the outer one ends. What was read is forgotten where it's rolled
+        back, since it may have been read after a write that's undone.
         """
         with self.lock:
             begun = (
@@ -265,13 +270,21 @@ class Database(MutableModel, arbitrary_types_allowed=True):
                 if self.connection.in_transaction()
                 else self.connection.begin()
             )
-            with begun:
-                yield self.connection
+            ended = False
+            try:
+                with begun:
+                    yield self.connection
+                ended = True
+            finally:
+                if not ended:
+                    self.remembered = Remembered()
 
     def wrote(self) -> None:
-        """Count a write, and forget what was read before it."""
+        """Count a write, forget what was read before it, and tell each watcher."""
         self.writes += 1
         self.remembered = Remembered()
+        for watcher in self.watchers:
+            watcher()
 
     def node_read(self, row: Row[str, str]) -> Node:
         """Read a node from its row, kind and record, as the class declaring its kind, or `Node`; raise `StoreError` where it doesn't read."""

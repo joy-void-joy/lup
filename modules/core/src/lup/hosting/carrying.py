@@ -118,6 +118,19 @@ class Visiting(Model):
     repository: str | None = None
 
 
+class Aiming(Model):
+    """A service call the machine's own parts make, to a part that doesn't run on the machine: the service, and the project it names, where it names one."""
+
+    service: str
+    project: Name | None = None
+
+
+class Aimed(Model):
+    """Where such a call goes: the socket of the container whose part answers it."""
+
+    to: Path
+
+
 class Route(Model):
     """Where a call goes, and the call as it's carried, its `by` this part's word."""
 
@@ -167,6 +180,14 @@ class Hearing(Model):
     given: JsonValue
 
 
+class Telling(Model):
+    """A part's own event come in on a container's socket: the directory it came in on, and the event's class, by its name, with its facts."""
+
+    directory: Path
+    event: str
+    given: JsonValue
+
+
 class Carrying(Part, machine=True, shared=True):
     """The machine's part deciding where each call goes, and who it's by, from the socket it came in on."""
 
@@ -187,6 +208,9 @@ class Carrying(Part, machine=True, shared=True):
     """The machine's own parts' plan, which every caller is offered beside
     its project's: set where the machine's parts run."""
     placements: list[Placement] = []
+    machinewide: list[Placement] = []
+    """Each container running a part one for the whole machine that doesn't
+    hold the machine, from the home repository's approved commit."""
     rooms: list[SessionRoom] = []
     """Each session's room that's running."""
 
@@ -224,6 +248,80 @@ class Carrying(Part, machine=True, shared=True):
             ],
             *placing.placements,
         ]
+
+    @lup.service
+    async def sharing(self, placing: Placing, by: Machine) -> None:
+        """Keep where the parts one for the whole machine that don't hold the machine run, each in a container of its own, in place of where they ran before."""
+        del by
+        self.machinewide = list(placing.placements)
+
+    def machines(self, way: Way, call: Call) -> Route:
+        """Route a call the machine answers: to the container of a part one for the whole machine that doesn't hold it, where the home repository's plan says one serves it, else to the machine's own parts, which refuse what none of them serves.
+
+        Only the home repository's plan says which part is one for the whole
+        machine: a project's plan claiming one is never followed. Where its
+        container isn't running, as where podman isn't there and it runs in
+        the machine's process, the machine answers, or refuses saying it isn't
+        running.
+        """
+        serving = self.hosted.serving(way.door, way.name, way.module)
+        if serving is None or serving.holds.machine or not serving.holds.shared:
+            return Route(to=None, call=call)
+        sharing = self.holding(serving.named())
+        if sharing is None:
+            return Route(to=None, call=call)
+        return Route(to=sharing.listening(), call=call)
+
+    @lup.service
+    async def aimed(self, aiming: Aiming, by: Machine) -> Aimed:
+        """Say where a service call the machine's own parts make goes, for a part that doesn't run on the machine: the container of a part one for the whole machine, as the home repository's plan says; else the container of the project the call names (`lup.within`) running the part serving it.
+
+        Raise `RefusedError` where the part runs one per project and the call
+        names none, the project named runs no part serving it, or that part
+        isn't running.
+        """
+        del by
+        machinewide = self.hosted.serving("service", aiming.service)
+        if (
+            machinewide is not None
+            and machinewide.holds.shared
+            and not machinewide.holds.machine
+        ):
+            sharing = self.holding(machinewide.named())
+            if sharing is None:
+                message = (
+                    f"the service `{aiming.service}` is `{machinewide.named()}`'s, "
+                    "one for the whole machine, which isn't running"
+                )
+                raise RefusedError(message)
+            return Aimed(to=sharing.listening())
+        if aiming.project is None:
+            message = (
+                f"the service `{aiming.service}` is served one per project: name "
+                "which project's with `lup.within`"
+            )
+            raise RefusedError(message)
+        plan = self.plans.get(aiming.project)
+        serving = None if plan is None else plan.serving("service", aiming.service)
+        if serving is None:
+            message = f"{aiming.project} runs no part serving `{aiming.service}`"
+            raise RefusedError(message)
+        placement = next(
+            (
+                each
+                for each in self.placements
+                if each.repository == aiming.project and serving.named() in each.parts
+            ),
+            None,
+        )
+        if placement is None:
+            message = f"{aiming.project}'s `{serving.named()}` isn't running"
+            raise RefusedError(message)
+        return Aimed(to=placement.listening())
+
+    def holding(self, part: str) -> Placement | None:
+        """Return the container running the part named `part` (`module.Part`) one for the whole machine; none where none does."""
+        return next((each for each in self.machinewide if part in each.parts), None)
 
     @lup.service
     async def seated(self, room: SessionRoom, by: Machine) -> None:
@@ -286,14 +384,70 @@ class Carrying(Part, machine=True, shared=True):
         return Heeded(told=told)
 
     @lup.service
+    async def fired(self, telling: Telling, by: Machine) -> Heeded:
+        """Carry a part's own event to every part of its project hearing it in the project's other containers, and return what they answered: their words in that order, and the first refusal, after which none is told.
+
+        Only a project's own code fires one, from its container, to its own
+        project's parts alone; the container it came from told its own parts
+        already. A container hearing it that doesn't answer, or refuses to read
+        it, refuses it, since a check that didn't run let nothing through.
+        Raise `RefusedError` where the directory is no project's container.
+        """
+        del by
+        vouched = self.vouched(telling.directory, None)
+        repository = vouched.repository
+        if not isinstance(vouched.by, Codebase) or repository is None:
+            message = (
+                f"`{telling.event}` is fired by a project's own code, from one of "
+                "its containers, which this socket isn't"
+            )
+            raise RefusedError(message)
+        plan = self.plans.get(repository)
+        hearers = (
+            []
+            if plan is None
+            else [each for each in plan.parts if telling.event in each.hears]
+        )
+        placements = [
+            each
+            for each in self.placements
+            if each.repository == repository
+            and each.directory != telling.directory
+            and any(part.named() in each.parts for part in hearers)
+        ]
+        call = EventCalled(event=telling.event, given=telling.given, by=vouched.by)
+        told: list[str] = []
+        for placement in placements:
+            try:
+                if self.forwards is None:
+                    message = "the machine forwards nothing yet"
+                    raise RefusedError(message)
+                answer = await self.forwards.forwarded(
+                    placement.listening(), call.model_dump_json().encode()
+                )
+                reply = read(answer, REPLIED)
+            except (OSError, LupError, ValidationError) as lost:
+                refused = f"`{placement.container}`, hearing `{telling.event}`, didn't answer: {lost}"
+                return Heeded(told=told, refused=refused)
+            if not isinstance(reply, Answered):
+                refused = f"`{placement.container}`, hearing `{telling.event}`, refused to read it: {reply.rejection.reason}"
+                return Heeded(told=told, refused=refused)
+            heeded = Heeded.model_validate(reply.output)
+            told = [*told, *heeded.told]
+            if heeded.refused is not None:
+                return Heeded(told=told, refused=heeded.refused)
+        return Heeded(told=told)
+
+    @lup.service
     async def routed(self, arrival: Arrival, by: Machine) -> Route:
         """Decide where a call come in on a socket goes, and who it's by: the operator on their own directory, a project's code on its container's.
 
         A call is answered by a part of the caller's project running in one
-        of its containers, the project the operator names for theirs, or else
-        by the machine's own parts, which refuse what none of them serves:
-        never by another project's part, and a part a plan says is the
-        machine's is only ever the machine's own. Raise
+        of its containers, the project the operator names for theirs; by a
+        part one for the whole machine that doesn't hold it, in its own
+        container; or else by the machine's own parts, which refuse what none
+        of them serves: never by another project's part, and a part a plan
+        says is the machine's is only ever the machine's own. Raise
         `RefusedError` where the directory is no container's, no session's
         room nor the operator's, where a conversation is named from anywhere
         but a room, where the call is to a command answered where `lup` is
@@ -321,7 +475,7 @@ class Carrying(Part, machine=True, shared=True):
             )
             raise RefusedError(message)
         if serving is None or serving.holds.machine or serving.holds.shared:
-            return Route(to=None, call=call)
+            return self.machines(way, call)
         placement = next(
             (
                 each
@@ -388,7 +542,12 @@ class Carrying(Part, machine=True, shared=True):
         if directory == self.operator():
             return Vouched(by=Operator(), repository=named)
         placement = next(
-            (each for each in self.placements if each.directory == directory), None
+            (
+                each
+                for each in [*self.placements, *self.machinewide]
+                if each.directory == directory
+            ),
+            None,
         )
         if placement is None:
             message = (

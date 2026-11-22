@@ -5,6 +5,14 @@ call the inbox's tools, the operator its commands, and an agent's project's code
 its services, as #5's sessions will (`README.md` here).
 """
 
+import asyncio
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from sqlalchemy import Column, Integer, MetaData, Table, Text, create_engine, insert
+from sqlalchemy.engine import URL
+
 import lup
 from lup import (
     Agent,
@@ -12,8 +20,10 @@ from lup import (
     Codebase,
     Commented,
     Fold,
+    JsonObject,
     Line,
     Machine,
+    Markdown,
     Model,
     Module,
     Modules,
@@ -25,17 +35,22 @@ from lup import (
     Recorded,
     Viewing,
 )
-from lup.inbox.records import Decision, Item, Laid, Question, Ruling
-from lup.inbox.said import (
+from lup.inbox import (
     Answering,
     AskSaid,
+    Awaited,
+    Awaiting,
     Clearing,
     ConcernOf,
     ConcernSaid,
+    Converting,
+    Decision,
     Ending,
     Everywhere,
     FrictionSaid,
     Inboxed,
+    Item,
+    Laid,
     Naming,
     NoteSaid,
     Nothing,
@@ -46,11 +61,15 @@ from lup.inbox.said import (
     Placed,
     Posted,
     Posting,
+    Question,
     Reached,
+    Ruling,
     SaidSince,
     SendSaid,
     Settling,
+    Showing,
     Since,
+    Spoken,
     Told,
     Untelling,
     Untold,
@@ -120,6 +139,233 @@ class Reviewing(Module):
 def reviewing() -> Project:
     """Return a project of lup's default modules and the reviewing module."""
     return Project(modules=Modules.default().add(Reviewing()))
+
+
+SECOND = MetaData()
+"""The second lup's ledger, as far as a conversion reads it: its tables as the second lup wrote them, stated apart from the conversion's own, so the scenario checks that reading against them."""
+
+SECOND_NODES = Table(
+    "nodes",
+    SECOND,
+    Column("number", Integer, primary_key=True),
+    Column("version", Integer, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("repository", Text, nullable=False),
+    Column("name", Text),
+)
+SECOND_VERSIONS = Table(
+    "versions",
+    SECOND,
+    Column("version", Integer, primary_key=True),
+    Column("number", Integer, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("record", Text, nullable=False),
+)
+SECOND_EDGES = Table(
+    "edges",
+    SECOND,
+    Column("drawn", Integer, primary_key=True),
+    Column("kind", Text, nullable=False),
+    Column("source", Integer),
+    Column("target", Integer, nullable=False),
+    Column("record", Text, nullable=False),
+)
+SECOND_RECORDS = Table(
+    "records",
+    SECOND,
+    Column("name", Text, primary_key=True),
+    Column("record", Text, nullable=False),
+)
+
+SECOND_REPOSITORY = "/repositories/lup.git"
+"""The repository, as the second lup's ledger names it: by its git directory."""
+
+
+class SecondNode(Model):
+    """One version of a node of the second lup's ledger, as a row of its tables reads, its record as the second lup wrote it."""
+
+    number: int
+    kind: str
+    repository: str = SECOND_REPOSITORY
+    name: str | None = None
+    record: JsonObject
+
+
+class SecondEdge(Model):
+    """An edge of the second lup's ledger, as a row of its table reads, its record as the second lup wrote it."""
+
+    kind: str
+    source: int | None = None
+    target: int
+    record: JsonObject = {}
+
+
+def second_ledger(path: Path) -> None:
+    """Write a ledger of the second lup's at `path`: a planning session and the session it spawned, with a subagent of its own, writing three threads of the repository, a note among their words, and a thread of another repository.
+
+    - `the-port`, held by the planner, its body rewritten once, a note filed in it;
+    - `the-gate`, under `the-port`, then held by the builder, with their words,
+      a copy of them told to the planner, their subagent's words, and a done mark;
+    - `keys-lag`, under `the-gate`, its words filed with `friction`;
+    - `elsewhere`, of another repository.
+    """
+
+    def party(session: str, agent: str | None = None) -> JsonObject:
+        return {
+            "party": "conversation",
+            "repository": SECOND_REPOSITORY,
+            "runtime": "claude",
+            "session": session,
+            "agent": agent,
+        }
+
+    plan, build, probe = party("s-plan"), party("s-build"), party("s-build", "a1")
+    operator: JsonObject = {"party": "operator"}
+
+    def at(hour: int) -> str:
+        return f"2026-11-16T{hour:02}:00:00Z"
+
+    def thread(
+        number: int,
+        name: str,
+        title: str,
+        hour: int,
+        *,
+        repository: str = SECOND_REPOSITORY,
+        parent: int | None = None,
+        holder: JsonObject | None = None,
+    ) -> SecondNode:
+        return SecondNode(
+            number=number,
+            kind="ledger:thread",
+            repository=repository,
+            name=name,
+            record={
+                "kind": "ledger:thread",
+                "repository": repository,
+                "by": plan,
+                "at": at(hour),
+                "number": number,
+                "name": name,
+                "title": title,
+                "parent": parent,
+                "holder": holder,
+            },
+        )
+
+    def item(
+        number: int,
+        by: JsonObject,
+        tool: str,
+        text: str,
+        hour: int,
+        to: JsonObject = operator,
+    ) -> SecondNode:
+        return SecondNode(
+            number=number,
+            kind="inbox:item",
+            record={
+                "kind": "inbox:item",
+                "repository": SECOND_REPOSITORY,
+                "by": by,
+                "at": at(hour),
+                "number": number,
+                "reason": {"tool": tool, "text": text, "title": text, "reason": tool},
+                "recipient": to,
+            },
+        )
+
+    versions = [
+        thread(1, "the-port", "How the port goes", 1, holder=plan),
+        item(2, plan, "concern", "Porting it", 1),
+        thread(3, "the-gate", "#10: the gate", 2, parent=1),
+        item(4, build, "concern", "The gate first", 3),
+        item(5, probe, "concern", "Probed it", 4),
+        item(6, build, "concern", "The gate first", 3, to=plan),
+        thread(7, "keys-lag", "the keys lag", 5, parent=3),
+        item(8, build, "friction", "the keys lag", 5),
+        item(9, plan, "note", "A note on the port", 6),
+        thread(10, "elsewhere", "Another's", 6, repository="/repositories/other.git"),
+        thread(3, "the-gate", "#10: the gate", 7, parent=1, holder=build),
+    ]
+    edges = [
+        *(
+            SecondEdge(kind="ledger:in", source=source, target=target)
+            for source, target in [(2, 1), (4, 3), (5, 3), (6, 3), (8, 7), (9, 1)]
+        ),
+        SecondEdge(
+            kind="ledger:body",
+            target=1,
+            record={"by": plan, "at": at(8), "text": "The port's body"},
+        ),
+        SecondEdge(
+            kind="ledger:done",
+            target=3,
+            record={"by": build, "at": at(9), "to_try": "Try the gate"},
+        ),
+    ]
+    conversations: list[JsonObject] = [
+        {"conversation": plan, "since": at(0), "parent": None, "name": None},
+        {"conversation": build, "since": at(1), "parent": plan, "name": None},
+        {"conversation": probe, "since": at(2), "parent": None, "name": "probe"},
+    ]
+    latest = {each.number: version for version, each in enumerate(versions, 1)}
+    engine = create_engine(URL.create("sqlite", database=str(path)))
+    with engine.begin() as connection:
+        SECOND.create_all(connection)
+        connection.execute(
+            insert(SECOND_VERSIONS),
+            [
+                {
+                    "version": version,
+                    "number": each.number,
+                    "kind": each.kind,
+                    "record": json.dumps(each.record),
+                }
+                for version, each in enumerate(versions, 1)
+            ],
+        )
+        connection.execute(
+            insert(SECOND_NODES),
+            [
+                {
+                    "number": each.number,
+                    "version": version,
+                    "kind": each.kind,
+                    "repository": each.repository,
+                    "name": each.name,
+                }
+                for version, each in enumerate(versions, 1)
+                if latest[each.number] == version
+            ],
+        )
+        connection.execute(
+            insert(SECOND_EDGES),
+            [
+                {
+                    "kind": each.kind,
+                    "source": each.source,
+                    "target": each.target,
+                    "record": json.dumps(
+                        {
+                            "kind": each.kind,
+                            "source": each.source,
+                            "target": each.target,
+                            **each.record,
+                        }
+                    ),
+                }
+                for each in edges
+            ],
+        )
+        connection.execute(
+            insert(SECOND_RECORDS),
+            [
+                {"name": f"inbox:conversation:{number}", "record": json.dumps(each)}
+                for number, each in enumerate(conversations)
+            ],
+        )
+    engine.dispose()
 
 
 async def inboxed(started: Started) -> Inboxed:
@@ -275,7 +521,7 @@ class InboxPromises(Part):
         """A question waits on the operator until they answer it, and a note never does."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await said(started, "ask", AskSaid(question="which way?"), agent)
+        await said(started, "ask", AskSaid(question="which way?", wait=False), agent)
         await said(started, "note", NoteSaid(remark="a doubt"), agent)
         [question] = (await inboxed(started)).waiting
         answered = await started.run(
@@ -292,13 +538,14 @@ class InboxPromises(Part):
         """Every item said reads once from a read of what's been said since, each with its words whole and what it's on: a question with each decision and its lean, an answer with the question and the decisions it rules on, a comment with the item and the lines it quotes."""
         started = await by.started(project())
         agent = by.any(Agent)
-        reader = by.any(Machine) if by.any(bool) else HERE
+        reader = Machine()
         await said(
             started,
             "ask",
             AskSaid(
                 question="which way?",
                 decisions=[Decision(decision="go left", lean="yes, it's shorter")],
+                wait=False,
             ),
             agent,
         )
@@ -345,7 +592,7 @@ class InboxPromises(Part):
         """A question its agent withdraws waits on nobody after."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await said(started, "ask", AskSaid(question="still needed?"), agent)
+        await said(started, "ask", AskSaid(question="still needed?", wait=False), agent)
         [question] = (await inboxed(started)).waiting
         await said(
             started, "withdraw", WithdrawSaid(item=question, why="settled"), agent
@@ -354,11 +601,14 @@ class InboxPromises(Part):
 
     @lup.promise
     async def news_stays_until_cleared(self, by: Testing) -> None:
-        """News stays new until the operator clears it; clearing a concern clears what's in it, until something newer is said there."""
+        """News stays new until the operator clears it; clearing a concern clears the news in it, until something newer is said there."""
         started = await by.started(project())
         agent = by.any(Agent)
         await said(
             started, "concern", ConcernSaid(text="first", title="a direction"), agent
+        )
+        await said(
+            started, "note", NoteSaid(remark="a doubt", thread="a-direction"), agent
         )
         state = await inboxed(started)
         assert state.new
@@ -374,10 +624,7 @@ class InboxPromises(Part):
         assert not after.new
         assert placed(after, "a direction").cleared
         await said(
-            started,
-            "concern",
-            ConcernSaid(name=str(concern.number), text="second"),
-            agent,
+            started, "note", NoteSaid(remark="another", thread="a-direction"), agent
         )
         again = await inboxed(started)
         assert again.new
@@ -482,7 +729,7 @@ class InboxPromises(Part):
         """What waits on the operator is in their view of what waits, and leaves it once they answer it."""
         started = await by.started(project())
         agent = by.any(Agent)
-        await said(started, "ask", AskSaid(question="which way?"), agent)
+        await said(started, "ask", AskSaid(question="which way?", wait=False), agent)
         assert (
             "which way?"
             in (
@@ -582,3 +829,153 @@ class InboxPromises(Part):
         question = Posting.of(Question, by=agent, repository="harness", text="may I?")
         refused = await started.serve("post", question, Machine())
         assert isinstance(refused, Refused)
+
+    @lup.promise
+    async def the_second_lups_concerns_come_over_once(self, by: Testing) -> None:
+        """A repository's threads in the second lup's ledger come over once, each a friction or a concern by the tool its first words were filed with, with its body, place, holder and done mark, and the words filed in it; the notes sent into one, another repository's threads, and a second run don't."""
+        started = await by.started(project())
+        with TemporaryDirectory() as directory:
+            ledger = Path(directory) / "ledger.sqlite3"
+            second_ledger(ledger)
+            converting = Converting(
+                ledger=ledger, named=SECOND_REPOSITORY, repository="harness"
+            )
+            converted = await started.run("core", "convert", converting, Operator())
+            assert isinstance(converted, Accepted), converted
+            again = await started.run("core", "convert", converting, Operator())
+            assert isinstance(again, Refused)
+            missing = converting.model_copy(update={"ledger": Path(directory) / "no"})
+            assert isinstance(
+                await started.run("core", "convert", missing, Operator()), Refused
+            )
+        state = await inboxed(started)
+        assert [each.title for each in state.concerns] == [
+            "How the port goes",
+            "#10: the gate",
+            "the keys lag",
+        ]
+        port = placed(state, "How the port goes")
+        gate = placed(state, "#10: the gate")
+        keys = placed(state, "the keys lag")
+        assert (port.holder, port.left_by, port.said) == (
+            "@no-agent",
+            "agent s-plan",
+            1,
+        )
+        assert (gate.left_by, gate.said, gate.done) == ("agent s-build", 2, True)
+        assert gate.number in state.waiting
+        assert (keys.kind, keys.holder) == ("inbox:friction", "@frictions")
+        assert not state.new
+        body = await viewed(started, "concern_view", ConcernOf(number=port.number))
+        assert any(
+            isinstance(each, Markdown) and each.text == "The port's body"
+            for each in body.blocks
+        )
+        probe = await started.view(
+            "core", "party", PartyOf(repository="harness", name="probe"), Operator()
+        )
+        assert isinstance(probe, Accepted), probe
+
+    @lup.promise
+    async def a_concerns_words_mark_it_rather_than_the_news(self, by: Testing) -> None:
+        """Words filed in a concern aren't news: the concern's line is new until the operator has had what's in it on their screen, while a note in it is news."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        await said(
+            started, "concern", ConcernSaid(text="first", title="a direction"), agent
+        )
+        state = await inboxed(started)
+        assert not state.new
+        concern = placed(state, "a direction")
+        assert concern.new
+        opened = await viewed(started, "concern_view", ConcernOf(number=concern.number))
+        for block in opened.blocks:
+            if block.sighted is not None:
+                seen = Showing.model_validate(block.sighted.given)
+                shown = await started.run("core", "shown", seen, Operator())
+                assert isinstance(shown, Accepted), shown
+        assert not placed(await inboxed(started), "a direction").new
+        await said(
+            started, "note", NoteSaid(remark="a doubt", thread="a-direction"), agent
+        )
+        after = await inboxed(started)
+        assert after.new
+        assert placed(after, "a direction").new
+
+    @lup.promise
+    async def a_subagents_friction_reaches_its_parent_as_a_line(
+        self, by: Testing
+    ) -> None:
+        """A subagent's friction is told to the agent who spawned them once, as a line saying what and where, never whole and never waiting; their concern isn't told to them."""
+        started = await by.started(project())
+        lead, probe = Agent.of("lead-id"), Agent.of("lead-id", "probe-id")
+        for agent, name, spawner in [(lead, "lead", None), (probe, "probe", lead)]:
+            await started.serve(
+                "agent_named",
+                Naming(repository="harness", agent=agent, name=name, spawner=spawner),
+                Machine(),
+            )
+        await said(
+            started,
+            "friction",
+            FrictionSaid(text="the keys lag\n\nEach press waits a second."),
+            probe,
+        )
+        await said(
+            started, "concern", ConcernSaid(text="watch the keys", title="keys"), probe
+        )
+        [line] = (await told(started, lead)).items
+        assert "the keys lag" in line.text
+        assert "Each press" not in line.text
+        assert not (await told(started, lead)).items
+        assert not (await inboxed(started)).waiting
+
+    @lup.promise
+    async def an_ask_holds_until_the_operator_answers(self, by: Testing) -> None:
+        """An agent's `ask` holds until the operator answers or `within` passes, and the answer is told to them once, by the held call or at their next; what's held settles once the answer is in, and an ask that doesn't wait leaves its question waiting."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        held = asyncio.ensure_future(
+            said(
+                started,
+                "ask",
+                AskSaid(
+                    question="which way?",
+                    decisions=[Decision(decision="go left", lean="it's shorter")],
+                ),
+                agent,
+            )
+        )
+        while not (await inboxed(started)).waiting and not held.done():
+            await asyncio.wait([held], timeout=60)
+        [question] = (await inboxed(started)).waiting
+        answered = await started.run(
+            "core",
+            "answer",
+            Answering(
+                question=question,
+                rulings=[Ruling(number=1, verdict="leaning", comment="go")],
+                text="and quickly",
+            ),
+            Operator(),
+        )
+        assert isinstance(answered, Accepted), answered
+        await held
+        await told(started, agent)
+        state = await inboxed(started)
+        [answer] = [
+            each
+            for each in state.told
+            if each.party != "@operator" and each.item > question
+        ]
+        assert answer.times == 1
+        settled = await started.serve(
+            "awaited",
+            Spoken(agent=agent, said=Awaiting(question=question)),
+            HERE,
+        )
+        assert isinstance(settled, Accepted), settled
+        assert isinstance(settled.output, Awaited)
+        assert settled.output.settled
+        await said(started, "ask", AskSaid(question="and then?", wait=False), agent)
+        assert len((await inboxed(started)).waiting) == 1

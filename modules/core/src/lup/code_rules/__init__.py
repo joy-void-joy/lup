@@ -21,7 +21,7 @@ from lup.code_rules.reports import (
 
 # The module, imported as it's first used: its promises, which it imports as
 # it's defined, import this front door, and find it whole.
-lazy from lup.code_rules.module import CodeRules, Exempt, Rules
+lazy from lup.code_rules.module import CodeRules, Exempt, Rules, Tests
 
 __all__ = [
     "CodeRules",
@@ -41,6 +41,7 @@ __all__ = [
     "RuleInfo",
     "Rules",
     "Span",
+    "Tests",
     "changed_deferrals",
     "deferrals_changed",
     "read_directives",
