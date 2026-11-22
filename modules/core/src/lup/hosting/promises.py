@@ -1748,7 +1748,8 @@ class MachinewidePromises(Part):
     async def a_part_one_for_the_machine_runs_in_a_container_of_its_own(
         self, by: Testing
     ) -> None:
-        """A part one for the whole machine that doesn't hold the machine runs in a container of its own, from the machine's own environment and tree read-only, its data the directory it kept on the machine; a part holding the machine starts no container; and a project's call to the former is carried there, never answered on the machine."""
+        """A part one for the whole machine that doesn't hold the machine runs in a container of its own, from the machine's own environment, tree and source read-only, never from a working directory, its data the directory it kept on the machine; a part holding the machine starts no container; one that doesn't come up listening is stopped and said; and a project's call to one that did is carried there, never answered on the machine."""
+        listens = by.any(bool)
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
             programs={"podman": OPENING_PODMAN, "uv": UV},
@@ -1760,6 +1761,12 @@ class MachinewidePromises(Part):
         )
         keeper = json.loads(json.dumps(plan))
         keeper["parts"][1]["holds"]["machine"] = True
+        made = await started.serve(
+            "directory", {"container": "lup-machine-chat-Desk-1"}, Machine()
+        )
+        assert isinstance(made, Accepted)
+        if listens:
+            (Path(json.loads(made.answer())["path"]) / "listening.sock").touch()
         with tempfile.TemporaryDirectory() as state:
             data = Path(state) / "data"
             sharing: JsonValue = {
@@ -1767,6 +1774,7 @@ class MachinewidePromises(Part):
                 "root": "/srv/lup",
                 "declaration": "lup_project.py",
                 "environment": "/srv/environment",
+                "paths": ["/srv/src"],
                 "data": str(data),
                 "plan": keeper,
             }
@@ -1774,22 +1782,32 @@ class MachinewidePromises(Part):
             kept = (data / "chat.Desk").is_dir()
         assert kept
         assert isinstance(shared, Accepted)
-        [container] = json.loads(shared.answer())["containers"]
-        assert container.startswith("lup-machine-chat-Desk-")
+        answer = json.loads(shared.answer())
+        container = "lup-machine-chat-Desk-1"
+        assert (container in answer["containers"]) == listens
+        assert ("chat.Desk" in answer["failed"]) != listens
+        stopped = [each[-1] for each in podman_ran(started, "stop")]
+        assert (container in stopped) != listens
         [command] = [
             each for each in podman_ran(started, "run") if f"--name={container}" in each
         ]
+        assert "-P" in command
+        assert "--workdir=/" in command
         mounts = [each for each in command if each.startswith("--mount=")]
-        environment = [each for each in mounts if "/srv/environment" in each]
+        environment = [
+            each for each in mounts if "/srv/environment" in each or "/srv/src" in each
+        ]
         data = [each for each in mounts if "/data/chat.Desk" in each]
-        assert environment
+        assert len(environment) == 2
         assert all("ro=true" in each for each in environment)
         assert data
         assert not any("ro=true" in each for each in data)
         assert not [each for each in mounts if "Keeper" in each]
         status = await started.run("hosting", "status", {}, lup.Operator())
         assert isinstance(status, Accepted)
-        assert container in status.answer()
+        assert (f"  {container}, " in status.answer()) == listens
+        if not listens:
+            return
         project = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
         await started.serve(
             "placed",

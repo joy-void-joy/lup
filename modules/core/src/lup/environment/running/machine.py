@@ -50,7 +50,7 @@ from lup.hosting.carrying import (
     Visiting,
 )
 from lup.hosting.containers import Clearing, ContainerError
-from lup.hosting.projects import Resumed, Resuming, Sharing
+from lup.hosting.projects import Resumed, Resuming, Shared, Sharing
 from lup.running.plan import Plan
 from lup.running.wire import (
     Answered,
@@ -118,7 +118,11 @@ async def carried(
     try:
         return await asked(route.to, vouched)
     except (OSError, ValueError) as lost:
-        return declined(f"the container answering it can't be reached: {lost}")
+        return declined(
+            f"the container answering it doesn't answer ({lost}): it may still be "
+            "starting, or have ended; `lup hosting status` says which, and where "
+            "what it printed is"
+        )
 
 
 class Forwarder(Model, Forwards):
@@ -228,6 +232,22 @@ def homed(host: Host) -> Project:
     return applied(layered, project, set_fields(layered))
 
 
+def imported() -> list[Path]:
+    """Return each directory this process imports its code from, outside its environment and the interpreter: a source tree an editable install points at. Never the working directory, which a part one for the whole machine must not import from."""
+    here = Path.cwd()
+    prefix = Path(sys.prefix)
+    base = Path(sys.base_prefix)
+    return [
+        path
+        for each in sys.path
+        if each
+        and (path := Path(each)).is_dir()
+        and path != here
+        and not path.is_relative_to(prefix)
+        and not path.is_relative_to(base)
+    ]
+
+
 async def hosted_parts(
     host: Host, runs: Runs | None, inward: Inward, *, contained: bool
 ) -> Running:
@@ -316,6 +336,7 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
             root=host.root,
             declaration=host.declaration,
             environment=Path(sys.prefix),
+            paths=imported(),
             data=host.state / "data",
             plan=hosting,
         )
@@ -331,6 +352,9 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
                 "lup couldn't start the parts one for the whole machine: %s",
                 shared.rejection.reason,
             )
+        if isinstance(shared, Accepted):
+            for part, why in Shared.model_validate(shared.output).failed.items():
+                log.warning("lup's %s didn't come up: %s", part, why)
         resumed = await running.serve(
             "resumed", Resuming().model_dump(mode="json"), Machine()
         )
