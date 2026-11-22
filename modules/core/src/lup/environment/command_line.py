@@ -120,13 +120,13 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
 
     def here(self, holds: Holds) -> bool:
         """Say whether a part holding `holds` is started here: it holds nothing but secrets, each given, and isn't one run in a session's room alone."""
-        apart = holds.machine or holds.approved or holds.shared or holds.room
+        apart = holds.beyond_secrets() or holds.room
         return not apart and all(each in self.secrets for each in holds.secrets)
 
     def elsewhere(self, part: PartPlan) -> str:
         """Say why a call to `part`, which isn't started here, can't be answered here: the secrets it needs, or that it runs apart."""
         missing = [each for each in part.holds.secrets if each not in self.secrets]
-        apart = part.holds.machine or part.holds.approved or part.holds.shared
+        apart = part.holds.beyond_secrets()
         if missing and not apart and self.command is not None:
             named = [variable(self.command, each) for each in missing]
             return (

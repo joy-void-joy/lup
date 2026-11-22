@@ -24,6 +24,8 @@ from lup.doors.parties import Machine
 from lup.doors.parts import Data, Part, Program
 from lup.hosting.carrying import Carrying, Naming
 from lup.hosting.containers import Bind, Containers, Image, Named, Once, Spec
+from lup.programs.git.running import Git
+from lup.remote.rooms import configured, launcher
 from lup.rooms.layout import InRoom, Kept, digest
 from lup.rooms.packages import Package
 from lup.running.plan import Name
@@ -190,6 +192,15 @@ class Rooms(Part, machine=True, shared=True):
         why="says where the machine keeps Python, which the room's lup runs on",
         install="https://docs.astral.sh/uv/getting-started/installation/",
     )
+    git: Program = Program(
+        name="git",
+        optional=True,
+        why=(
+            "reads a project's remotes, and writes the room's git configuration "
+            "sending them through lup"
+        ),
+        install="https://git-scm.com",
+    )
     base: Base = Field(default_factory=Base)
     inside: InRoom = Field(default_factory=InRoom)
     fresh: dict[str, Fresh] = {}
@@ -232,6 +243,14 @@ class Rooms(Part, machine=True, shared=True):
         )
         for name, text in prepared.files.items():
             (files / name).write_text(text)
+        helping = files / "bin"
+        helping.mkdir(exist_ok=True)
+        helper = helping / "git-remote-lup"
+        helper.write_text(launcher(python))
+        helper.chmod(0o755)
+        await configured(
+            Git.pinned(room.common, through=self.git), files / "gitconfig", self.git
+        )
         for name, text in prepared.homed.items():
             replaced(directory / name, text)
         history = room.kept.history(room.common, runtime.name)
@@ -465,6 +484,7 @@ class Rooms(Part, machine=True, shared=True):
                     str(self.inside.cli(name) / each.program.parent)
                     for name, each in clis.items()
                 ],
+                str(placed.session / "bin"),
                 "/usr/local/bin",
                 "/usr/bin",
                 "/bin",
@@ -486,6 +506,7 @@ class Rooms(Part, machine=True, shared=True):
                 "PATH": path,
                 "LANG": self.base.locale,
                 "LUP_CALLING": str(self.inside.calling()),
+                "GIT_CONFIG_GLOBAL": str(placed.session / "gitconfig"),
                 "LUP_SESSION": room.session,
                 "UV_CACHE_DIR": str(cache),
                 "UV_PROJECT_ENVIRONMENT": str(environment),

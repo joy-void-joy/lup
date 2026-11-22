@@ -31,7 +31,15 @@ from lup.declaration.project import Project
 from lup.doors.door import Accepted, DoorError, Method, Refused
 from lup.doors.events import Event, Heeded
 from lup.doors.parties import Agent, Party
-from lup.doors.parts import Finished, Parts, Program, Runs, State, UnrunError
+from lup.doors.parts import (
+    Finished,
+    Parts,
+    Program,
+    Runs,
+    SshAgent,
+    State,
+    UnrunError,
+)
 from lup.doors.tool import ToolDoor, ToolSpec
 from lup.environment.declaration import read, resolve
 from lup.environment.doors import Doors, Entry, Running, Serves
@@ -657,6 +665,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         programs: Mapping[str, Scripted | Responding | Acting] | None = None,
         *,
         machine: bool = False,
+        git: Path | None = None,
     ) -> Started:
         """Start lup on a declaration: a `Project`, or a repository's files, read with their layers as lup reads a repository's, each class made once and started.
 
@@ -668,7 +677,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         heard = Heard()
         stand = StandIn(scripts=dict(programs or {}), heard=heard)
         reached = await self.reached(
-            project, secrets, repository, stand, machine=machine
+            project, secrets, repository, stand, machine=machine, git=git
         )
         planner = Planner(project=project)
         return Started(
@@ -697,24 +706,37 @@ class Harness(Testing, arbitrary_types_allowed=True):
         runs: Runs | None = None,
         *,
         machine: bool = False,
+        git: Path | None = None,
     ) -> Reached:
         """Start lup on `project`, as the code of `repository`, and return its doors as this harness reaches them, every invariant its modules hold checked over each call.
 
         Each secret a class holds is `secrets`'s, or drawn where they're left
-        out.
+        out. What the operator's machine lends is given, never drawn, since a
+        promise reaches nothing it would open, and a run drawing nothing is
+        checked once: the operator's GitHub login, `secrets`' where they give
+        it, else a token nothing takes; the project's git directory, `git`, or
+        an empty directory where it's left out, as a law's runs give none; and
+        the operator's SSH agent, a socket nothing answers on.
         """
         resolved = resolve(project)
         held = [
             name for each in resolved.doors.served for name in each.part.holds().secrets
         ]
-        given = (
-            dict(secrets)
-            if secrets is not None
-            else {name: self.any(str) for name in dict.fromkeys(held)}
-        )
+        logins = [
+            name for each in resolved.doors.served for name in each.part.holds().github
+        ]
+        given = {
+            **dict.fromkeys(logins, "a login nothing takes"),
+            **(
+                dict(secrets)
+                if secrets is not None
+                else {name: self.any(str) for name in dict.fromkeys(held)}
+            ),
+        }
         kept = tempfile.TemporaryDirectory(prefix="lup-data-")
         lasting = tempfile.TemporaryDirectory(prefix="lup-run-")
-        self.run.kept.extend([kept, lasting])
+        lent = tempfile.TemporaryDirectory(prefix="lup-lent-")
+        self.run.kept.extend([kept, lasting, lent])
         running = await resolved.doors.started(
             repository,
             given,
@@ -722,6 +744,8 @@ class Harness(Testing, arbitrary_types_allowed=True):
             runtime=Path(lasting.name),
             runs=runs or StandIn(heard=Heard()),
             machine=machine,
+            git=git or Path(lent.name),
+            ssh=SshAgent(socket=Path(lent.name) / "agent.sock", home=Path(lent.name)),
         )
         self.run.started.append(running)
         return Reached(

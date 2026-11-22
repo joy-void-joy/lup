@@ -22,4 +22,7 @@ Each module's doc is in its directory:
 - `modules/core/src/lup/runtimes/README.md`: the runtimes lup holds sessions on, behind one interface, and reading each one's records of its conversations as lup's model of one.
 - `modules/core/src/lup/gate/README.md`: the gate, the steps every module declares, run on a worktree's files, and a pass recorded by the files it passed on.
 - `modules/core/src/lup/landing/README.md`: landing a branch, the operator's review, what's on trial in what their lup runs, and accepting it onto the integration branch.
+- `modules/core/src/lup/remote/README.md`: a room's `git push` and `git fetch`, carried out with the operator's credentials within what the declaration allows, and `git-remote-lup`, the room's side.
+- `modules/core/src/lup/github/README.md`: the tools sessions act on GitHub through, with the operator's own login, within what the declaration allows.
+- `modules/core/src/lup/publishing/README.md`: publishing, what's about to leave under the operator's name, told to every part hearing it before it leaves, which may refuse it.
 - `modules/core/src/lup/code_rules/README.md`: the code rules, what they catch and when each is told, the engine reading pyright's own tree, and `# lup:` comments.

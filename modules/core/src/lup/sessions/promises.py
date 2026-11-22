@@ -98,7 +98,9 @@ class Store(Model, Responding):
     objects: list[Stored] = [COMMIT, TREE]
 
     def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
-        """Answer a `cat-file` run, each object asked on its own line: its size on a line, its content, then a newline."""
+        """Answer a `cat-file` run, each object asked on its own line: its size on a line, its content, then a newline; and a `config` run, as git does for a repository naming no remote: no value found, and each written."""
+        if "config" in arguments:
+            return Answering(status=1 if "get" in arguments else 0)
         if "cat-file" not in arguments or given is None:
             return None
         held = {each.id: each.content for each in self.objects}

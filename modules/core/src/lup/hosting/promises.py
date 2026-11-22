@@ -39,12 +39,17 @@ modules and the machine's parts."""
 
 
 class Planned(Model):
-    """A part of a project's plan, as a promise writes one: its module and class, what it holds, the file it's defined in, and the tools and services it serves, each called by an agent."""
+    """A part of a project's plan, as a promise writes one: its module and class, what it holds, the file it's defined in, the tools and services it serves, each called by an agent, and the packages its programs are in."""
 
     module: str
     part: str
     secrets: list[str] = []
     shared: bool = False
+    git: bool = False
+    github: list[str] = []
+    packages: list[str] = []
+    hears: list[str] = []
+    """The events its methods run at, by their classes' names."""
     source: str | None = None
     tools: list[str] = []
     services: list[str] = []
@@ -73,9 +78,16 @@ class Planned(Model):
         return {
             "module": self.module,
             "part": self.part,
-            "holds": {"secrets": list[JsonValue](self.secrets), "shared": self.shared},
+            "holds": {
+                "secrets": list[JsonValue](self.secrets),
+                "shared": self.shared,
+                "git": self.git,
+                "github": list[JsonValue](self.github),
+            },
             "source": self.source,
             "doorways": doorways,
+            "packages": list[JsonValue](self.packages),
+            "hears": list[JsonValue](self.hears),
         }
 
 
@@ -467,6 +479,64 @@ class HostingPromises(Part):
             "routed", {"directory": "/srv/elsewhere", "call": call}, Machine()
         )
         assert isinstance(stranger, Refused)
+
+    @lup.promise
+    async def a_parts_event_goes_from_its_projects_containers_alone(
+        self, by: Testing
+    ) -> None:
+        """A part's own event is carried from a container of its project, and from nowhere else, to the parts of that project hearing it in its other containers: where none hears it, nothing's told or refused; where one is out of reach, it's refused, since a check that didn't run let nothing through."""
+        heard_elsewhere = by.any(bool)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        plan = plan_of(
+            Planned(module="notes", part="Notes"),
+            Planned(
+                module="guard",
+                part="Guard",
+                secrets=["key"],
+                hears=["Publishing"] if heard_elsewhere else [],
+            ),
+        )
+        made = await started.serve("directory", {"container": "c"}, Machine())
+        guarding = await started.serve("directory", {"container": "g"}, Machine())
+        assert isinstance(made, Accepted)
+        assert isinstance(guarding, Accepted)
+        own: str = json.loads(made.answer())["path"]
+        guard: str = json.loads(guarding.answer())["path"]
+        await started.serve(
+            "placed",
+            {
+                "repository": "harmon",
+                "plan": plan,
+                "placements": [
+                    {
+                        "repository": "harmon",
+                        "parts": ["notes.Notes"],
+                        "container": "c",
+                        "directory": own,
+                    },
+                    {
+                        "repository": "harmon",
+                        "parts": ["guard.Guard"],
+                        "container": "g",
+                        "directory": guard,
+                    },
+                ],
+            },
+            Machine(),
+        )
+        told: JsonValue = {"event": "Publishing", "given": {}}
+        fired = await started.serve("fired", {"directory": own, **told}, Machine())
+        assert isinstance(fired, Accepted)
+        heeded = json.loads(fired.answer())
+        assert (heeded["refused"] is not None) == heard_elsewhere
+        stray = await started.serve(
+            "fired", {"directory": "/srv/nowhere", **told}, Machine()
+        )
+        assert isinstance(stray, Refused)
 
     @lup.promise
     async def a_call_from_a_room_is_by_its_session(self, by: Testing) -> None:
@@ -1071,13 +1141,21 @@ class ApprovalsPromises(Part):
 
 
 async def started_approved(
-    by: Testing, podman: Scripted | Responding, committed: Committed | None = None
+    by: Testing,
+    podman: Scripted | Responding,
+    committed: Committed | None = None,
+    gh: Scripted | None = None,
 ) -> Started:
-    """Start the machine's parts, podman as `podman` scripts it, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
+    """Start the machine's parts, podman as `podman` scripts it, `gh` as it scripts it where it's given, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
     approving = committed or Committed.of(Files())
     started = await by.started(
         lup.testing.Repository(declaration=HOME),
-        programs={"podman": podman, "git": approving.store, "uv": UV},
+        programs={
+            "podman": podman,
+            "git": approving.store,
+            "uv": UV,
+            **({} if gh is None else {"gh": gh}),
+        },
         machine=True,
     )
     await started.run(
@@ -1302,6 +1380,81 @@ class Failing(lup.MutableModel, Responding):
         if "--interactive" in arguments:
             return Answering(output=json.dumps(VAULT_PLAN))
         return Answering()
+
+
+class LendingPromises(Part):
+    """What the operator can count on of what their machine lends a part acting for agents: only to a part holding it, running apart."""
+
+    @lup.promise
+    async def a_part_is_lent_the_git_directory_and_login_it_holds(
+        self, by: Testing
+    ) -> None:
+        """A part holding the project's git directory and the operator's GitHub login runs in a container of its own: the git directory bound read-write at its own path, its `config` and `hooks/` read-only over it, and its image installing the packages its programs are in; where `gh` lends no login, it waits, not started. A part holding nothing is lent neither."""
+        logged = by.any(bool)
+        plan = plan_of(
+            Planned(module="notes", part="Notes"),
+            Planned(
+                module="github",
+                part="Forge",
+                git=True,
+                github=["login"],
+                packages=["github-cli"],
+            ),
+        )
+        podman = Scripted(
+            answers=[
+                VERSIONED,
+                Answering(when=["image", "exists"], status=0),
+                Answering(when=["run", "--interactive"], output=json.dumps(plan)),
+                Answering(when=["run", "--detach"]),
+                Answering(when=["stop"]),
+            ]
+        )
+        gh = Scripted(
+            answers=[
+                Answering(when=["auth", "token"], output="gho_lent\n")
+                if logged
+                else Answering(when=["auth", "token"], status=1, error="not logged in")
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            common = Path(directory) / "harmon.git"
+            (common / "hooks").mkdir(parents=True)
+            (common / "config").touch()
+            started = await started_approved(by, podman, gh=gh)
+            opened = await started.serve(
+                "opened", Opens(common=str(common)).given(), Machine()
+            )
+        assert isinstance(opened, Accepted)
+        result = json.loads(opened.answer())
+        assert ("github.Forge" in result["unlent"]) != logged
+        detached = [each for each in podman_ran(started, "run") if "--detach" in each]
+        forge = [
+            each for each in detached if "--name=lup-harmon-github-Forge-1" in each
+        ]
+        project = [each for each in detached if "--name=lup-harmon-project-1" in each]
+        assert len(forge) == int(logged)
+        assert len(project) == 1
+        assert not [
+            each
+            for each in project[0]
+            if each.startswith("--mount=") and str(common) in each
+        ]
+        for command in forge:
+            mounts = [
+                each
+                for each in command
+                if each.startswith("--mount=") and str(common) in each
+            ]
+            writable = [each for each in mounts if "ro=true" not in each]
+            assert writable
+            assert all(each.endswith(f"destination={common}") for each in writable)
+            assert any(f"destination={common / 'config'}" in each for each in mounts)
+            assert any(f"destination={common / 'hooks'}" in each for each in mounts)
+        images = dict.fromkeys(
+            each[-1] for each in podman_ran(started, "image") if each[1] == "exists"
+        )
+        assert len(images) == 1 + int(logged)
 
 
 class ClearingPromises(Part):
