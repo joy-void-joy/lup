@@ -17,15 +17,18 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.doors.door import Accepted, Refused, Rejection
-from lup.doors.parties import Agent, Codebase, Operator
+from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.errors import LupError
 from lup.running.plan import Plan
 from lup.types import Model
 
-type Caller = Annotated[Agent | Operator | Codebase, Field(discriminator="party")]
+type Caller = Annotated[
+    Agent | Operator | Codebase | Machine, Field(discriminator="party")
+]
 """Who calls, as a call across containers names them: one of the core's
-parties, which the program on the operator's machine vouches for, never the
-machine itself."""
+parties, which the program on the operator's machine vouches for. `Machine`
+only on a call the machine's own parts send into a container: a call coming in
+to the machine is named from the socket it came in on, whatever it says."""
 
 
 class FormatError(LupError):

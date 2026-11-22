@@ -110,6 +110,30 @@ class Telling(Model):
     agent: Agent
 
 
+class Sharing(Model):
+    """The parts one for the whole machine that don't hold it, to start each in a container of its own: the home repository, its tree and declaration as the machine runs them, the machine's own Python environment, where the machine keeps its parts' data, and the home repository's plan."""
+
+    repository: Name
+    root: Path
+    """The home repository's tree the machine runs, mounted read-only."""
+    declaration: Path
+    """Its declaration, relative to the root."""
+    environment: Path
+    """The Python environment the machine runs in, mounted read-only: a part
+    one for the whole machine runs the machine's own code, approved."""
+    data: Path
+    """Where the machine keeps its parts' data: each part's own directory
+    there is mounted at its own path, so it keeps what it kept before."""
+    plan: Plan
+
+
+class Shared(Model):
+    """The containers running the parts one for the whole machine that don't hold it, by name; and those waiting for a secret nothing's kept yet."""
+
+    containers: list[str] = []
+    waiting: list[str] = []
+
+
 class Statusing(Model):
     """Asking what the machine runs, giving nothing."""
 
@@ -126,7 +150,11 @@ class Resumed(Model):
 
 
 class Base(Model):
-    """The image every project's containers start from: Arch Linux's, pinned with the day of its archive its packages come from, with git and uv."""
+    """The image every project's containers start from: Arch Linux's, pinned with the day of its archive its packages come from, with git and uv.
+
+    The archive answers slowly at times, so pacman waits on it as long as it
+    takes, rather than giving up past its ten seconds.
+    """
 
     image: str = (
         "docker.io/library/archlinux:base-20260816.0.574111"
@@ -139,7 +167,8 @@ class Base(Model):
         """Return its Containerfile."""
         steps = [
             f"echo 'Server = {self.archive}' > /etc/pacman.d/mirrorlist",
-            "pacman -Syu --noconfirm --needed -- " + " ".join(self.packages),
+            "pacman -Syu --noconfirm --needed --disable-download-timeout -- "
+            + " ".join(self.packages),
             "rm -rf /var/cache/pacman/pkg/*",
         ]
         return f"FROM {self.image}\nRUN " + " \\\n    && ".join(steps) + "\n"
@@ -165,6 +194,9 @@ class Projects(Part, machine=True, shared=True):
     base: Base = Field(default_factory=Base)
     projects: dict[str, Opened] = {}
     """Each project running, by its repository."""
+    machinewides: Shared = Field(default_factory=Shared)
+    """The containers running the parts one for the whole machine that don't
+    hold it."""
     unopened: dict[str, str] = {}
     """Why each project registered isn't open, by its repository, where
     opening it was refused, as the operator's `status` says."""
@@ -233,6 +265,126 @@ class Projects(Part, machine=True, shared=True):
                 "UV_PYTHON_DOWNLOADS": "never",
                 "UV_PYTHON_INSTALL_DIR": str(source.interpreters),
             },
+        )
+
+    @lup.service
+    async def machinewide(self, sharing: Sharing, by: Machine) -> Shared:
+        """Start each part one for the whole machine that doesn't hold the machine in a container of its own, from the machine's own code, holding only what it declares, in place of those started before: as the machine's parts start.
+
+        A part holding a secret nothing's kept for the home repository waits,
+        not started. Raise `RefusedError` where a container doesn't start.
+        """
+        del by
+        for name in self.machinewides.containers:
+            await Containers.stopped(Named(name=name))
+        parts = [
+            each
+            for each in sharing.plan.parts
+            if each.holds.shared and not each.holds.machine
+        ]
+        if not parts:
+            self.machinewides = Shared()
+            await Carrying.sharing(
+                Placing(repository=sharing.repository, plan=sharing.plan, placements=[])
+            )
+            return self.machinewides
+        await Containers.built(self.image(sharing.repository))
+        found = await self.uv.ran("python", "dir")
+        if found.status != 0:
+            message = f"uv couldn't say where it keeps Python: {found.said()}"
+            raise RefusedError(message)
+        interpreters = Path(found.text().strip())
+        held = {
+            each.named(): await Secrets.held(
+                Holding(project=sharing.repository, names=each.holds.secrets)
+            )
+            for each in parts
+        }
+        waiting = [name for name, values in held.items() if values.missing]
+        self.generation += 1
+        placements = [
+            await self.shared_at(sharing, each, interpreters, held[each.named()].values)
+            for each in parts
+            if each.named() not in waiting
+        ]
+        await Carrying.sharing(
+            Placing(
+                repository=sharing.repository, plan=sharing.plan, placements=placements
+            )
+        )
+        self.machinewides = Shared(
+            containers=[each.container for each in placements], waiting=waiting
+        )
+        return self.machinewides
+
+    async def shared_at(
+        self,
+        sharing: Sharing,
+        part: PartPlan,
+        interpreters: Path,
+        secrets: dict[str, str],
+    ) -> Placement:
+        """Start the container of the part one for the whole machine `part`, from the machine's own environment, read-only, its data the directory it kept on the machine, and return where it runs."""
+        name = f"lup-machine-{part.module}-{part.part}-{self.generation}"
+        directory = await Carrying.directory(Naming(container=name))
+        start = Start(
+            root=sharing.root,
+            declaration=sharing.declaration,
+            repository=sharing.repository,
+            parts=[part.named()],
+            listening=Path("/run/lup/listening.sock"),
+            calling=Path("/run/lup/calling.sock"),
+            secrets=None if not secrets else Path("/run/lup/secrets"),
+            data=sharing.data,
+            runtime=Path("/run/lup/runtime"),
+        )
+        if secrets:
+            kept = directory.path / "secrets"
+            kept.mkdir(mode=0o700, exist_ok=True)
+            for each, value in secrets.items():
+                file = kept / each
+                file.touch(mode=0o600)
+                file.write_text(value)
+        spec = self.shared_spec(sharing, part, name, interpreters, directory.path)
+        spec = spec.model_copy(
+            update={"env": {**spec.env, "LUP_ASKED": start.model_dump_json()}}
+        )
+        await Containers.started(spec)
+        return Placement(
+            repository=sharing.repository,
+            parts=[part.named()],
+            container=name,
+            directory=directory.path,
+        )
+
+    def shared_spec(
+        self,
+        sharing: Sharing,
+        part: PartPlan,
+        name: str,
+        interpreters: Path,
+        sockets: Path,
+    ) -> Spec:
+        """Return the container named `name` of the part one for the whole machine `part`: the machine's tree, environment and interpreters read-only at their own paths, its data the directory it kept on the machine, its sockets in memory."""
+        data = sharing.data / part.named()
+        data.mkdir(parents=True, exist_ok=True)
+        return Spec(
+            name=name,
+            image=self.image(sharing.repository),
+            command=[
+                str(sharing.environment / "bin" / "python"),
+                "-m",
+                "lup.environment.running",
+            ],
+            workdir=sharing.root,
+            binds=[
+                Bind(source=sharing.root.resolve(), target=sharing.root),
+                Bind(source=sharing.environment.resolve(), target=sharing.environment),
+                Bind(source=interpreters.resolve(), target=interpreters),
+                Bind(source=data.resolve(), target=data, read_only=False),
+                Bind(source=sockets, target=Path("/run/lup"), read_only=False),
+            ],
+            output=self.output(name),
         )
 
     @lup.service
@@ -334,16 +486,14 @@ class Projects(Part, machine=True, shared=True):
 
     @lup.service
     async def resumed(self, resuming: Resuming, by: Machine) -> Resumed:
-        """Open again each project the machine's parts ran before they last stopped, at the commit approved last, every container they left stopped first, since nothing routes calls to it any more: as the machine's parts start.
+        """Open again each project the machine's parts ran before they last stopped, at the commit approved last: as the machine's parts start, once they've stopped every container a machine before them left (`Containers.cleared`).
 
         A project that can't open is said with why, and the others open.
-        Raise `RefusedError` where the containers left can't be stopped.
         """
         del resuming, by
         kept = self.kept()
         if not kept:
             return Resumed()
-        await Containers.cleared(Clearing())
         opened: list[str] = []
         refused: dict[str, str] = {}
         for repository, opening in kept.items():

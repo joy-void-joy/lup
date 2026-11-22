@@ -11,21 +11,31 @@ parts or forwarded to the container whose part answers it, its `by` the one
 
 import asyncio
 import logging
+import shutil
 import signal
+import sys
 from pathlib import Path
 from typing import override
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from lup.declaration.errors import ProjectError
 from lup.declaration.layout import MachineLayout
-from lup.doors.door import Accepted
+from lup.doors.door import Accepted, Answer, Method, RefusedError
 from lup.doors.parties import Machine
+from lup.doors.service import Carrier
 from lup.environment.declaration import load, resolve
-from lup.environment.running.container import answered, asked, declined, listening
+from lup.environment.running.container import (
+    REPLIES,
+    answered,
+    asked,
+    declined,
+    listening,
+)
 from lup.environment.running.planning import plan_of
 from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import Served, started
+from lup.errors import LupError
 from lup.hosting.carrying import (
     Arrival,
     Carrying,
@@ -34,10 +44,20 @@ from lup.hosting.carrying import (
     Route,
     Visiting,
 )
-from lup.hosting.containers import ContainerError
-from lup.hosting.projects import Resumed, Resuming
+from lup.hosting.containers import Clearing, ContainerError
+from lup.hosting.projects import Resumed, Resuming, Sharing
 from lup.running.plan import Plan
-from lup.running.wire import Asking, FormatError, Host, Offer, Offering, read
+from lup.running.wire import (
+    Answered,
+    Asking,
+    Declined,
+    FormatError,
+    Host,
+    Offer,
+    Offering,
+    ServiceCalled,
+    read,
+)
 from lup.types import Model, MutableModel
 lazy from lup.doors.parts import Runs
 lazy from lup.environment.doors import Running
@@ -124,18 +144,88 @@ class Binder(MutableModel, Listens, arbitrary_types_allowed=True):
             each.close()
 
 
-async def hosted_parts(host: Host, runs: Runs | None) -> Running:
-    """Start the home repository's machine parts, those holding the machine or one for the whole machine, as the machine's own, their data under `host.state`, their programs run by `runs`."""
+class Inward(MutableModel, Carrier, arbitrary_types_allowed=True):
+    """What carries a service's call the machine's own parts make to a part one for the whole machine that runs in a container of its own: as the machine's, the one call that crosses saying so."""
+
+    running: Running | None = None
+    """The machine's parts, whose doors say which part serves a method: set
+    once they've started."""
+    carrying: Carrying | None = None
+    """What knows where each part one for the whole machine runs: set once
+    the machine's parts have started."""
+    limit: int = 16 * 2**20
+    """The longest answer read, in bytes."""
+
+    @override
+    async def carried(self, method: Method, value: BaseModel) -> Answer | JsonValue:
+        """Send the call to the container of the part serving it, as the machine's, and return what it answered as JSON.
+
+        Raise `RefusedError` where that part isn't running in a container, or
+        its container refuses or can't be reached.
+        """
+        name = method.taken.qualified
+        entry = (
+            None
+            if self.running is None
+            else next(
+                (
+                    each
+                    for each in self.running.doors.entries()
+                    if each.method is method
+                ),
+                None,
+            )
+        )
+        placement = (
+            None
+            if entry is None or self.carrying is None
+            else self.carrying.holding(entry.serves.named())
+        )
+        if placement is None:
+            message = (
+                f"`{name}` runs neither on the machine nor in a container of its own"
+            )
+            raise RefusedError(message, about=[name])
+        call = ServiceCalled(
+            service=method.taken.name,
+            given=value.model_dump(mode="json"),
+            by=Machine(),
+        )
+        try:
+            text = await asked(
+                placement.listening(), call.model_dump_json().encode(), limit=self.limit
+            )
+            reply = read(text, REPLIES)
+        except (OSError, ValueError, LupError, ValidationError) as lost:
+            message = f"`{name}` couldn't be carried to its container: {lost}"
+            raise RefusedError(message, about=[name]) from lost
+        match reply:
+            case Answered(output=output):
+                return output
+            case Declined(rejection=rejection):
+                raise RefusedError(rejection.reason, about=[name])
+
+
+async def hosted_parts(
+    host: Host, runs: Runs | None, inward: Inward, *, contained: bool
+) -> Running:
+    """Start the home repository's parts holding the machine, as the machine's own, their data under `host.state`, their programs run by `runs`, a service of a part one for the whole machine in a container of its own carried by `inward`.
+
+    Where nothing runs in a container (`contained` false: podman isn't
+    there), the parts one for the whole machine run here too: no project's
+    code runs anywhere, and the inbox still answers.
+    """
     resolved = resolve(load(host.root / host.declaration))
     machine = [
         each.named()
         for each in resolved.doors.served
-        if each.part.holds().machine or each.part.holds().shared
+        if each.part.holds().machine or (each.part.holds().shared and not contained)
     ]
     return await resolved.doors.started(
         host.repository,
         {},
         only=machine,
+        beyond=inward,
         data=host.state / "data",
         runtime=host.runtime,
         runs=runs,
@@ -155,7 +245,9 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
     declaration doesn't select `Hosting`, which carries calls, and
     `ContainerError` where podman can't stop those left.
     """
-    running = await hosted_parts(host, runs)
+    inward = Inward(limit=limit)
+    contained = shutil.which("podman") is not None
+    running = await hosted_parts(host, runs, inward, contained=contained)
     carrying = next(
         (each.made for each in running.made if isinstance(each.made, Carrying)), None
     )
@@ -166,6 +258,8 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
             "`Carrying` carries every call: the home repository's must"
         )
         raise ProjectError(message)
+    inward.running = running
+    inward.carrying = carrying
     resolved = resolve(load(host.root / host.declaration))
     binder = Binder(running=running, looks=resolved.looks, limit=limit)
     carrying.listens = binder
@@ -187,6 +281,35 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
             MachineLayout(configuration=LupSettings().xdg_config_home),
         )
         await binder.listened(carrying.operator())
+        cleared = (
+            await running.serve(
+                "cleared", Clearing().model_dump(mode="json"), Machine()
+            )
+            if contained
+            else None
+        )
+        if cleared is not None and not isinstance(cleared, Accepted):
+            raise ContainerError(cleared.rejection.reason)
+        sharing = Sharing(
+            repository=host.repository,
+            root=host.root,
+            declaration=host.declaration,
+            environment=Path(sys.prefix),
+            data=host.state / "data",
+            plan=hosting,
+        )
+        shared = (
+            await running.serve(
+                "machinewide", sharing.model_dump(mode="json"), Machine()
+            )
+            if contained
+            else None
+        )
+        if shared is not None and not isinstance(shared, Accepted):
+            log.warning(
+                "lup couldn't start the parts one for the whole machine: %s",
+                shared.rejection.reason,
+            )
         resumed = await running.serve(
             "resumed", Resuming().model_dump(mode="json"), Machine()
         )
