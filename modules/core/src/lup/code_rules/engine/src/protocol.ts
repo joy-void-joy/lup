@@ -73,6 +73,10 @@ export interface FileReport {
 // When a rule is told, and whether the gate fails on it (`catalog.ts`, `Rule.category`).
 export type Category = 'design' | 'spelling' | 'heuristic';
 
+// Which files a rule reads (`catalog.ts`, `Rule.reads`): code, a test's or a
+// promise's checks, or both.
+export type Reads = 'code' | 'tests';
+
 export interface RuleExamples {
     flags: { code: string; rewritten: string }[];
     passes: string[];
@@ -85,6 +89,7 @@ export interface RuleInfo {
     mistake: string;
     steer: string;
     category: Category;
+    reads: Reads;
     examples: RuleExamples;
 }
 

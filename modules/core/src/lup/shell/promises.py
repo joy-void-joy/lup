@@ -39,7 +39,7 @@ from lup import (
     Tones,
     Viewing,
 )
-from lup.inbox.said import PartyOf, Pile
+from lup.inbox import PartyOf, Pile
 from lup.testing import (
     Accepted,
     Answered,
