@@ -236,7 +236,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     stays the same: how late at most the page shows what an agent said."""
     refused: timedelta = timedelta(minutes=2)
     """The longest between two reads of a view that can't be answered, so one
-    refused as absent costs a read now and then, never a stream of them."""
+    refused as absent costs a read every two minutes, never a stream of them."""
 
     async def changed(self, draft: Draft, by: Session | None = None) -> None:
         """Keep `draft` in place of the draft, tell every page open but `by`, the page that wrote the change, which holds it already, and lay the review out again for every page.
@@ -673,9 +673,9 @@ class Session(MutableModel, arbitrary_types_allowed=True):
                     else dashboard.refused
                 )
                 wait = min(wait * 2, longest)
-            with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(wait.total_seconds()):
-                    await self.acted.wait()
+            acting = asyncio.ensure_future(self.acted.wait())
+            await asyncio.wait([acting], timeout=wait.total_seconds())
+            acting.cancel()
 
     async def tell(
         self, told: Opened | Answered | Unanswered | Drafted | Delivered | Reviewed
