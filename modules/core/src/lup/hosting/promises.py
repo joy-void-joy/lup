@@ -1849,9 +1849,10 @@ class MachinewidePromises(Part):
             }
             shared = await started.serve("machinewide", sharing, Machine())
         assert isinstance(shared, Accepted)
-        [container] = json.loads(shared.answer())["containers"]
         [command] = [
-            each for each in podman_ran(started, "run") if f"--name={container}" in each
+            each
+            for each in podman_ran(started, "run")
+            if "--name=lup-machine-chat-Desk-1" in each
         ]
         [workdir] = [
             each.removeprefix("--workdir=")
