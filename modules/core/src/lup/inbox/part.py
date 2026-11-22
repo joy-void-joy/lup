@@ -172,12 +172,22 @@ class Inboxes(Part, approved=True, shared=True):
             return inbox.acted(agent, found, said)
 
     @lup.service
-    async def friction(self, given: Spoken[FrictionSaid], by: Codebase) -> str:
-        """Keep what got in an agent's way as a friction, where they send it, and say where."""
-        agent = self.inbox(by.repository).agent(given.agent)
+    async def friction(
+        self, given: Spoken[FrictionSaid], by: Codebase | Machine
+    ) -> str:
+        """Keep what got in an agent's way as a friction, where they send it, and say where.
+
+        Called by the machine, as a landing files what its gate found, the
+        agent's repository is the one the friction names, which it must name.
+        """
         said = given.said
+        own = by.repository if isinstance(by, Codebase) else said.repository
+        if own is None:
+            message = "a friction the machine files names the agent's repository"
+            raise RefusedError(message)
+        agent = self.inbox(own).agent(given.agent)
         with refusing():
-            inbox = self.elsewhere(by.repository, said.repository)
+            inbox = self.elsewhere(own, said.repository)
             under = inbox.party_or_pile(said.under, agent)
             spawner = inbox.under(agent)
             friction = inbox.opened(

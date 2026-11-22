@@ -21,6 +21,7 @@ from lup import (
     Codebase,
     Diff,
     Fold,
+    Line,
     Machine,
     Markdown,
     Model,
@@ -31,6 +32,7 @@ from lup.testing import (
     Accepted,
     Acting,
     Answering,
+    RealGit,
     Refused,
     Repository,
     Scripted,
@@ -64,8 +66,16 @@ TOLD = "historical-voice: main.py:3"
 """What the gate's step tells where it passes."""
 
 
-class RealGit(Model, Acting):
-    """git, run for real, with the variables and from the directory each run asks."""
+class Found(Model):
+    """What a gate step finds without failing, as it writes it to the file the gate gives it."""
+
+    about: str = "harness"
+    title: str = "a check that held on its second run"
+    text: str = "it failed once, then held"
+
+
+class Checked(Model, Acting):
+    """The gate's step `checked`, stood in for: it passes, saying `TOLD`, and writes one finding to the file the gate gives it."""
 
     def ran(
         self,
@@ -74,12 +84,11 @@ class RealGit(Model, Acting):
         env: dict[str, str],
         cwd: Path | None,
     ) -> Answering:
-        """Run git as asked, and answer how it ended."""
-        pinned = [f"{name}={value}" for name, value in env.items()]
-        done = lup.programs.run(
-            "env", *pinned, "git", *arguments, cwd=cwd, stdin=given, checked=False
-        )
-        return Answering(status=done.status, output=done.output, error=done.error)
+        """Write the finding, and pass."""
+        del arguments, given, cwd
+        for each in env.values():
+            Path(each).write_text(Found().model_dump_json() + "\n")
+        return Answering(output=TOLD)
 
 
 class Places(Model):
@@ -202,10 +211,17 @@ class Nothing(Model):
     """Nothing to give."""
 
 
+class Titled(Model):
+    """A concern of the project's inbox, by its title."""
+
+    title: str
+
+
 class Standing(Model):
-    """The numbers of what waits on the operator in the project's inbox."""
+    """What waits on the operator in the project's inbox, by number, and its concerns, frictions among them."""
 
     waiting: list[int] = []
+    concerns: list[Titled] = []
 
 
 class Ending(Model):
@@ -227,18 +243,36 @@ class Told(Model):
     items: list[ToldItem] = []
 
 
+class Seen(Model):
+    """A `# lup: defer` a landing says its branch changes: the file, and what the branch does to it."""
+
+    path: str
+    how: str
+
+
+class LandedDeferrals(Model):
+    """What a landing says of the work left undone it lands."""
+
+    deferrals: list[Seen] = []
+
+
 class LandedItem(Model):
     """The item a landing posted, by its number."""
 
     item: int | None = None
 
 
-async def waiting(started: Started) -> list[int]:
-    """Return the numbers of what waits on the operator in the project's inbox."""
+async def standing(started: Started) -> Standing:
+    """Return what the project's inbox holds, as its code reads it."""
     read = await started.serve("standing", Nothing(), Codebase(repository=PROJECT))
     assert isinstance(read, Accepted)
     assert isinstance(read.output, Model)
-    return Standing.model_validate(read.output.model_dump()).waiting
+    return Standing.model_validate(read.output.model_dump())
+
+
+async def waiting(started: Started) -> list[int]:
+    """Return the numbers of what waits on the operator in the project's inbox."""
+    return (await standing(started)).waiting
 
 
 async def told(started: Started, agent: Agent) -> list[str]:
@@ -272,7 +306,7 @@ async def machine(by: Testing, at: Places) -> Started:
             "git": RealGit(),
             "ssh": Scripted(),
             "uv": Scripted(answers=[Answering(output="/srv/python\n")]),
-            "checked": Scripted(answers=[Answering(output=TOLD)]),
+            "checked": Checked(),
         },
         machine=True,
         git=at.project / ".git",
@@ -459,6 +493,56 @@ class LandingPromises(Part):
         assert heard
 
     @lup.promise
+    async def a_landing_says_the_work_left_undone_it_lands(self, by: Testing) -> None:
+        """A landing says each `# lup: defer` its branch adds and removes in a Python file against the integration branch it holds, and none it only moves to another line."""
+        agent = Agent.of("landing")
+        with places() as at:
+            at.committed("dev", "kept.py", '# lup: defer(issue=1, why="moved")\n')
+            at.committed("dev", "gone.py", '# lup: defer(issue=2, why="done")\n')
+            at.git("push", "--quiet", "origin", "dev")
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed(
+                "feature", "kept.py", 'x = 1\n# lup: defer(issue=1, why="moved")\n'
+            )
+            at.committed("feature", "gone.py", "y = 2\n")
+            at.committed("feature", "new.py", '# lup: defer(issue=3, why="later")\n')
+            await gated(started, at)
+            answered = await landed(started, "feature", agent)
+        assert isinstance(answered, Accepted)
+        assert isinstance(answered.output, Model)
+        seen = LandedDeferrals.model_validate(answered.output.model_dump()).deferrals
+        assert Seen(path="new.py", how="adds") in seen
+        assert Seen(path="gone.py", how="removes") in seen
+        assert all(each.path != "kept.py" for each in seen)
+
+    @lup.promise
+    async def what_the_gate_found_is_filed_as_the_branch_lands(
+        self, by: Testing
+    ) -> None:
+        """What the gate's steps found without failing on the landing's tip shows in its review, and is filed as a friction of the agent landing it, under its subject."""
+        agent = Agent.of("landing")
+        with places() as at:
+            started = await machine(by, at)
+            at.branched("feature")
+            at.committed("feature", "feature.txt", "feature\n")
+            await gated(started, at)
+            answered = await landed(started, "feature", agent)
+            reviewed = await started.view(
+                "landing", "review", Naming(branch="feature"), Operator()
+            )
+            filed = (await standing(started)).concerns
+        assert isinstance(answered, Accepted)
+        assert isinstance(reviewed, Accepted)
+        assert isinstance(reviewed.output, Blocks)
+        assert any(
+            Found().title in each.said()
+            for each in reviewed.output.blocks
+            if isinstance(each, Line)
+        )
+        assert Titled(title=Found().title) in filed
+
+    @lup.promise
     async def a_yes_is_to_the_tip_whose_review_was_read(self, by: Testing) -> None:
         """A yes names the tip whose review the operator read: where the branch landed again since, at a tip they haven't read, it's refused and nothing of the tip it landed at since runs."""
         agent = Agent.of("landing")
@@ -506,7 +590,7 @@ class LandingPromises(Part):
     async def a_store_reading_anothers_objects_pushes_nothing(
         self, by: Testing
     ) -> None:
-        """Accepting pushes nothing from a store that reads objects from outside it, whose history a push would send: the integration branch on the remote stays as it was."""
+        """Accepting pushes nothing from a store that reads objects from outside it, through `alternates` or `http-alternates`, whose history a push would send: the integration branch on the remote stays as it was."""
         agent = Agent.of("landing")
         with places() as at:
             started = await machine(by, at)
@@ -515,14 +599,22 @@ class LandingPromises(Part):
             await gated(started, at)
             assert isinstance(await landed(started, "feature", agent), Accepted)
             await started.run("landing", "yes", reviewing(at, "feature"), Operator())
-            alternates = at.project / ".git" / "objects" / "info" / "alternates"
-            alternates.parent.mkdir(parents=True, exist_ok=True)
-            alternates.write_text(f"{at.remote / 'objects'}\n")
-            refused = await started.run(
-                "landing", "accept", Naming(branch="feature"), Operator()
-            )
+            info = at.project / ".git" / "objects" / "info"
+            info.mkdir(parents=True, exist_ok=True)
+
+            async def refused_with(name: str) -> bool:
+                (info / name).write_text(f"{at.remote / 'objects'}\n")
+                accepted = await started.run(
+                    "landing", "accept", Naming(branch="feature"), Operator()
+                )
+                (info / name).unlink()
+                return isinstance(accepted, Refused)
+
+            refused = [
+                await refused_with(name) for name in ["alternates", "http-alternates"]
+            ]
             after = at.remote_file("dev", "feature.txt")
-        assert isinstance(refused, Refused)
+        assert all(refused)
         assert after is None
 
     @lup.promise
