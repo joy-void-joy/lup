@@ -877,3 +877,18 @@ scenario("Space h on a comment or a marked block keeps it back, so a send leaves
         parent.remove();
     }
 });
+
+scenario("\\ hides the outline beside the document and shows it again, the keys staying in the document", async (by) => {
+    const content = by.any(blocks(1, kinds));
+    const { shell: opened, parent } = shellOn(content);
+    try {
+        expect(opened.outline?.shown()).toBe(true);
+        await press(opened, ["\\"]);
+        expect(opened.outline?.shown()).toBe(false);
+        await press(opened, ["\\"]);
+        expect(opened.outline?.shown()).toBe(true);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});

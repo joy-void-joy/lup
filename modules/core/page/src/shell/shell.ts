@@ -58,6 +58,8 @@ export interface Placing {
     readonly keys?: HTMLElement | null;
     /** More of the outline's own editor: how it's drawn, as the second lup's overview rows were. */
     readonly outlining?: readonly Extension[];
+    /** Whether a line longer than the editor is wide wraps onto the next row; the outline's are cut, a row each. */
+    readonly wraps?: boolean;
 }
 
 
@@ -143,6 +145,7 @@ export class Shell {
                       return new Shell(body, { module: null, view: "outline", given: {} }, looks, given, {
                           extensions: [...(placing.outlining ?? extensions), went],
                           owner: this,
+                          wraps: false,
                       });
                   })
                 : null;
@@ -155,7 +158,7 @@ export class Shell {
                     vim(),
                     // vim hides the browser's own selection, and draws its visual mode's through this layer.
                     drawSelection(),
-                    EditorView.lineWrapping,
+                    ...(placing.wraps === false ? [] : [EditorView.lineWrapping]),
                     EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true || shell.comments.allows(transaction)),
                     // vim's `u` and Ctrl+R undo and redo what the operator wrote, never what views answered.
                     history(),
@@ -577,6 +580,10 @@ const drawing = ViewPlugin.fromClass(
                     if (heading) {
                         classes.push("lup-summary", `lup-kind-${kind}`);
                     }
+                    const stood = start === line.from ? (node.block?.standing ?? null) : null;
+                    if (stood !== null) {
+                        classes.push(`lup-stands-${stood}`);
+                    }
                     if (chosen.size > 0 && within(node, chosen)) {
                         classes.push("lup-chosen");
                     }
@@ -718,6 +725,12 @@ export const look = EditorView.theme(
             lineHeight: "var(--lup-lh)",
         },
         ".lup-stands.lup-standing-waiting": { fontWeight: "700" },
+        // How a block stands, across its first line as the second lup's review drew it: what's new barred, what waits
+        // on the operator and what's held back tinted, what's done set back.
+        ".lup-line.lup-stands-new": { boxShadow: "inset 3px 0 0 var(--lup-new)" },
+        ".lup-line.lup-stands-waiting": { background: "color-mix(in srgb, var(--lup-waiting) 14%, var(--lup-bg))" },
+        ".lup-line.lup-stands-held": { background: "color-mix(in srgb, var(--lup-held) 12%, var(--lup-bg))" },
+        ".lup-line.lup-stands-done": { opacity: "0.6" },
         ".lup-letter.lup-drafted": { textDecoration: "underline 2px var(--lup-comment)", textUnderlineOffset: "2px" },
         ".lup-line.lup-chosen": { background: "var(--lup-selection)" },
         ".lup-line.lup-comment": {
@@ -755,6 +768,10 @@ export const look = EditorView.theme(
  * the one its cursor is in highlighted.
  */
 export const overview = EditorView.theme({
+    // A row a fold, cut where the pane ends rather than wrapped, with room between rows.
+    ".cm-scroller": { overflowX: "hidden" },
+    ".cm-content": { width: "100%" },
+    ".cm-line": { overflow: "hidden", textOverflow: "ellipsis", paddingTop: "2px", paddingBottom: "2px" },
     ".lup-line.lup-summary": { fontWeight: "400" },
     ".lup-line.lup-summary.lup-kind-party": { background: "none", borderTop: "none", boxShadow: "none", fontWeight: "700" },
     ".lup-line.lup-summary.lup-marked": { boxShadow: "inset 3px 0 0 var(--lup-border)", background: "var(--lup-float)" },

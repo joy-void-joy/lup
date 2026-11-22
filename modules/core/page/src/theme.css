@@ -75,6 +75,11 @@ body {
     max-width: 40%;
 }
 
+/* A pane hidden, as `\` hides the outline. */
+.lup-pane[hidden] {
+    display: none;
+}
+
 .lup-document-pane {
     flex: 1;
     border-right: none;
