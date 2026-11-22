@@ -293,4 +293,4 @@ class WithinPromises(Part):
         called = await started.call("forwarded", note, by.any(Agent))
         assert isinstance(called, Accepted) == naming.machine
         if isinstance(called, Refused):
-            assert "only the machine's own parts may name" in called.rejection.reason
+            assert "Vault.sealed" in called.rejection.about
