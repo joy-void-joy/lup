@@ -160,8 +160,9 @@ export class Shell {
                     drawSelection(),
                     ...(placing.wraps === false ? [] : [EditorView.lineWrapping]),
                     EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true || shell.comments.allows(transaction)),
-                    // vim's `u` and Ctrl+R undo and redo what the operator wrote, never what views answered.
+                    // vim's `u` and Ctrl+R undo and redo what the operator wrote and marked, never what views answered.
                     history(),
+                    this.marks.extension(),
                     EditorState.transactionExtender.of((transaction) => (transaction.annotation(fromCore) === true ? { annotations: Transaction.addToHistory.of(false) } : null)),
                     // What's written in Markdown is read anew as the shell lays the text out, its tree already the text's.
                     EditorState.transactionExtender.of((transaction) =>

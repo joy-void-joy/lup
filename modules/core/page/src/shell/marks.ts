@@ -4,9 +4,12 @@
 // Space and a verb's key marks the innermost block at the cursor that offers that verb, or every fold chosen that
 // offers it; the same key again takes the mark off. A block holds one mark at most: marking it with another verb puts
 // that one in the first's place. A mark shows at the end of its block's first line, saying what the send will do.
-// Nothing happens until the draft is sent; the review in the window lists each mark first.
+// Nothing happens until the draft is sent; the review in the window lists each mark first. vim's `u` takes a change
+// to the marks back, as any change to the draft, and Ctrl+R makes it again (`remarked`).
 
-import type { Text } from "@codemirror/state";
+import { invertedEffects, isolateHistory } from "@codemirror/commands";
+import { StateEffect, Transaction, type Extension, type Text } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 
 import type { Delivered, Draft, Marked, Offer } from "../generated/read";
 import { nodeAt, type Node } from "../document/tree";
@@ -21,6 +24,21 @@ const glyphs: Readonly<Record<string, string>> = { done: "✓", decline: "✗" }
 export function glyphOf(verb: string): string {
     return glyphs[verb] ?? "•";
 }
+
+/** One mark's change, by its id: the mark as it was, and as it is after; none where there was none, or is none after. */
+interface Change {
+    readonly id: string;
+    readonly was: Marked | null;
+    readonly now: Marked | null;
+}
+
+/** A change to the draft's marks, which the editor's history keeps, so vim's `u` and Ctrl+R take it back and make it again. */
+export const remarked = StateEffect.define<readonly Change[]>();
+
+/** Undoing a change to the marks is the change the other way. */
+const undoable = invertedEffects.of((transaction) =>
+    transaction.effects.flatMap((effect) => (effect.is(remarked) ? [remarked.of(effect.value.map((each) => ({ id: each.id, was: each.now, now: each.was })))] : [])),
+);
 
 /** Return what `node`'s block offers under `verb`; none where it offers nothing under it. */
 function offering(node: Node, verb: string): Offer | null {
@@ -38,6 +56,30 @@ export class Marks {
 
     constructor(shell: Shell) {
         this.#shell = shell;
+    }
+
+    /** Return what the shell's editor takes to undo and redo the marks: a change undone or redone is made again in the draft. */
+    extension(): Extension {
+        return [
+            undoable,
+            EditorView.updateListener.of((update) => {
+                for (const transaction of update.transactions) {
+                    if (!transaction.isUserEvent("undo") && !transaction.isUserEvent("redo")) {
+                        continue;
+                    }
+                    const undoing = transaction.isUserEvent("undo");
+                    for (const effect of transaction.effects) {
+                        if (effect.is(remarked)) {
+                            // The editor takes no transaction while it's telling this one's listeners.
+                            queueMicrotask(() => {
+                                const made = this.#applied(effect.value);
+                                this.#shell.say(made === 0 ? "nothing of the marks to take back: the draft moved on" : `${made} ${made === 1 ? "mark" : "marks"} ${undoing ? "taken back" : "made again"}`);
+                            });
+                        }
+                    }
+                }
+            }),
+        ];
     }
 
     /** Follow the draft's marks as the core tells them. */
@@ -133,27 +175,27 @@ export class Marks {
             return;
         }
         const marking = !nodes.every((node) => this.on(node)?.offer.verb === verb);
-        let changed = 0;
+        const changes: Change[] = [];
         for (const node of nodes) {
             const was = this.on(node);
             if (!marking) {
                 if (was !== null) {
-                    this.#erase(was.id);
-                    changed += 1;
+                    changes.push({ id: was.id, was, now: null });
                 }
                 continue;
             }
             if (was?.offer.verb === verb) {
                 continue;
             }
-            if (this.#mark(node, verb, was?.id ?? crypto.randomUUID())) {
-                changed += 1;
+            const now = this.#made(node, verb, was?.id ?? crypto.randomUUID());
+            if (now !== null) {
+                changes.push({ id: now.id, was, now });
             }
         }
         if (chosen.length > 0) {
             this.#shell.choose([]);
         }
-        this.#shell.view.dispatch({ effects: redrawn.of(null), annotations: fromCore.of(true) });
+        const changed = this.#changed(changes);
         const first = nodes[0];
         const says = first === undefined ? verb : (offering(first, verb)?.says ?? verb);
         if (!marking) {
@@ -170,19 +212,51 @@ export class Marks {
             return null;
         }
         const now = { ...mark, held: held ?? !mark.held };
-        this.#marks.set(id, now);
-        this.#placed = null;
-        this.#shell.source.mark(now);
-        this.#shell.view.dispatch({ effects: redrawn.of(null), annotations: fromCore.of(true) });
+        this.#changed([{ id, was: mark, now }]);
         return now;
     }
 
-    /** Mark `verb` on `node`'s block under the id `id`, in place of the mark of that id where there's one; say whether it was. */
-    #mark(node: Node, verb: string, id: string): boolean {
+    /** Make `changes` to the draft's marks, as one step the editor's history keeps; return how many there were. */
+    #changed(changes: readonly Change[]): number {
+        const made = this.#applied(changes);
+        this.#shell.view.dispatch({
+            effects: [remarked.of(changes), redrawn.of(null)],
+            annotations: [isolateHistory.of("full"), Transaction.userEvent.of("select.mark")],
+        });
+        return made;
+    }
+
+    /**
+     * Make each of `changes` in the draft where the mark stands as the change found it, so taking back a change the
+     * draft has since moved on from (a mark sent, or changed in another page) changes nothing; return how many it made.
+     */
+    #applied(changes: readonly Change[]): number {
+        let made = 0;
+        for (const change of changes) {
+            const current = this.#marks.get(change.id) ?? null;
+            if (JSON.stringify(current) !== JSON.stringify(change.was)) {
+                continue;
+            }
+            if (change.now === null) {
+                this.#marks.delete(change.id);
+                this.#shell.source.erase(change.id);
+            } else {
+                this.#marks.set(change.id, change.now);
+                this.#shell.source.mark(change.now);
+            }
+            made += 1;
+        }
+        this.#placed = null;
+        this.#shell.view.dispatch({ effects: redrawn.of(null), annotations: fromCore.of(true) });
+        return made;
+    }
+
+    /** Return a mark of `verb` on `node`'s block under the id `id`; none where it offers nothing under the verb. */
+    #made(node: Node, verb: string, id: string): Marked | null {
         const offer = offering(node, verb);
         const section = sectionOf(node);
         if (offer === null || node.block === null || section?.viewing === undefined || section.viewing === null) {
-            return false;
+            return null;
         }
         const mark: Marked = {
             id,
@@ -201,10 +275,7 @@ export class Marks {
             reason: null,
             held: false,
         };
-        this.#marks.set(id, mark);
-        this.#placed = null;
-        this.#shell.source.mark(mark);
-        return true;
+        return mark;
     }
 
     /** Say whether `node`'s block is the one its view and id name: the first of its id in its view's answer. */
@@ -217,10 +288,4 @@ export class Marks {
         return quotedIn(this.#shell.document.root, quote) === node;
     }
 
-    /** Take the mark of id `id` out of the draft. */
-    #erase(id: string): void {
-        this.#marks.delete(id);
-        this.#placed = null;
-        this.#shell.source.erase(id);
-    }
 }

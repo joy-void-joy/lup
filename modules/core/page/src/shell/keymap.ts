@@ -307,6 +307,34 @@ export const commands: Readonly<Record<string, Command>> = {
             shell.comments.commentWhole();
         },
     },
+    /** Go to the next block that offers something to do, as an item, a concern or a landing, on the closed fold's line where one hides it: `]]`. */
+    "item-next": {
+        says: "go to the next thing that offers something to do",
+        run: (shell) => {
+            went(shell, true, (node) => (node.block?.offers.length ?? 0) > 0, "thing to do", false);
+        },
+    },
+    /** Go to the thing to do before the cursor: `[[`. */
+    "item-previous": {
+        says: "go to the thing to do before",
+        run: (shell) => {
+            went(shell, false, (node) => (node.block?.offers.length ?? 0) > 0, "thing to do", false);
+        },
+    },
+    /** Go to the next block that waits on the operator, opening what folds over it: `]a`. */
+    "waiting-next": {
+        says: "go to the next thing waiting on you",
+        run: (shell) => {
+            went(shell, true, (node) => node.block?.standing === "waiting", "thing waiting on you", true);
+        },
+    },
+    /** Go to the thing waiting on the operator before the cursor: `[a`. */
+    "waiting-previous": {
+        says: "go to the thing waiting on you before",
+        run: (shell) => {
+            went(shell, false, (node) => node.block?.standing === "waiting", "thing waiting on you", true);
+        },
+    },
     /** Go to the next comment after the cursor, opening what folds over it: `]n`. */
     "comment-next": {
         says: "go to the next comment",
@@ -483,12 +511,39 @@ export function said(keys: string): string {
 
 /** Move the cursor to the start of the next comment after it, or the last before it, opening every fold over it. */
 function jumped(shell: Shell, forward: boolean): void {
+    went(shell, forward, (node) => node.kind === "comment", "comment", true);
+}
+
+/**
+ * Move the cursor to the start of the next node `wanted` takes after it, or the last before it, called `called` where
+ * there's none: opening every fold over it where `opening`, else onto the summary line of the outermost closed fold
+ * hiding it, which vim's motions never open.
+ */
+function went(shell: Shell, forward: boolean, wanted: (node: Node) => boolean, called: string, opening: boolean): void {
     const head = shell.view.state.selection.main.head;
-    const comments = every(shell.document.root).filter((node) => node.kind === "comment");
-    const starts = comments.map((node) => ({ node, at: offsetOf(node) }));
+    const hiding = (node: Node): Node | null => {
+        let outermost: Node | null = null;
+        for (let at = node.parent; at !== null; at = at.parent) {
+            if (foldKind(at) !== null && !shell.isOpen(at)) {
+                outermost = at;
+            }
+        }
+        return outermost;
+    };
+    const starts = every(shell.document.root)
+        .filter(wanted)
+        .map((node) => {
+            const hidden = opening ? null : hiding(node);
+            return { node, at: offsetOf(hidden ?? node), hidden };
+        });
     const found = forward ? starts.find((each) => each.at > head) : starts.filter((each) => each.at < head).at(-1);
     if (found === undefined) {
-        shell.say(`no comment ${forward ? "after" : "before"} the cursor`);
+        shell.say(`no ${called} ${forward ? "after" : "before"} the cursor`);
+        return;
+    }
+    if (!opening) {
+        shell.say(found.hidden === null ? null : `in a closed fold: za opens it`);
+        shell.go(found.at);
         return;
     }
     const over: string[] = [];
@@ -539,6 +594,10 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<C-k>", command: "palette", modes: ["normal"] },
     { keys: "\\", command: "overview", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
+    { keys: "]]", command: "item-next", modes: ["normal"] },
+    { keys: "[[", command: "item-previous", modes: ["normal"] },
+    { keys: "]a", command: "waiting-next", modes: ["normal"] },
+    { keys: "[a", command: "waiting-previous", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },
     { keys: ":w", command: "draft-write", modes: ["normal"] },
     { keys: "zR", command: "open-all", modes: ["normal"] },
