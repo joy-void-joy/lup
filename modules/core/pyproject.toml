@@ -28,6 +28,10 @@ dependencies = [
     # lup's one library for retrying what's transient: the loader waiting for
     # the machine it started to answer (`lup/hosting/README.md`, *The loader*).
     "tenacity>=9",
+    # lup's one Markdown library on the Python side, CommonMark with each
+    # block's source lines: `Private` finds an inbox item's number where
+    # Markdown reads prose, never in code (`lup/private/README.md`).
+    "markdown-it-py>=4",
 ]
 
 [project.optional-dependencies]
