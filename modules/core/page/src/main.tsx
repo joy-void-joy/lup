@@ -4,13 +4,12 @@ import { look, overview, Shell } from "./shell/shell";
 import { bindVim, vimBindings } from "./shell/keymap";
 import { margin, placeholder } from "./shell/margin";
 import { painted } from "./shell/palette";
-import { Server } from "./server";
+import { remembered, Server } from "./server";
 import "./theme.css";
 
 painted(document.documentElement);
 const parent = document.getElementById("root");
-const token = location.hash.slice(1) || sessionStorage.getItem("lup-token") || "";
-sessionStorage.setItem("lup-token", token);
+const token = remembered(location.hash, localStorage);
 history.replaceState(null, "", location.pathname);
 bindVim(vimBindings);
 
@@ -58,5 +57,8 @@ const server: Server = new Server(
     },
     (refused) => {
         said.textContent = refused.reason;
+    },
+    (why) => {
+        said.textContent = why;
     },
 );
