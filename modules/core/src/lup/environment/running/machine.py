@@ -49,7 +49,7 @@ from lup.hosting.carrying import (
     Telling,
     Visiting,
 )
-from lup.hosting.containers import Clearing, ContainerError
+from lup.hosting.containers import Clearing, ContainerError, imported
 from lup.hosting.projects import Resumed, Resuming, Shared, Sharing
 from lup.running.plan import Plan
 from lup.running.wire import (
@@ -230,22 +230,6 @@ def homed(host: Host) -> Project:
         return project
     layered = load(layer)
     return applied(layered, project, set_fields(layered))
-
-
-def imported() -> list[Path]:
-    """Return each directory this process imports its code from, outside its environment and the interpreter: a source tree an editable install points at. Never the working directory, which a part one for the whole machine must not import from."""
-    here = Path.cwd()
-    prefix = Path(sys.prefix)
-    base = Path(sys.base_prefix)
-    return [
-        path
-        for each in sys.path
-        if each
-        and (path := Path(each)).is_dir()
-        and path != here
-        and not path.is_relative_to(prefix)
-        and not path.is_relative_to(base)
-    ]
 
 
 async def hosted_parts(
