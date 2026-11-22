@@ -1396,7 +1396,7 @@ class WithoutPromises(Part):
         assert isinstance(run, Accepted) == (podman == "6.1.0")
         assert bool(podman_ran(started, "run")) == (podman == "6.1.0")
         if isinstance(run, Refused):
-            assert "`podman`" in run.rejection.reason
+            assert "podman" in run.rejection.about
 
     @lup.promise
     async def the_machine_stopping_stops_its_projects(self, by: Testing) -> None:
