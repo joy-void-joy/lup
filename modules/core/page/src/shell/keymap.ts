@@ -36,14 +36,40 @@ function typed(shell: Shell, given: Given): FoldKind | null {
     return kind;
 }
 
-/** Return the keys of what an action acts on: every fold chosen, else the innermost fold the cursor is in. */
+/**
+ * Return the keys of what an action acts on: every fold vim's visual mode selects the summary line of, leaving visual
+ * mode; else every fold chosen; else the innermost fold the cursor is in.
+ */
 function reached(shell: Shell): readonly string[] {
+    const selected = shell.visual();
+    if (selected !== null) {
+        shell.unselect();
+        return shell
+            .blocksIn(selected)
+            .filter((node) => foldKind(node) !== null)
+            .map((node) => node.key);
+    }
     const chosen = shell.chosen();
     if (chosen.length > 0) {
         return chosen;
     }
     const node = shell.foldAt();
     return node === null ? [] : [node.key];
+}
+
+/** Choose every fold of `kind` vim's visual mode selects the summary line of, leaving visual mode; say how many, or that there's none. */
+function chooseSelected(shell: Shell, kind: FoldKind, selected: { from: number; to: number }): void {
+    shell.unselect();
+    const found = shell
+        .blocksIn(selected)
+        .filter((node) => foldKind(node) === kind.name)
+        .map((node) => node.key);
+    if (found.length === 0) {
+        shell.say(`no ${kind.called} selected`);
+        return;
+    }
+    shell.choose(found);
+    shell.say(`${kind.called}: ${found.length} chosen`);
 }
 
 /**
@@ -85,21 +111,21 @@ export interface Command {
 export const commands: Readonly<Record<string, Command>> = {
     /** Open or close what's chosen, or the innermost fold the cursor is in, as `za` does. */
     "fold-toggle": {
-        says: "open or close the fold the cursor is in, or every fold chosen",
+        says: "open or close the fold the cursor is in, or every fold chosen or selected",
         run: (shell) => {
             folded(shell, reached(shell));
         },
     },
     /** Open what's chosen, or the innermost fold the cursor is in. */
     "fold-open": {
-        says: "open the fold the cursor is in, or every fold chosen",
+        says: "open the fold the cursor is in, or every fold chosen or selected",
         run: (shell) => {
             folded(shell, reached(shell), true);
         },
     },
     /** Close what's chosen, or the innermost fold the cursor is in. */
     "fold-close": {
-        says: "close the fold the cursor is in, or every fold chosen",
+        says: "close the fold the cursor is in, or every fold chosen or selected",
         run: (shell) => {
             folded(shell, reached(shell), false);
         },
@@ -117,10 +143,13 @@ export const commands: Readonly<Record<string, Command>> = {
     },
     /** Choose the nearest fold of the kind typed after the key around the cursor, in place of what was chosen. */
     "choose-nearest": {
-        says: "choose the nearest fold of a kind",
+        says: "choose the nearest fold of a kind; in visual mode, every one selected",
         run: (shell, given) => {
             const kind = typed(shell, given);
-            if (kind !== null) {
+            const selected = shell.visual();
+            if (kind !== null && selected !== null) {
+                chooseSelected(shell, kind, selected);
+            } else if (kind !== null) {
                 nearest(shell, kind);
             }
         },
@@ -130,10 +159,15 @@ export const commands: Readonly<Record<string, Command>> = {
      * there's none, say so and leave what's chosen.
      */
     "choose-every": {
-        says: "choose every fold of a kind within what's chosen, or everywhere",
+        says: "choose every fold of a kind within what's chosen, or everywhere; in visual mode, every one selected",
         run: (shell, given) => {
             const kind = typed(shell, given);
             if (kind === null) {
+                return;
+            }
+            const selected = shell.visual();
+            if (selected !== null) {
+                chooseSelected(shell, kind, selected);
                 return;
             }
             const chosen = shell.chosen();
@@ -437,18 +471,18 @@ function levels(shell: Shell, open: boolean): number[] {
 
 /** vim's bindings of the shell's commands: what the `vim` keymap module binds, until its module sends them. */
 export const vimBindings: readonly Bind[] = [
-    { keys: "za", command: "fold-toggle", modes: ["normal"] },
-    { keys: "zo", command: "fold-open", modes: ["normal"] },
-    { keys: "zc", command: "fold-close", modes: ["normal"] },
+    { keys: "za", command: "fold-toggle", modes: ["normal", "visual"] },
+    { keys: "zo", command: "fold-open", modes: ["normal", "visual"] },
+    { keys: "zc", command: "fold-close", modes: ["normal", "visual"] },
     { keys: "zf{kind}", command: "fold-nearest", modes: ["normal"] },
-    { keys: "<Space>f{kind}", command: "choose-nearest", modes: ["normal"] },
-    { keys: "<Space>F{kind}", command: "choose-every", modes: ["normal"] },
+    { keys: "<Space>f{kind}", command: "choose-nearest", modes: ["normal", "visual"] },
+    { keys: "<Space>F{kind}", command: "choose-every", modes: ["normal", "visual"] },
     { keys: "<Esc>", command: "choose-none", modes: ["normal"] },
     { keys: "<C-CR>", command: "send", modes: ["normal", "insert"] },
     { keys: "<Space>c", command: "comment-whole", modes: ["normal"] },
-    { keys: "<Space>d", command: "verb:done", modes: ["normal"] },
-    { keys: "<Space>x", command: "verb:decline", modes: ["normal"] },
-    { keys: "<Space>t", command: "verb:toggle", modes: ["normal"] },
+    { keys: "<Space>d", command: "verb:done", modes: ["normal", "visual"] },
+    { keys: "<Space>x", command: "verb:decline", modes: ["normal", "visual"] },
+    { keys: "<Space>t", command: "verb:toggle", modes: ["normal", "visual"] },
     { keys: "<Space>s", command: "address", modes: ["normal"] },
     { keys: "<CR>", command: "enter", modes: ["normal"] },
     { keys: "<Space>wh", command: "pane-left", modes: ["normal"] },

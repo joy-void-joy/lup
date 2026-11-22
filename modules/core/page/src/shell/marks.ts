@@ -104,20 +104,27 @@ export class Marks {
     }
 
     /**
-     * Mark `verb` on the innermost block at the cursor that offers it, or on every fold chosen that does; where each of
-     * those is marked with it already, take the marks off. Say what was done, or why nothing was.
+     * Mark `verb` on every block vim's visual mode selects that offers it, else every fold chosen that does, else the
+     * innermost block at the cursor that does; where each of those is marked with it already, take the marks off. Say
+     * what was done, or why nothing was. A selection reaches what shows alone, never what a closed fold hides.
      */
     toggle(verb: string): void {
         const chosen = this.#shell.chosen();
-        const nodes =
-            chosen.length > 0
-                ? chosen.flatMap((key) => {
+        const selected = this.#shell.visual();
+        this.#shell.unselect();
+        const among =
+            selected !== null
+                ? this.#shell.blocksIn(selected)
+                : chosen.flatMap((key) => {
                       const node = this.#shell.document.node(key);
-                      return node !== null && offering(node, verb) !== null ? [node] : [];
-                  })
+                      return node === null ? [] : [node];
+                  });
+        const nodes =
+            selected !== null || chosen.length > 0
+                ? among.filter((node) => offering(node, verb) !== null)
                 : [this.offeringHere(verb)].filter((node): node is Node => node !== null);
         if (nodes.length === 0) {
-            this.#shell.say(chosen.length > 0 ? `nothing chosen offers ${verb}` : `nothing here offers ${verb}`);
+            this.#shell.say(selected !== null ? `nothing selected offers ${verb}` : chosen.length > 0 ? `nothing chosen offers ${verb}` : `nothing here offers ${verb}`);
             return;
         }
         const unmarkable = nodes.filter((node) => node.block === null || !this.#own(node));

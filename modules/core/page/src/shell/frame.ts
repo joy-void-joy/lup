@@ -50,7 +50,17 @@ export function keysHere(shell: Shell): Keyed[] {
     if (owner.outline?.shell === shell) {
         return [{ keys: "j k", does: "move, the document following" }, { keys: "Enter", does: "go there" }, { keys: "Space w l", does: "the document" }, every];
     }
-    const vim = getCM(shell.view)?.state.vim as { insertMode?: boolean } | null | undefined;
+    const vim = getCM(shell.view)?.state.vim as { insertMode?: boolean; visualMode?: boolean } | null | undefined;
+    if (vim?.visualMode === true) {
+        return [
+            { keys: "Space d", does: "mark done on each selected" },
+            { keys: "Space x", does: "decline each" },
+            { keys: "c", does: "comment on the selection" },
+            { keys: "za", does: "fold each" },
+            { keys: "Space f", does: "choose a kind" },
+            { keys: "Esc", does: "end it" },
+        ];
+    }
     if (vim?.insertMode === true) {
         return [
             { keys: "Esc", does: "end the comment" },
