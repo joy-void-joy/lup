@@ -27,6 +27,7 @@ import { comments } from './comments';
 import { boundaries } from './boundaries';
 import { collections } from './collections';
 import { constants } from './constants';
+import { tests } from './tests';
 
 export const rules = {
     ...parsing,
@@ -42,4 +43,5 @@ export const rules = {
     ...boundaries,
     ...collections,
     ...constants,
+    ...tests,
 } satisfies Catalog;
