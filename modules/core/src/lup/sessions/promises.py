@@ -28,6 +28,7 @@ lazy from collections.abc import AsyncGenerator
 from pydantic import Field, JsonValue
 
 import lup
+import lup.hosting
 import lup.testing
 from lup import Agent, Codebase, Machine, Model, MutableModel, Operator, Part
 from lup.testing import (
@@ -688,6 +689,20 @@ class SessionsPromises(Part):
             assert isinstance(routed, Accepted), routed
             carried = Carried.model_validate_json(routed.answer())
             assert carried.call.by == Agent.of(session).model_dump(mode="json")
+
+    @lup.promise
+    async def the_installed_lup_starts_sessions(self, by: Testing) -> None:
+        """Whoever only installs lup, naming no home repository, starts sessions as the operator does: the machine's parts the installed `lup` runs, from the declaration it ships, offer the operator `lup sessions start`."""
+        shipped = Path(lup.hosting.__file__).with_name("installed.py")
+        declaration = await asyncio.to_thread(shipped.read_text)
+        started = await by.started(
+            lup.testing.Repository(declaration=declaration),
+            programs={"podman": Podman(), "git": Store(), "uv": UV, "curl": Curl()},
+            machine=True,
+        )
+        typed = await started.typed(["sessions", "--help"], Operator())
+        assert typed.listed is not None
+        assert "start" in typed.listed
 
     @lup.promise
     async def a_room_holds_the_machines_own_lup_whole(self, by: Testing) -> None:

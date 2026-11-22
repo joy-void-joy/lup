@@ -1,6 +1,6 @@
 # Sessions
 
-Every session is started and held by lup itself (`DESIGN.md`, *Sessions*), each in a room of its own (`lup/rooms/README.md`), on Claude Code or Codex behind one interface (`lup/runtimes/`). You talk with a session in its buffer in the dashboard. A terminal takes it over and gives it back. `Sessions` is a module of the machine's own parts, which the home repository selects beside `Hosting`: `Held`, which holds every session, and `Rooms`, which makes their rooms. Its library side is the session's events (`events.py`) and what crosses between the machine, a session's holder and its room (`held.py`, `said.py`).
+Every session is started and held by lup itself (`DESIGN.md`, *Sessions*), each in a room of its own (`lup/rooms/README.md`), on Claude Code or Codex behind one interface (`lup/runtimes/`). You talk with a session in its buffer in the dashboard. A terminal takes it over and gives it back. `Sessions` is a module of the machine's own parts, which the home repository selects beside `Hosting`, and which the installed `lup` runs where no home repository is named (`lup/hosting/installed.py`): `Held`, which holds every session, and `Rooms`, which makes their rooms. Its library side is the session's events (`events.py`) and what crosses between the machine, a session's holder and its room (`held.py`, `said.py`).
 
 ## Starting, and what's kept
 
