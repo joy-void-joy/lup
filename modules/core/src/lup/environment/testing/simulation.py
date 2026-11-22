@@ -7,7 +7,7 @@ thing could run next, it asks whoever runs it which (hypothesis, in the gate),
 and when nothing is ready it moves its clock to the next timer at once, so an
 hour's `asyncio.sleep` passes instantly. Its first choice is always asyncio's
 own (first ready, first run, a timer when nothing else can), so a run shrinks
-towards what asyncio would do anyway (`lup/testing/README.md`, *Laws*).
+towards what asyncio would do anyway (`lup/testing/README.md`, *Invariants*).
 
 It runs no I/O and starts no process: what a promise runs is lup in this
 process, through its doors. Work handed to a thread (`asyncio.to_thread`), as
@@ -47,7 +47,7 @@ class Simulation(asyncio.AbstractEventLoop):
     """An event loop whose order and time are chosen: what's ready runs in the order `choose` picks, and its clock moves only to the next timer.
 
     Before each slice it runs, it calls `watch` with the handle about to run,
-    and after it, what `watch` returned: how the harness checks every law over
+    and after it, what `watch` returned: how the harness checks every invariant over
     every slice of a call.
     """
 

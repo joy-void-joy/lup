@@ -17,15 +17,19 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.doors.door import Accepted, Refused, Rejection
-from lup.doors.parties import Agent, Codebase, Operator
+from lup.doors.parties import Agent, Codebase, Machine, Operator
+from lup.doors.parts import SshAgent
 from lup.errors import LupError
 from lup.running.plan import Plan
 from lup.types import Model
 
-type Caller = Annotated[Agent | Operator | Codebase, Field(discriminator="party")]
+type Caller = Annotated[
+    Agent | Operator | Codebase | Machine, Field(discriminator="party")
+]
 """Who calls, as a call across containers names them: one of the core's
-parties, which the program on the operator's machine vouches for, never the
-machine itself."""
+parties, which the program on the operator's machine vouches for. `Machine`
+only on a call the machine's own parts send into a container: a call coming in
+to the machine is named from the socket it came in on, whatever it says."""
 
 
 class FormatError(LupError):
@@ -148,9 +152,19 @@ class Offering(Model):
     whatever this says."""
 
 
-type Asking = Annotated[Call | Offering, Field(discriminator="kind")]
+class EventSent(Model):
+    """A part's own event, sent from its container for every part of its project hearing it in another: its class, by its name, and its facts (`lup.heeded`)."""
+
+    format: int = 1
+    kind: Literal["event-sent"] = "event-sent"
+    event: str
+    given: JsonValue
+
+
+type Asking = Annotated[Call | Offering | EventSent, Field(discriminator="kind")]
 """What comes in on a socket of the program on the operator's machine: a call
-through a door, or a question of what the caller may call."""
+through a door, a question of what the caller may call, or a part's own
+event."""
 
 
 class Offer(Model):
@@ -251,6 +265,12 @@ class Start(Model):
     """The directory in memory each part keeping what lasts while it runs
     keeps it under, a directory named `module.Part` each; none where none
     keeps any."""
+    git: Path | None = None
+    """The project's common git directory, as mounted in it, where its part
+    holds it (`GitDirectory`); none otherwise."""
+    ssh: SshAgent | None = None
+    """The operator's SSH agent, its socket and their home as mounted in it,
+    where its part holds it (`SshAgent`); none otherwise."""
 
 
 class Host(Model):

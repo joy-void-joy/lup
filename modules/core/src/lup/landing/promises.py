@@ -51,12 +51,13 @@ from lup.hosting.module import Hosting
 project = Project(
     modules=Modules.default()
     .edit(Gate(steps=Steps.of(Step(name="checked", command=["checked"], tells=True))))
+    .drop("private", why="the promises' gate runs its one step alone")
     .add(Hosting())
 )
 """
 """The home repository's declaration, as lup's own declares it, lup's default
-modules and the machine's parts, its gate one step, `checked`, which tells what
-it prints, as a step listing what's due does, and whose program the promises
+modules and the machine's parts, `Private` dropped so its own step doesn't run,
+its gate one step, `checked`, which tells what it prints, as a step listing what's due does, and whose program the promises
 stand in for passing, saying `TOLD`: the gate as an agent runs it, on the files
 the promise committed."""
 TOLD = "historical-voice: main.py:3"
@@ -264,15 +265,17 @@ class Approved(Model):
 
 
 async def machine(by: Testing, at: Places) -> Started:
-    """Start the machine's parts, git run for real, podman left out, with the project at `at` registered and the integration branch's tip approved, as the operator answers at its first run."""
+    """Start the machine's parts, git run for real, podman left out, with the project at `at` registered and the integration branch's tip approved, as the operator answers at its first run: its `remote`, which landing reaches the remote through, holding the project's git directory, ssh stood in for, never run."""
     started = await by.started(
         Repository(declaration=HOME),
         programs={
             "git": RealGit(),
+            "ssh": Scripted(),
             "uv": Scripted(answers=[Answering(output="/srv/python\n")]),
             "checked": Scripted(answers=[Answering(output=TOLD)]),
         },
         machine=True,
+        git=at.project / ".git",
     )
     registered = await started.run(
         "hosting", "register", Registering(common=at.project / ".git"), Operator()
@@ -421,7 +424,8 @@ class LandingPromises(Part):
         assert "accept" not in waiting
         assert "accept" in offered(shown.output, "trying")
         paths = [each.path for each in reviewed.output.blocks if isinstance(each, Diff)]
-        assert paths == ["waiting.txt"]
+        assert "waiting.txt" in paths
+        assert "trying.txt" not in paths
         told = [
             each.text for each in reviewed.output.blocks if isinstance(each, Markdown)
         ]

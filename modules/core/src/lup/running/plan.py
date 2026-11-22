@@ -102,6 +102,9 @@ class PartPlan(Model):
     hears: list[str] = []
     """The events its methods run at, each by its class's name, which the
     machine carries a session's to it."""
+    packages: list[str] = []
+    """The packages its programs are in, which the image of the container
+    running it installs (`Program.package`)."""
 
     def apart(self) -> bool:
         """Say whether it runs apart: in a container of its own, from approved code, or on the operator's machine."""

@@ -2,7 +2,7 @@
 // and the rules a request names from it.
 
 import { File } from './file';
-import { Category, RuleInfo } from './protocol';
+import { Category, Reads, RuleInfo } from './protocol';
 import { rules } from './rules';
 
 export interface Rule {
@@ -15,6 +15,9 @@ export interface Rule {
     // listed at the gate alone and failing it; `heuristic`, a guess over prose, listed
     // at the gate alone and never failing it.
     category: Category;
+    // Which files it reads: `code`, every file but a test's (the default), or
+    // `tests`, a test's and a module's promises, whose checks are what it's about.
+    reads?: Reads;
     // How it recognises its case: reports where it found it, and what it saw there.
     check(file: File): void;
     // The rule's specification, which the module's promises check.
@@ -41,6 +44,7 @@ export function ruleInfos(): RuleInfo[] {
         mistake: rule.mistake,
         steer: rule.steer,
         category: rule.category,
+        reads: rule.reads ?? 'code',
         examples: rule.examples,
     }));
 }

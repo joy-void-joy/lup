@@ -7,8 +7,9 @@ run on), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.command`, `lup.on`,
 `lup.promise`), with the parties a method's `by` names, lup's events,
 and the parts a module is made of (`Part`, listed in its `Parts`, holding its
-`Secret`s, its `Data` and what lasts while it runs, its `Runtime`, and what
-every module declares, `Declared`); the shell's
+`Secret`s, its `Data` and what lasts while it runs, its `Runtime`, what
+every module declares, `Declared`, and what the operator's machine lends it,
+`GitDirectory`, `SshAgent` and `GitHubLogin`); the shell's
 view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
 `Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
@@ -47,14 +48,18 @@ from lup.doors.parts import (
     Data,
     Declared,
     Finished,
+    GitDirectory,
+    GitHubLogin,
     Part,
     Parts,
     Program,
     Runtime,
     Secret,
+    SshAgent,
+    State,
     UnrunError,
 )
-from lup.doors.service import UncarriedError, service
+from lup.doors.service import UncarriedError, heeded, service, within
 from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.gate.steps import Step, Steps
@@ -112,6 +117,8 @@ __all__ = [
     "Folds",
     "Gate",
     "Gauge",
+    "GitDirectory",
+    "GitHubLogin",
     "GuidanceError",
     "JsonObject",
     "Landing",
@@ -149,7 +156,9 @@ __all__ = [
     "Selection",
     "Settings",
     "Span",
+    "SshAgent",
     "Starting",
+    "State",
     "Step",
     "Steps",
     "Stopping",
@@ -162,10 +171,12 @@ __all__ = [
     "chosen",
     "command",
     "guidance",
+    "heeded",
     "on",
     "programs",
     "promise",
     "service",
     "tool",
     "view",
+    "within",
 ]

@@ -39,7 +39,7 @@ from lup import (
     Tones,
     Viewing,
 )
-from lup.inbox.said import PartyOf, Pile
+from lup.inbox import PartyOf, Pile
 from lup.testing import (
     Accepted,
     Answered,
@@ -255,8 +255,16 @@ class ShellPromises(Part):
         assert isinstance(answered, Accepted)
         assert isinstance(answered.output, Blocks)
         text = answered.output.text().splitlines()
+        views = [
+            each.content
+            for each in answered.output.blocks
+            if isinstance(each, Fold) and isinstance(each.content, Viewing)
+        ]
         assert len(text) == 1 + notes
-        assert all("note number=" in line for line in text[1:])
+        assert len(views) == notes
+        assert all(
+            view.said() in line for view, line in zip(views, text[1:], strict=True)
+        )
 
     @lup.promise
     async def a_view_naming_a_kind_nobody_declares_fails(self, by: Testing) -> None:

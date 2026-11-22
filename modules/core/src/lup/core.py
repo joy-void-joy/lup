@@ -7,14 +7,15 @@ from lup.declaration.module import Module
 from lup.declaration.profiles import DEFAULT, DirectoryName, Profile, Profiles
 from lup.declaration.promises import DeclarationPromises, ProfilesPromises
 from lup.doors.parts import Parts
-from lup.doors.promises import DoorsPromises, PartsPromises
+from lup.doors.promises import DoorsPromises, EventsPromises, PartsPromises
 from lup.inbox.part import Inboxes, Speaking
 from lup.inbox.promises import InboxPromises
 from lup.inbox.records import EDGES, NODES
+from lup.programs.git.promises import GitPromises
 from lup.programs.promises import ProgramsPromises
 from lup.rooms.packages import Packages, standard
 from lup.running.plan import CORE
-from lup.running.promises import RunningPromises
+from lup.running.promises import RunningPromises, WithinPromises
 from lup.runtimes.known import known
 from lup.runtimes.promises import RecordsPromises
 from lup.runtimes.runtime import Runtimes
@@ -47,7 +48,9 @@ class Core(Module):
         ProfilesPromises,
         DoorsPromises,
         PartsPromises,
+        EventsPromises,
         RunningPromises,
+        WithinPromises,
         RecordsPromises,
         TestingPromises,
         ShellPromises,
@@ -58,6 +61,7 @@ class Core(Module):
         Speaking,
         InboxPromises,
         ProgramsPromises,
+        GitPromises,
         GuidancePromises,
         CommandLinePromises,
         Setup,

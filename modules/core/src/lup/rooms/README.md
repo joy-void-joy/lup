@@ -15,6 +15,7 @@ Arch Linux's image, pinned with the day of its archive its packages come from, a
 - **The newest CLI of every runtime,** read-only, on the `PATH`, so a Claude Code session can run Codex and the other way round. Each is fetched from its vendor and checked against the vendor's checksum, its channel asked at most hourly.
 - **The machine's own lup and its Python,** read-only at their own paths: the room's first program, its hooks and its tool server run from them (`lup/sessions/README.md`).
 - **uv's cache and the session's environment,** one directory a project, so an environment's files are links into the cache. The worktree's own `.venv` is hidden.
+- **git through lup:** the room's git configuration (`GIT_CONFIG_GLOBAL`, among the session's own files) sends each URL the repository's `config` gives a remote through `git-remote-lup`, on its `PATH` there too, so a push or a fetch is made with the operator's credentials by the project's `remote` part (`lup/remote/README.md`), and anything else is reached as nobody. The machine reads those URLs from `config`, which no room writes.
 - **The room's directory of sockets** at `/run/lup`: the machine's, which says the room's calls are its session's agent's, and the session's holder's.
 - **The machine's network,** so a server started in a room opens in the operator's browser.
 

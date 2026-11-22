@@ -19,7 +19,7 @@ import importlib.metadata
 import shutil
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, TypeAdapter, ValidationError
 
@@ -41,6 +41,11 @@ class EngineLayout(Model):
     def cache(self) -> Path:
         """The directory the code rules keep their builds in."""
         return self.common / "lup" / "code-rules"
+
+    @property
+    def outcomes(self) -> Path:
+        """The record of what became of each finding told after a write, a JSON object a line, for the next review of the rules."""
+        return self.cache / "outcomes.jsonl"
 
     @property
     def lock(self) -> Path:
@@ -311,3 +316,155 @@ def answered[T](finished: Finished, kind: type[T]) -> T:
     except ValidationError as unread:
         message = f"the engine answered what this package can't read: {unread}"
         raise CodeRulesError(message) from unread
+
+
+class Environment(Model):
+    """The environment a warm engine reads, as each request names it: its directory, and the files whose change means another."""
+
+    venv: str
+    files: list[str]
+
+
+class Asking(Model):
+    """A check asked of a warm engine, as its socket takes it."""
+
+    op: Literal["check"] = "check"
+    build: str
+    environment: Environment
+    root: str
+    rules: list[str]
+    sources: list[Source]
+
+
+class Passing(Model):
+    """An importers pass asked of a warm engine: the files importing those changed, re-checked for type errors, a step at a time between checks."""
+
+    op: Literal["importers"] = "importers"
+    build: str
+    environment: Environment
+    root: str
+    changed: list[str]
+
+
+class Answer(Model):
+    """A warm engine's answer: the reports, or that it's from another build or another environment and stopped, or why it refused."""
+
+    build: str
+    stale: bool = False
+    error: str | None = None
+    reports: list[FileReport] | None = None
+
+
+class WarmEngine(Model):
+    """The engine kept running for one worktree, on a socket, so each check after the first costs what pyright's re-check of the files does rather than a load of the project: what's told after each write asks.
+
+    Each request goes through the engine's client, a small script `node` runs
+    (`engine/client.mjs`), so the socket is reached through a program, which a
+    promise stands in for, as every program a part runs.
+    """
+
+    engine: Engine
+    root: Path
+    venv: Path
+    socket: Path
+    """Where it listens: a path short enough for a socket's, 108 bytes."""
+    log: Path
+    """Where it says what it does, which nothing else shows."""
+    idle: int = 1800
+    """How long, in seconds, it waits with nothing asked before it stops."""
+
+    async def checked(
+        self, rules: list[str], sources: list[Source]
+    ) -> list[FileReport]:
+        """Check `sources` with lup's `rules` by name, starting the engine where none answers, and again where one from another build or environment stopped.
+
+        Raise `CodeRulesError` where it can't start, or refuses.
+        """
+        bundle = await self.engine.built()
+        build = stamped(bundle)
+        for _ in range(2):
+            await self.started(bundle)
+            asking = Asking(
+                build=build,
+                environment=self.environment(),
+                root=str(self.root),
+                rules=rules,
+                sources=sources,
+            )
+            answer = await self.asked(asking)
+            if answer.error is not None:
+                message = f"the engine refused a check: {answer.error}"
+                raise CodeRulesError(message)
+            if not answer.stale:
+                return answer.reports or []
+        message = "the engine kept answering from another build or environment"
+        raise CodeRulesError(message)
+
+    async def started(self, bundle: Path) -> None:
+        """Make sure an engine answers on the socket, starting one detached where none does."""
+        self.socket.parent.mkdir(parents=True, exist_ok=True)
+        environment = self.environment()
+        succeeded(
+            await self.engine.node.ran(
+                str(bundle),
+                "start",
+                "--root",
+                str(self.root),
+                "--socket",
+                str(self.socket),
+                "--idle-seconds",
+                str(self.idle),
+                "--venv",
+                TypeAdapter(str).dump_json(environment.venv).decode(),
+                "--environment-files",
+                TypeAdapter(list[str]).dump_json(environment.files).decode(),
+                "--log",
+                str(self.log),
+            ),
+            "starting the engine",
+        )
+
+    def environment(self) -> Environment:
+        """Return the environment the engine reads, as a request names it."""
+        return Environment(venv=str(self.venv), files=self.engine.environment_files)
+
+    async def importers(self, changed: list[str]) -> list[FileReport]:
+        """Re-check, for type errors, the worktree's files importing those `changed`, directly or through others, and return each one's report.
+
+        Raise `CodeRulesError` where the engine can't start, or refuses.
+        """
+        bundle = await self.engine.built()
+        build = stamped(bundle)
+        await self.started(bundle)
+        passing = Passing(
+            build=build,
+            environment=self.environment(),
+            root=str(self.root),
+            changed=changed,
+        )
+        answer = await self.asked(passing)
+        if answer.error is not None or answer.stale:
+            message = f"the engine refused an importers pass: {answer.error or 'it was from another build'}"
+            raise CodeRulesError(message)
+        return answer.reports or []
+
+    async def asked(self, asking: Asking | Passing) -> Answer:
+        """Ask the engine on the socket what `asking` asks, through the engine's client run by `node`, and return its answer."""
+        client = self.engine.sources.directory / "client.mjs"
+        said = succeeded(
+            await self.engine.node.ran(
+                str(client), str(self.socket), given=asking.model_dump_json()
+            ),
+            "asking the engine",
+        )
+        try:
+            return Answer.model_validate_json(said.output)
+        except ValidationError as unread:
+            message = f"the engine answered what this package can't read: {unread}"
+            raise CodeRulesError(message) from unread
+
+
+def stamped(bundle: Path) -> str:
+    """Return what names the engine's build its bundle is, as the engine names its own: the bundle's size and when it was written, which a check names, so an engine from another build stops rather than answering."""
+    stat = bundle.stat()
+    return f"{stat.st_size}-{stat.st_mtime_ns}"

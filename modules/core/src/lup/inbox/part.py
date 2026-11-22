@@ -306,13 +306,14 @@ class Inboxes(Part, approved=True, shared=True):
         return self.inbox(by.repository).inboxed()
 
     @lup.tool(reads=True)
-    async def everywhere(self, nothing: Nothing) -> Everywhere:
+    async def everywhere(self, nothing: Nothing, by: Operator) -> Everywhere:
         """Read every repository's inbox as data.
 
         Where each concern stands, what waits on the operator, what's new to
-        them, what's been told, and the operator's comments.
+        them, what's been told, and the operator's comments. Yours alone, since
+        it holds every project's exchange with you.
         """
-        del nothing
+        del nothing, by
         database = self.opened()
         if self.state is None or self.state_at != database.writes:
             self.state = Everywhere(

@@ -10,6 +10,7 @@ Each module's doc is in its directory:
 - `modules/core/src/lup/doors/README.md`: the doors a module's methods are reached through, who may call them, and a module's parts, made once where they run.
 - `modules/core/src/lup/testing/README.md`: promises, what a module promises and how the gate checks it, and the harness a promise reaches lup through.
 - `modules/core/src/lup/programs/README.md`: running programs, lup's one runner of them, and why its promises start real ones.
+- `modules/core/src/lup/programs/git/README.md`: git's companion, where every module asks git, how git is run, and what a store a room writes is read as.
 - `modules/core/src/lup/running/README.md`: running a project's modules: the plan the program on the operator's machine reads, what crosses between it and a container, and the program a container runs.
 - `modules/core/src/lup/told/README.md`: guidance, each module's sections of what a session is told at its start, the door they're written behind, rendering them, and the room they may take.
 - `modules/core/src/lup/shell/README.md`: the shell, the view door, the blocks a view answers and the kinds a module declares for them.
@@ -21,4 +22,8 @@ Each module's doc is in its directory:
 - `modules/core/src/lup/runtimes/README.md`: the runtimes lup holds sessions on, behind one interface, and reading each one's records of its conversations as lup's model of one.
 - `modules/core/src/lup/gate/README.md`: the gate, the steps every module declares, run on a worktree's files, and a pass recorded by the files it passed on.
 - `modules/core/src/lup/landing/README.md`: landing a branch, the operator's review, what's on trial in what their lup runs, and accepting it onto the integration branch.
+- `modules/core/src/lup/remote/README.md`: a room's `git push` and `git fetch`, carried out with the operator's credentials within what the declaration allows, and `git-remote-lup`, the room's side.
+- `modules/core/src/lup/github/README.md`: the tools sessions act on GitHub through, with the operator's own login, within what the declaration allows.
+- `modules/core/src/lup/private/README.md`: what never leaves under the operator's name, the list the machine alone holds, refused at `Publishing` and failed at the gate.
+- `modules/core/src/lup/publishing/README.md`: publishing, what's about to leave under the operator's name, told to every part hearing it before it leaves, which may refuse it.
 - `modules/core/src/lup/code_rules/README.md`: the code rules, what they catch and when each is told, the engine reading pyright's own tree, and `# lup:` comments.

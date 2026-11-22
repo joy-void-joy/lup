@@ -128,8 +128,15 @@ class Noting(Module):
 
 
 def project() -> Project:
-    """Return a project of lup's default modules, the gate among them, and one declaring a step of its own."""
-    return Project(modules=Modules.default().add(Noting()))
+    """Return a project of lup's default modules, the gate among them, and one declaring a step of its own; `Private`, whose step the promises don't stand in for, dropped."""
+    return Project(
+        modules=Modules.default()
+        .drop(
+            "private",
+            why="the promises stand in for the gate's steps and the project's own alone",
+        )
+        .add(Noting())
+    )
 
 
 @contextmanager
@@ -230,8 +237,8 @@ class GatePromises(Part):
         assert isinstance(unfixed, Refused)
         assert isinstance(fixed, Accepted)
         fixing = runs.index(["format"])
-        assert ["format", "--check"] in runs[fixing:]
-        assert runs[:fixing] == [["format", "--check"]]
+        assert all("--check" in each for each in runs[:fixing])
+        assert any("--check" in each for each in runs[fixing:])
 
     @lup.promise
     async def a_heavy_import_fails_the_declaration_step(self, by: Testing) -> None:

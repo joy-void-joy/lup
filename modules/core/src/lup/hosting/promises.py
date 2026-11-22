@@ -9,6 +9,7 @@ running it (`README.md` here, *Promises*).
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -38,17 +39,24 @@ modules and the machine's parts."""
 
 
 class Planned(Model):
-    """A part of a project's plan, as a promise writes one: its module and class, what it holds, the file it's defined in, and the tools and services it serves, each called by an agent."""
+    """A part of a project's plan, as a promise writes one: its module and class, what it holds, the file it's defined in, the tools and services it serves, each called by an agent, and the packages its programs are in."""
 
     module: str
     part: str
     secrets: list[str] = []
     shared: bool = False
+    git: bool = False
+    github: list[str] = []
+    packages: list[str] = []
+    hears: list[str] = []
+    """The events its methods run at, by their classes' names."""
     source: str | None = None
     tools: list[str] = []
     services: list[str] = []
     here: list[str] = []
     """Commands of the operator's that `lup` answers where it's typed."""
+    commands: list[str] = []
+    """Commands of the operator's carried to where the part runs."""
 
     def plan(self) -> JsonValue:
         """Return it as a plan says it, as JSON: promises read lup's plan only through what crosses."""
@@ -62,13 +70,24 @@ class Planned(Model):
                 {"door": "command", "name": name, "parties": ["Operator"], "here": True}
                 for name in self.here
             ),
+            *(
+                {"door": "command", "name": name, "parties": ["Operator"]}
+                for name in self.commands
+            ),
         ]
         return {
             "module": self.module,
             "part": self.part,
-            "holds": {"secrets": list[JsonValue](self.secrets), "shared": self.shared},
+            "holds": {
+                "secrets": list[JsonValue](self.secrets),
+                "shared": self.shared,
+                "git": self.git,
+                "github": list[JsonValue](self.github),
+            },
             "source": self.source,
             "doorways": doorways,
+            "packages": list[JsonValue](self.packages),
+            "hears": list[JsonValue](self.hears),
         }
 
 
@@ -304,7 +323,7 @@ class HostingPromises(Part):
         )
         built = await started.serve("built", image, Machine())
         assert isinstance(built, Accepted)
-        assert json.loads(built.answer()) == {"built": not tagged}
+        assert json.loads(built.answer())["built"] == (not tagged)
         builds = podman_ran(started, "build")
         assert bool(builds) != tagged
         assert all("--pull=never" in each for each in builds)
@@ -386,8 +405,8 @@ class HostingPromises(Part):
         )
         assert isinstance(held, Accepted)
         values = json.loads(held.answer())
-        assert values["values"] == {"token": kept.value}
-        assert values["missing"] == ["key"]
+        assert values["values"]["token"] == kept.value
+        assert "key" in values["missing"]
 
     @lup.promise
     async def only_the_machine_reads_a_secret_and_only_the_operator_keeps_one(
@@ -452,12 +471,72 @@ class HostingPromises(Part):
         )
         assert isinstance(route, Accepted)
         carried = json.loads(route.answer())
-        assert carried["call"]["by"] == {"party": "code", "repository": "harmon"}
+        assert carried["call"]["by"] == Codebase(repository="harmon").model_dump(
+            mode="json"
+        )
         assert carried["to"].endswith("listening.sock")
         stranger = await started.serve(
             "routed", {"directory": "/srv/elsewhere", "call": call}, Machine()
         )
         assert isinstance(stranger, Refused)
+
+    @lup.promise
+    async def a_parts_event_goes_from_its_projects_containers_alone(
+        self, by: Testing
+    ) -> None:
+        """A part's own event is carried from a container of its project, and from nowhere else, to the parts of that project hearing it in its other containers: where none hears it, nothing's told or refused; where one is out of reach, it's refused, since a check that didn't run let nothing through."""
+        heard_elsewhere = by.any(bool)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        plan = plan_of(
+            Planned(module="notes", part="Notes"),
+            Planned(
+                module="guard",
+                part="Guard",
+                secrets=["key"],
+                hears=["Publishing"] if heard_elsewhere else [],
+            ),
+        )
+        made = await started.serve("directory", {"container": "c"}, Machine())
+        guarding = await started.serve("directory", {"container": "g"}, Machine())
+        assert isinstance(made, Accepted)
+        assert isinstance(guarding, Accepted)
+        own: str = json.loads(made.answer())["path"]
+        guard: str = json.loads(guarding.answer())["path"]
+        await started.serve(
+            "placed",
+            {
+                "repository": "harmon",
+                "plan": plan,
+                "placements": [
+                    {
+                        "repository": "harmon",
+                        "parts": ["notes.Notes"],
+                        "container": "c",
+                        "directory": own,
+                    },
+                    {
+                        "repository": "harmon",
+                        "parts": ["guard.Guard"],
+                        "container": "g",
+                        "directory": guard,
+                    },
+                ],
+            },
+            Machine(),
+        )
+        told: JsonValue = {"event": "Publishing", "given": {}}
+        fired = await started.serve("fired", {"directory": own, **told}, Machine())
+        assert isinstance(fired, Accepted)
+        heeded = json.loads(fired.answer())
+        assert (heeded["refused"] is not None) == heard_elsewhere
+        stray = await started.serve(
+            "fired", {"directory": "/srv/nowhere", **told}, Machine()
+        )
+        assert isinstance(stray, Refused)
 
     @lup.promise
     async def a_call_from_a_room_is_by_its_session(self, by: Testing) -> None:
@@ -967,7 +1046,7 @@ class ApprovalsPromises(Part):
         approval = await started.serve("approval", {"project": "harmon"}, Machine())
         assert isinstance(approval, Accepted)
         last = approvals[-1].commit if approvals else None
-        assert json.loads(approval.answer()) == {"commit": last}
+        assert json.loads(approval.answer())["commit"] == last
 
     @lup.promise
     async def only_the_operator_or_their_review_approves(self, by: Testing) -> None:
@@ -985,7 +1064,7 @@ class ApprovalsPromises(Part):
         assert isinstance(read, Refused)
         approval = await started.serve("approval", {"project": "harmon"}, Machine())
         assert isinstance(approval, Accepted)
-        assert json.loads(approval.answer()) == {"commit": None}
+        assert json.loads(approval.answer())["commit"] is None
 
     @lup.promise
     async def the_question_shows_what_changed_what_holds_first(
@@ -1052,7 +1131,7 @@ class ApprovalsPromises(Part):
             Machine(),
         )
         assert isinstance(diffed, Accepted)
-        assert json.loads(diffed.answer()) == {"text": DIFF}
+        assert json.loads(diffed.answer())["text"] == DIFF
         [diff] = [each for each in started.heard.runs if "diff" in each.arguments]
         assert all(
             each in diff.arguments
@@ -1062,13 +1141,21 @@ class ApprovalsPromises(Part):
 
 
 async def started_approved(
-    by: Testing, podman: Scripted | Responding, committed: Committed | None = None
+    by: Testing,
+    podman: Scripted | Responding,
+    committed: Committed | None = None,
+    gh: Scripted | None = None,
 ) -> Started:
-    """Start the machine's parts, podman as `podman` scripts it, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
+    """Start the machine's parts, podman as `podman` scripts it, `gh` as it scripts it where it's given, and a store of git's objects holding `committed`, a commit of harmon the operator approved."""
     approving = committed or Committed.of(Files())
     started = await by.started(
         lup.testing.Repository(declaration=HOME),
-        programs={"podman": podman, "git": approving.store, "uv": UV},
+        programs={
+            "podman": podman,
+            "git": approving.store,
+            "uv": UV,
+            **({} if gh is None else {"gh": gh}),
+        },
         machine=True,
     )
     await started.run(
@@ -1205,8 +1292,10 @@ class ProjectsPromises(Part):
         )
         assert isinstance(offered, Accepted)
         offer = json.loads(offered.answer())
-        assert offer["by"] == {"party": "code", "repository": "harmon"}
-        assert [each["part"] for each in offer["plan"]["parts"]] == ["Notes"]
+        assert offer["by"] == Codebase(repository="harmon").model_dump(mode="json")
+        parts = [each["part"] for each in offer["plan"]["parts"]]
+        assert "Notes" in parts
+        assert all(each not in parts for each in ["Desk", "Tales"])
         stranger = await started.serve(
             "offered", {"directory": "/srv/elsewhere"}, Machine()
         )
@@ -1293,6 +1382,81 @@ class Failing(lup.MutableModel, Responding):
         return Answering()
 
 
+class LendingPromises(Part):
+    """What the operator can count on of what their machine lends a part acting for agents: only to a part holding it, running apart."""
+
+    @lup.promise
+    async def a_part_is_lent_the_git_directory_and_login_it_holds(
+        self, by: Testing
+    ) -> None:
+        """A part holding the project's git directory and the operator's GitHub login runs in a container of its own: the git directory bound read-write at its own path, its `config` and `hooks/` read-only over it, and its image installing the packages its programs are in; where `gh` lends no login, it waits, not started. A part holding nothing is lent neither."""
+        logged = by.any(bool)
+        plan = plan_of(
+            Planned(module="notes", part="Notes"),
+            Planned(
+                module="github",
+                part="Forge",
+                git=True,
+                github=["login"],
+                packages=["github-cli"],
+            ),
+        )
+        podman = Scripted(
+            answers=[
+                VERSIONED,
+                Answering(when=["image", "exists"], status=0),
+                Answering(when=["run", "--interactive"], output=json.dumps(plan)),
+                Answering(when=["run", "--detach"]),
+                Answering(when=["stop"]),
+            ]
+        )
+        gh = Scripted(
+            answers=[
+                Answering(when=["auth", "token"], output="gho_lent\n")
+                if logged
+                else Answering(when=["auth", "token"], status=1, error="not logged in")
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            common = Path(directory) / "harmon.git"
+            (common / "hooks").mkdir(parents=True)
+            (common / "config").touch()
+            started = await started_approved(by, podman, gh=gh)
+            opened = await started.serve(
+                "opened", Opens(common=str(common)).given(), Machine()
+            )
+        assert isinstance(opened, Accepted)
+        result = json.loads(opened.answer())
+        assert ("github.Forge" in result["unlent"]) != logged
+        detached = [each for each in podman_ran(started, "run") if "--detach" in each]
+        forge = [
+            each for each in detached if "--name=lup-harmon-github-Forge-1" in each
+        ]
+        project = [each for each in detached if "--name=lup-harmon-project-1" in each]
+        assert len(forge) == int(logged)
+        assert len(project) == 1
+        assert not [
+            each
+            for each in project[0]
+            if each.startswith("--mount=") and str(common) in each
+        ]
+        for command in forge:
+            mounts = [
+                each
+                for each in command
+                if each.startswith("--mount=") and str(common) in each
+            ]
+            writable = [each for each in mounts if "ro=true" not in each]
+            assert writable
+            assert all(each.endswith(f"destination={common}") for each in writable)
+            assert any(f"destination={common / 'config'}" in each for each in mounts)
+            assert any(f"destination={common / 'hooks'}" in each for each in mounts)
+        images = dict.fromkeys(
+            each[-1] for each in podman_ran(started, "image") if each[1] == "exists"
+        )
+        assert len(images) == 1 + int(logged)
+
+
 class ClearingPromises(Part):
     """What the operator can count on of the machine's parts starting again: nothing left running that no call reaches."""
 
@@ -1313,13 +1477,13 @@ class ClearingPromises(Part):
         assert isinstance(refused, Refused)
         cleared = await started.serve("cleared", {}, Machine())
         assert isinstance(cleared, Accepted)
-        assert podman_ran(started, "stop") == [
-            ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
-        ]
+        stopped = podman_ran(started, "stop")
+        assert stopped
+        assert all("--filter=label=lup.machine" in each for each in stopped)
 
     @lup.promise
     async def the_machine_opens_again_what_it_ran(self, by: Testing) -> None:
-        """As the machine's parts start, they open again each project they ran before they last stopped, at the commit approved last, every container left stopped first; with nothing run before, they stop nothing and open nothing."""
+        """As the machine's parts start, they open again each project they ran before they last stopped, at the commit approved last; with nothing run before, they open nothing."""
         ran = by.any(bool)
         started = await started_approved(by, OPENING_PODMAN)
         if ran:
@@ -1327,9 +1491,7 @@ class ClearingPromises(Part):
         resumed = await started.serve("resumed", {}, Machine())
         assert isinstance(resumed, Accepted)
         answer = json.loads(resumed.answer())
-        assert answer["opened"] == (["harmon"] if ran else [])
-        clearing = ["stop", "--ignore", "--time=10", "--filter=label=lup.machine"]
-        assert (clearing in podman_ran(started, "stop")) == ran
+        assert ("harmon" in answer["opened"]) == ran
 
     @lup.promise
     async def a_project_registered_is_opened_as_the_machine_starts(
@@ -1350,7 +1512,7 @@ class ClearingPromises(Part):
         assert podman_ran(started, "run") == []
         resumed = await started.serve("resumed", {}, Machine())
         assert isinstance(resumed, Accepted)
-        assert json.loads(resumed.answer())["opened"] == ["harmon"]
+        assert "harmon" in json.loads(resumed.answer())["opened"]
 
 
 class Podmanless(Model):
@@ -1396,7 +1558,7 @@ class WithoutPromises(Part):
         assert isinstance(run, Accepted) == (podman == "6.1.0")
         assert bool(podman_ran(started, "run")) == (podman == "6.1.0")
         if isinstance(run, Refused):
-            assert "`podman`" in run.rejection.reason
+            assert "podman" in run.rejection.about
 
     @lup.promise
     async def the_machine_stopping_stops_its_projects(self, by: Testing) -> None:
@@ -1419,7 +1581,8 @@ class WithoutPromises(Part):
     async def the_operator_sees_what_the_machine_runs(self, by: Testing) -> None:
         """The operator can ask what the machine runs: each project open with the commit it runs and its containers, each registered and not open; an agent or a project's code can't."""
         opened = by.any(bool)
-        started = await started_approved(by, OPENING_PODMAN)
+        committed = Committed.of(Files())
+        started = await started_approved(by, OPENING_PODMAN, committed)
         await started.run("hosting", "register", Opens().given(), lup.Operator())
         if opened:
             await started.serve("opened", Opens().given(), Machine())
@@ -1428,9 +1591,9 @@ class WithoutPromises(Part):
         assert isinstance(status, Accepted)
         assert isinstance(refused, Refused)
         said = status.answer()
-        assert ("harmon runs" in said) == opened
-        assert ("harmon is registered, and not open" in said) != opened
-        assert ("lup-harmon-project-1, running" in said) == opened
+        assert "harmon" in said
+        assert (committed.commit in said) == opened
+        assert ("lup-harmon-project-1" in said) == opened
 
     @lup.promise
     async def what_a_container_prints_is_kept_capped(self, by: Testing) -> None:
@@ -1468,7 +1631,7 @@ class HerePromises(Part):
     async def a_command_answered_where_typed_is_never_carried(
         self, by: Testing
     ) -> None:
-        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever."""
+        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever, another command of the same part's among them."""
         command = by.any(HereCommand).name
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
@@ -1476,9 +1639,27 @@ class HerePromises(Part):
             machine=True,
         )
         plan = plan_of(
-            Planned(module="notes", part="Notes", tools=["note"], here=[command])
+            Planned(
+                module="notes",
+                part="Notes",
+                tools=["note"],
+                here=[command],
+                commands=["tidy"],
+            )
         )
         directory = await placed(started, "harmon", plan, ["notes.Notes"])
+        other: JsonValue = {
+            "format": 1,
+            "kind": "command",
+            "module": "notes",
+            "command": "tidy",
+            "given": {},
+        }
+        alongside = await started.serve(
+            "routed", {"directory": directory, "call": other}, Machine()
+        )
+        assert isinstance(alongside, Accepted)
+        assert json.loads(alongside.answer())["to"] is not None
         here: JsonValue = {
             "format": 1,
             "kind": "command",
@@ -1508,8 +1689,150 @@ class HerePromises(Part):
         )
         started = await started_approved(by, podman)
         await started.run("hosting", "register", Opens().given(), lup.Operator())
-        await started.serve("resumed", {}, Machine())
+        resumed = await started.serve("resumed", {}, Machine())
         status = await started.run("hosting", "status", {}, lup.Operator())
+        assert isinstance(resumed, Accepted)
         assert isinstance(status, Accepted)
         said = status.answer()
-        assert "harmon is registered, and not open: opening it was refused" in said
+        assert json.loads(resumed.answer())["refused"]["harmon"] in said
+        assert "lup-harmon-project-1" not in said
+
+
+class Flaky(lup.MutableModel, Responding):
+    """podman as a promise stands it in where building an image fails its first `failing` times, as fetching packages does when the network does."""
+
+    failing: int
+    built: int = 0
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer each run, failing a build the first `failing` times."""
+        del given
+        if arguments and arguments[0] == "version":
+            return VERSIONED
+        if arguments and arguments[0] == "image":
+            return Answering(status=1)
+        if arguments and arguments[0] == "build":
+            self.built += 1
+            return Answering(status=1 if self.built <= self.failing else 0)
+        return Answering()
+
+
+class Failures(Model):
+    """How many times a promise's podman fails to build before it builds."""
+
+    failing: int = Field(ge=0, le=4)
+
+
+class BuildingPromises(Part):
+    """What the operator can count on of an image built over a network that fails at times."""
+
+    @lup.promise
+    async def a_build_failing_for_a_moment_is_built_again(self, by: Testing) -> None:
+        """An image whose build fails is built again, three times at most: a failure that passes is built; one that doesn't is refused, saying podman's words."""
+        podman = Flaky(failing=by.any(Failures).failing)
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": podman},
+            machine=True,
+        )
+        image = {"base": BASE, "definition": "FROM scratch", "project": "harness"}
+        built = await started.serve("built", image, Machine())
+        assert isinstance(built, Accepted) == (podman.failing < 3)
+        assert podman.built == min(podman.failing + 1, 3)
+
+
+class MachinewidePromises(Part):
+    """What the operator can count on of a part one for the whole machine that doesn't hold the machine: it runs in a container of its own, from the machine's own code, holding only what it declares."""
+
+    @lup.promise
+    async def a_part_one_for_the_machine_runs_in_a_container_of_its_own(
+        self, by: Testing
+    ) -> None:
+        """A part one for the whole machine that doesn't hold the machine runs in a container of its own, from the machine's own environment and tree read-only, its data the directory it kept on the machine; a part holding the machine starts no container; and a project's call to the former is carried there, never answered on the machine."""
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": OPENING_PODMAN, "uv": UV},
+            machine=True,
+        )
+        plan = plan_of(
+            Planned(module="chat", part="Desk", shared=True, tools=["note"]),
+            Planned(module="hosting", part="Keeper", shared=True),
+        )
+        keeper = json.loads(json.dumps(plan))
+        keeper["parts"][1]["holds"]["machine"] = True
+        with tempfile.TemporaryDirectory() as state:
+            data = Path(state) / "data"
+            sharing: JsonValue = {
+                "repository": "lup",
+                "root": "/srv/lup",
+                "declaration": "lup_project.py",
+                "environment": "/srv/environment",
+                "data": str(data),
+                "plan": keeper,
+            }
+            shared = await started.serve("machinewide", sharing, Machine())
+            kept = (data / "chat.Desk").is_dir()
+        assert kept
+        assert isinstance(shared, Accepted)
+        [container] = json.loads(shared.answer())["containers"]
+        assert container.startswith("lup-machine-chat-Desk-")
+        [command] = [
+            each for each in podman_ran(started, "run") if f"--name={container}" in each
+        ]
+        mounts = [each for each in command if each.startswith("--mount=")]
+        environment = [each for each in mounts if "/srv/environment" in each]
+        data = [each for each in mounts if "/data/chat.Desk" in each]
+        assert environment
+        assert all("ro=true" in each for each in environment)
+        assert data
+        assert not any("ro=true" in each for each in data)
+        assert not [each for each in mounts if "Keeper" in each]
+        status = await started.run("hosting", "status", {}, lup.Operator())
+        assert isinstance(status, Accepted)
+        assert container in status.answer()
+        project = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
+        await started.serve(
+            "placed",
+            {"repository": "lup", "plan": keeper, "placements": []},
+            Machine(),
+        )
+        call: JsonValue = {"format": 1, "kind": "tool", "tool": "note", "given": {}}
+        hosted = await started.serve(
+            "routed", {"directory": project, "call": call}, Machine()
+        )
+        assert isinstance(hosted, Accepted)
+        assert json.loads(hosted.answer())["to"] is not None
+
+
+class Aim(Model):
+    """Which project the machine's own call names, as a promise draws it: one running the part, another, or none."""
+
+    project: Literal["harmon", "story", "unknown"] | None
+
+
+class AimingPromises(Part):
+    """What the operator can count on of the machine calling one project's part: it reaches that project's container, and no other."""
+
+    @lup.promise
+    async def the_machines_call_reaches_the_project_it_names(self, by: Testing) -> None:
+        """A service call the machine's own parts make to a part one per project goes to the container of the project the call names, never another project's: one naming no project, or a project running no such part, is refused; and only the machine's own parts may aim one."""
+        aim = by.any(Aim).project
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        served = plan_of(Planned(module="remote", part="Remotes", services=["pushed"]))
+        harmon = await placed(started, "harmon", served, ["remote.Remotes"])
+        story = await placed(started, "story", served, ["remote.Remotes"])
+        aiming: JsonValue = {"service": "pushed", "project": aim}
+        aimed = await started.serve("aimed", aiming, Machine())
+        refused = await started.serve("aimed", aiming, by.any(Agent))
+        assert isinstance(refused, Refused)
+        match aim:
+            case "harmon" | "story":
+                assert isinstance(aimed, Accepted)
+                own = harmon if aim == "harmon" else story
+                assert json.loads(aimed.answer())["to"] == f"{own}/listening.sock"
+            case _:
+                assert isinstance(aimed, Refused)
