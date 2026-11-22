@@ -7,6 +7,8 @@ from lup.inbox.records import Decision, Item, Laid, Question, Ruling
 from lup.inbox.said import (
     Answering,
     AskSaid,
+    Awaited,
+    Awaiting,
     Clearing,
     ConcernOf,
     ConcernSaid,
@@ -31,6 +33,7 @@ from lup.inbox.said import (
     Settling,
     Showing,
     Since,
+    Spoken,
     Told,
     Untelling,
     Untold,
@@ -40,6 +43,8 @@ from lup.inbox.said import (
 __all__ = [
     "Answering",
     "AskSaid",
+    "Awaited",
+    "Awaiting",
     "Clearing",
     "ConcernOf",
     "ConcernSaid",
@@ -69,6 +74,7 @@ __all__ = [
     "Settling",
     "Showing",
     "Since",
+    "Spoken",
     "Told",
     "Untelling",
     "Untold",

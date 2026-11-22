@@ -38,6 +38,8 @@ from lup import (
 from lup.inbox import (
     Answering,
     AskSaid,
+    Awaited,
+    Awaiting,
     Clearing,
     ConcernOf,
     ConcernSaid,
@@ -67,6 +69,7 @@ from lup.inbox import (
     Settling,
     Showing,
     Since,
+    Spoken,
     Told,
     Untelling,
     Untold,
@@ -929,7 +932,7 @@ class InboxPromises(Part):
 
     @lup.promise
     async def an_ask_holds_until_the_operator_answers(self, by: Testing) -> None:
-        """An agent's `ask` holds until the operator answers, and returns their answer, then not told again; held past `within`, it says it isn't answered yet, and the answer is told at their next call. One that doesn't wait returns at once."""
+        """An agent's `ask` holds until the operator answers or `within` passes, and the answer is told to them once, by the held call or at their next; what's held settles once the answer is in, and an ask that doesn't wait leaves its question waiting."""
         started = await by.started(project())
         agent = by.any(Agent)
         held = asyncio.ensure_future(
@@ -946,7 +949,7 @@ class InboxPromises(Part):
         while not (await inboxed(started)).waiting and not held.done():
             await asyncio.wait([held], timeout=60)
         [question] = (await inboxed(started)).waiting
-        await started.run(
+        answered = await started.run(
             "core",
             "answer",
             Answering(
@@ -956,19 +959,23 @@ class InboxPromises(Part):
             ),
             Operator(),
         )
-        answer = await held
-        later = [
+        assert isinstance(answered, Accepted), answered
+        await held
+        await told(started, agent)
+        state = await inboxed(started)
+        [answer] = [
             each
-            for each in (await told(started, agent)).items
-            if each.kind == "inbox:answer"
+            for each in state.told
+            if each.party != "@operator" and each.item > question
         ]
-        if "isn't answered yet" in answer:
-            assert [each.text for each in later] == ["and quickly"]
-        else:
-            assert "leaning: go" in answer
-            assert "and quickly" in answer
-            assert not later
-        at_once = await said(
-            started, "ask", AskSaid(question="and then?", wait=False), agent
+        assert answer.times == 1
+        settled = await started.serve(
+            "awaited",
+            Spoken(agent=agent, said=Awaiting(question=question)),
+            HERE,
         )
-        assert "later call" in at_once
+        assert isinstance(settled, Accepted), settled
+        assert isinstance(settled.output, Awaited)
+        assert settled.output.settled
+        await said(started, "ask", AskSaid(question="and then?", wait=False), agent)
+        assert len((await inboxed(started)).waiting) == 1
