@@ -17,10 +17,17 @@ which a room kept nothing of.
 import csv
 import hashlib
 import io
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, TypeAdapter
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_fixed,
+)
 
 import lup
 from lup.doors.door import RefusedError
@@ -245,6 +252,12 @@ class Containers(Part, machine=True, shared=True):
         install="https://podman.io/docs/installation",
     )
     walls: Walls = Field(default_factory=Walls)
+    attempts: int = 3
+    """How many times an image is built before its call is refused: a build
+    fetching packages fails at times for the network alone, as Arch's archive
+    resetting a connection did."""
+    pause: timedelta = timedelta(seconds=10)
+    """How long to wait before building an image again."""
     running: list[Run] = []
     """Each container this part started that hasn't stopped, in order."""
 
@@ -262,6 +275,21 @@ class Containers(Part, machine=True, shared=True):
             if pulled.status != 0:
                 message = f"podman couldn't fetch {image.base}: {pulled.said()}"
                 raise ContainerError(message)
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.attempts),
+            wait=wait_fixed(self.pause.total_seconds()),
+            retry=retry_if_exception_type(ContainerError),
+            reraise=True,
+        ):
+            with attempt:
+                await self.build(image)
+        return Built(built=True)
+
+    async def build(self, image: Image) -> None:
+        """Build `image` once.
+
+        Raise `ContainerError` where podman fails to.
+        """
         made = await self.podman.ran(
             "build",
             "--pull=never",
@@ -277,7 +305,6 @@ class Containers(Part, machine=True, shared=True):
         if made.status != 0:
             message = f"podman couldn't build {image.tag()}: {made.said()}"
             raise ContainerError(message)
-        return Built(built=True)
 
     async def there(self, image: str) -> bool:
         """Say whether the image named `image` is there.
