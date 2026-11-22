@@ -16,6 +16,7 @@ export function line(id: string): fc.Arbitrary<Line> {
         offers: [],
         reaches: null,
         sighted: null, standing: null,
+        aside: [],
         spans: [{ text, tone: "plain", ticking: null, gauge: null, refers: null }],
     }));
 }
@@ -34,6 +35,7 @@ export function markdown(id: string): fc.Arbitrary<Markdown> {
         offers: [],
         reaches: null,
         sighted: null, standing: null,
+        aside: [],
         text: lines.join("\n"),
         tone: "plain",
     }));
@@ -48,6 +50,7 @@ export function fold(id: string, depth: number, kinds: readonly string[] = ["not
         offers: [],
         reaches: null,
         sighted: null, standing: null,
+        aside: [],
         kind,
         summary: [{ text: summary, tone: "plain", ticking: null, gauge: null, refers: null }],
         open: null,

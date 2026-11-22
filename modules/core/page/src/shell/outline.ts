@@ -45,6 +45,7 @@ function outlined(node: Node, open: (node: Node) => boolean, shown: (kind: strin
                 reaches: null,
                 sighted: null,
                 standing: child.block?.standing ?? null,
+                aside: [],
                 kind,
                 summary: summaryOf(child),
                 open: open(child),

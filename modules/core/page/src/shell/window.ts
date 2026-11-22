@@ -84,6 +84,7 @@ function listed(names: readonly string[], asking: string): Blocks {
             offers: [],
             reaches: null,
             sighted: null, standing: null,
+            aside: [],
             spans: [{ text: name, tone: "strong", ticking: null, gauge: null, refers: null }],
         })),
         summary: [{ text: asking, tone: "plain", ticking: null, gauge: null, refers: null }],

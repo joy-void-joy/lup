@@ -11,8 +11,8 @@ import { type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, GutterMarker, gutter, type ViewUpdate } from "@codemirror/view";
 
 import { depthOf, foldKind, foldRange, nodeAt, offsetOf, type Node as Laid } from "../document/tree";
-import { redrawn } from "./annotations";
-import { meanings } from "./palette";
+import { redrawn, standsInMargin } from "./annotations";
+import { meanings, standings } from "./palette";
 import { shells, type Shell } from "./shell";
 
 /** A fold's letter, on the line its summary is on. */
@@ -37,8 +37,19 @@ export interface Barred {
     readonly last: boolean;
 }
 
-/** What the margin shows beside one line: the letters of the folds whose summary is on it, and the bars of those it's under. */
+/** How the block whose first line a line is stands for the operator, in its own column left of the folds': its glyph, in its meaning's colour. */
+export interface Stood {
+    readonly glyph: string;
+    readonly colour: string;
+    readonly standing: string;
+}
+
+/**
+ * What the margin shows beside one line: how the block it starts stands, the letters of the folds whose summary is on
+ * it, and the bars of those it's under.
+ */
 export interface Beside {
+    readonly stands: Stood | null;
     readonly letters: readonly Lettered[];
     readonly bars: readonly Barred[];
 }
@@ -47,13 +58,16 @@ export interface Beside {
 export function beside(shell: Shell, from: number, to: number, bright: ReadonlySet<string>): Beside {
     const letters: Lettered[] = [];
     const bars: Barred[] = [];
-    let node: Laid | null = nodeAt(shell.document.root, from);
+    const first = nodeAt(shell.document.root, from);
+    const standing = offsetOf(first) === from ? (first.block?.standing ?? null) : null;
+    const stands = standing === null ? null : { glyph: standings[standing], colour: meanings[standing], standing };
+    let node: Laid | null = first;
     while (node !== null) {
         const kind = foldKind(node);
         if (kind !== null) {
+            // A fold's letter and bar keep its kind's colour, how it stands said in the column before them.
+            const colour = shell.kinds.folds.get(kind)?.colour ?? "muted";
             const declared = shell.kinds.folds.get(kind);
-            const standing = node.block?.standing ?? null;
-            const colour = standing === null ? (declared?.colour ?? "muted") : meanings[standing];
             const column = depthOf(node);
             const start = offsetOf(node);
             if (start === from) {
@@ -65,7 +79,7 @@ export function beside(shell: Shell, from: number, to: number, bright: ReadonlyS
         }
         node = node.parent;
     }
-    return { letters: letters.reverse(), bars: bars.reverse() };
+    return { stands, letters: letters.reverse(), bars: bars.reverse() };
 }
 
 /** Return the keys of the folds the cursor is in, in `state`. */
@@ -102,10 +116,20 @@ class Marked extends GutterMarker {
     override toDOM(): Node {
         const cell = document.createElement("span");
         cell.className = "lup-rails";
+        const stands = this.shown.stands;
+        if (stands !== null) {
+            const drawn = document.createElement("span");
+            drawn.className = `lup-stands lup-standing-${stands.standing}`;
+            drawn.textContent = stands.glyph;
+            drawn.title = stands.standing;
+            drawn.style.color = `var(--lup-${stands.colour})`;
+            cell.append(drawn);
+        }
         for (const bar of this.shown.bars) {
             const drawn = document.createElement("span");
             drawn.className = `lup-rail${bar.bright ? " lup-bright" : ""}${bar.last ? " lup-last" : ""}`;
-            drawn.style.setProperty("--lup-at", String(Math.min(bar.column, this.columns - 1)));
+            // The first column is how the block stands; the folds' start after it.
+            drawn.style.setProperty("--lup-at", String(Math.min(bar.column, this.columns - 1) + 1));
             drawn.style.color = `var(--lup-${bar.colour})`;
             cell.append(drawn);
         }
@@ -115,7 +139,7 @@ class Marked extends GutterMarker {
             drawn.dataset.key = letter.key;
             drawn.textContent = letter.letter;
             drawn.title = letter.closed ? "open" : "close";
-            drawn.style.setProperty("--lup-at", String(Math.min(letter.column, this.columns - 1)));
+            drawn.style.setProperty("--lup-at", String(Math.min(letter.column, this.columns - 1) + 1));
             drawn.style.color = `var(--lup-${letter.colour})`;
             cell.append(drawn);
         }
@@ -132,10 +156,11 @@ function moved(update: ViewUpdate): boolean {
     );
 }
 
-/** The margin, `columns` wide: folds deeper than that share its last column. */
+/** The margin, a column of how each block stands, then `columns` of folds: folds deeper than that share its last column. */
 export function margin(columns = 6): Extension {
     return [
-        EditorView.editorAttributes.of({ style: `--lup-columns: ${columns}` }),
+        standsInMargin.of(true),
+        EditorView.editorAttributes.of({ style: `--lup-columns: ${columns + 1}` }),
         gutter({
             class: "lup-margin",
             lineMarker(view, line) {
@@ -149,7 +174,7 @@ export function margin(columns = 6): Extension {
                     brightIn.set(view.state, bright);
                 }
                 const shown = beside(shell, line.from, view.state.doc.lineAt(line.from).to, bright);
-                return shown.letters.length === 0 && shown.bars.length === 0 ? null : new Marked(shown, columns);
+                return shown.stands === null && shown.letters.length === 0 && shown.bars.length === 0 ? null : new Marked(shown, columns);
             },
             lineMarkerChange: moved,
             domEventHandlers: {

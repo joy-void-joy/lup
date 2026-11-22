@@ -2,7 +2,7 @@
 // text to draw again: kept apart from the shell, so what it uses (its comments, its margin) reads them without
 // importing the shell itself.
 
-import { Annotation, StateEffect } from "@codemirror/state";
+import { Annotation, Facet, StateEffect } from "@codemirror/state";
 
 /** Marks a transaction the shell makes, as views answer or as it lays a comment out, rather than one the operator's keys make. */
 export const fromCore = Annotation.define<boolean>();
@@ -13,3 +13,6 @@ export const fromCore = Annotation.define<boolean>();
  * itself.
  */
 export const redrawn = StateEffect.define<null>();
+
+/** Whether an editor's margin says how each block stands, so its lines don't say it again before their text. */
+export const standsInMargin = Facet.define<boolean, boolean>({ combine: (values) => values.some((each) => each) });

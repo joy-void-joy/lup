@@ -244,6 +244,11 @@ class Shown(Model):
     """How it stands for the operator: new to them, waiting on them, done, or
     held back from a send; none where there's nothing to say. Drawn alike
     wherever it shows, a glyph in its own colour, and said in its text form."""
+    aside: list[Span] = []
+    """What's said of it apart from its line, which the page's header says
+    while the cursor is in it: what names it and what it is, as a concern's
+    @name or an item's number and kind, so its line says what it says alone.
+    Its text form says it after its line."""
     shows: ClassVar[dict[str, bool]] = {}
     """The fields saying what the block shows itself, apart from what's under
     it, each marked to include, which the version the core works out is a
@@ -262,6 +267,15 @@ class Shown(Model):
             )
             raise BlockError(message, about=[self.id, *twice])
         return self
+
+    def aside_said(self) -> str:
+        """Say what's said of it apart from its line, as its text form adds it after the line: nothing where nothing is.
+
+        >>> Line(id="1", aside=[Span(text="note"), Span(text="@12")]).aside_said()
+        '  · note · @12'
+        """
+        said = " · ".join(span.text for span in self.aside if span.text)
+        return f"  · {said}" if said else ""
 
     def own_version(self) -> str:
         """Return a version of what the block shows itself: a digest of the fields saying it, which changes as they do."""
@@ -331,6 +345,7 @@ class Fold(Shown):
         summary = "".join(span.text for span in self.summary)
         if self.standing is not None:
             summary = f"{summary}  [{self.standing}]"
+        summary = f"{summary}{self.aside_said()}"
         if isinstance(self.content, Viewing):
             return [f"{indent}▸ {summary}  [{self.content.said()}]"]
         if not opened:
@@ -558,9 +573,9 @@ def lines(blocks: list[Block], indent: str = "") -> list[str]:
     def said(block: Block) -> list[str]:
         match block:
             case Line(standing=str() as standing):
-                return [f"{indent}{block.said()}  [{standing}]"]
+                return [f"{indent}{block.said()}  [{standing}]{block.aside_said()}"]
             case Line():
-                return [f"{indent}{block.said()}"]
+                return [f"{indent}{block.said()}{block.aside_said()}"]
             case Markdown():
                 return [
                     f"{indent}{line}" if line else ""

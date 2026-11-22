@@ -10,7 +10,7 @@ import { getCM, vim, Vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Comment, Delivered, Draft, Looks, Marked, Standing, Viewing } from "../generated/read";
 import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, opening, section, viewKey, type Change, type Node } from "../document/tree";
-import { fromCore, redrawn } from "./annotations";
+import { fromCore, redrawn, standsInMargin } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
 import { glyphOf, Marks } from "./marks";
@@ -606,7 +606,7 @@ const drawing = ViewPlugin.fromClass(
                             },
                         }).range(line.from),
                     );
-                    const standing = start === line.from ? (node.block?.standing ?? null) : null;
+                    const standing = start === line.from && !view.state.facet(standsInMargin) ? (node.block?.standing ?? null) : null;
                     if (standing !== null) {
                         ranges.push(Decoration.widget({ widget: new Stands(standing), side: -1 }).range(line.from));
                     }
@@ -709,6 +709,15 @@ export const look = EditorView.theme(
             cursor: "pointer",
         },
         ".lup-letter.lup-closed": { boxShadow: "inset 0 0 0 1px currentColor" },
+        ".lup-stands": {
+            position: "absolute",
+            top: "0",
+            left: "1px",
+            width: "var(--lup-column)",
+            textAlign: "center",
+            lineHeight: "var(--lup-lh)",
+        },
+        ".lup-stands.lup-standing-waiting": { fontWeight: "700" },
         ".lup-letter.lup-drafted": { textDecoration: "underline 2px var(--lup-comment)", textUnderlineOffset: "2px" },
         ".lup-line.lup-chosen": { background: "var(--lup-selection)" },
         ".lup-line.lup-comment": {
