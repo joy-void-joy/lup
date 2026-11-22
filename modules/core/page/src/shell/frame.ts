@@ -36,8 +36,9 @@ export function keysHere(shell: Shell): Keyed[] {
     const role = owner.window?.shell() === shell ? owner.window.role() : null;
     if (role === "review") {
         return [
-            { keys: "Space d", does: "send it" },
-            { keys: "Space x", does: "keep it back" },
+            { keys: "Space d", does: "tick it" },
+            { keys: "Space x", does: "untick it" },
+            { keys: "Space h", does: "either" },
             { keys: "Space s", does: "send elsewhere" },
             { keys: "Ctrl+Enter", does: "send" },
             { keys: "Esc", does: "close" },
@@ -72,6 +73,7 @@ export function keysHere(shell: Shell): Keyed[] {
             { keys: "i", does: "write" },
             { keys: "dd", does: "take a line out" },
             { keys: "Space s", does: "send to" },
+            { keys: "Space h", does: "keep back" },
             { keys: "]n", does: "next comment" },
             { keys: "Ctrl+Enter", does: "review the draft" },
             every,

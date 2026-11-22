@@ -252,15 +252,11 @@ class Dashboard(Model, arbitrary_types_allowed=True):
             await page.tell(Reviewed(review=self.kept.review))
 
     async def going(self, draft: Draft) -> list[Going]:
-        """Say where each comment of `draft` not held back goes at the next send, and what each mark does, or why it can't, each block read once."""
+        """Say where each comment of `draft` goes at a send, and what each mark does, or why it can't, each block read once: those held back too, which the review lists unticked where they'd go."""
         read: dict[str, Placed | str] = {}
         return [
-            *[
-                await self.goes(comment, read)
-                for comment in draft.comments
-                if not comment.held
-            ],
-            *[await self.does(mark, read) for mark in draft.marks if not mark.held],
+            *[await self.goes(comment, read) for comment in draft.comments],
+            *[await self.does(mark, read) for mark in draft.marks],
         ]
 
     async def on(self, quote: Quote, read: dict[str, Placed | str]) -> Placed | str:

@@ -567,7 +567,7 @@ const drawing = ViewPlugin.fromClass(
                         const told = shell.comments.said(node.key);
                         if (told !== null) {
                             classes.push("lup-comment-first");
-                            attributes["data-to"] = `to ${told.to}`;
+                            attributes["data-to"] = `to ${told.to}${told.held ? " · kept back" : ""}`;
                             const said = told.reason ?? (told.outdated ? "outdated: the lines it quotes changed" : null);
                             if (said !== null) {
                                 attributes["data-said"] = said;

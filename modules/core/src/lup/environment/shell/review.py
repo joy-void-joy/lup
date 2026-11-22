@@ -1,11 +1,12 @@
 """The review: what the next send would do with the draft, as the page's window shows it.
 
-The core decides where each part goes (`Dashboard.taking`); the review shows it,
-the comments grouped by where each goes, then the marks, what each does, then
-what's held back, each part a line saying the words it says, or what it does,
-and what it's on. The page opens it in its window at the first Ctrl+Enter and
-sends at the second; Space x and Space d on a part keep it back and let it go
-(`README.md` in `lup/shell/`, *The draft*).
+The core decides where each part goes (`Dashboard.taking`); the review shows it
+as a checklist, the comments grouped by where each goes, then the marks, what
+each does, each part a line ticked where it goes and blank where the operator
+keeps it back, saying the words it says, or what it does, and what it's on. The
+page opens it in its window at the first Ctrl+Enter and sends what's ticked at
+the second; Space d and Space x on a part tick it and untick it, Space t and
+Space h either (`README.md` in `lup/shell/`, *The draft*).
 """
 
 from typing import TYPE_CHECKING
@@ -52,18 +53,22 @@ def done(mark: Marked) -> list[Span]:
 
 
 def reviewed(draft: Draft, going: list[Going]) -> Blocks:
-    """Return the review of `draft`, each part going where `going` says: a fold for each place comments go, in the order they were written, then one of the marks, then one of the parts held back, said in its summary as how many go; nothing where the draft holds nothing.
+    """Return the review of `draft` as a checklist, each part going where `going` says: a fold for each place comments go, in the order they were written, then one of the marks; each part a line, ticked where it goes at the next send and blank where the operator keeps it back, which stays in the draft; the summary saying how many go; nothing where the draft holds nothing.
 
     >>> from lup.shell.blocks import Viewing
     >>> from lup.shell.draft import Comment, Draft, Quote
     >>> quote = Quote(viewing=Viewing(view="pile"), block="1", lines=["note 1"])
-    >>> draft = Draft(comments=[Comment(id="c", on=quote, words="looks good")])
-    >>> print(reviewed(draft, [Going(part="c", to="to notes")]).text())
-    draft · 1 to send
-    ▾ to notes: 1
-      looks good  on “note 1”
+    >>> draft = Draft(comments=[Comment(id="c", on=quote, words="looks good"),
+    ...     Comment(id="d", on=quote, words="later", held=True)])
+    >>> print(reviewed(draft, [Going(part="c", to="to notes"),
+    ...     Going(part="d", to="to notes")]).text())
+    draft · 1 of 2 to send
+    ▾ to notes: 1 of 2
+      [x] looks good  on “note 1”
+      [ ] later  on “note 1”
     """
-    if not draft.comments and not draft.marks:
+    parts = [*draft.comments, *draft.marks]
+    if not parts:
         return Blocks()
     where = {each.part: each for each in going}
 
@@ -73,64 +78,40 @@ def reviewed(draft: Draft, going: list[Going]) -> Blocks:
         return found.to if found is not None else "to no one"
 
     def line(part: Comment | Marked) -> Line:
-        """Return `part`'s line, saying why it can't go where it can't."""
+        """Return `part`'s line, ticked where it goes, saying why it can't go where it can't."""
         found = where.get(part.id)
         stays = (
             []
-            if found is None or found.stays is None
+            if part.held or found is None or found.stays is None
             else [Span(text=f"  ◂ {found.stays}", tone="muted")]
         )
-        spans = said(part) if isinstance(part, Comment) else done(part)
-        return Line(id=part.id, spans=[*spans, *stays])
-
-    sending = [each for each in draft.comments if not each.held]
-    marking = [each for each in draft.marks if not each.held]
-    held: list[Block] = [
-        line(each).model_copy(update={"standing": "held"})
-        for each in [*draft.comments, *draft.marks]
-        if each.held
-    ]
-    places: list[Block] = [
-        Fold(
-            id=f"to {to}",
-            kind="sent-to",
-            summary=[
-                Span(
-                    text=f"{to}: {sum(place(each) == to for each in sending)}",
-                    tone="strong",
-                )
-            ],
-            content=list[Block](line(each) for each in sending if place(each) == to),
+        box = (
+            Span(text="[ ] ", tone="muted")
+            if part.held
+            else Span(text="[x] ", tone="strong")
         )
-        for to in dict.fromkeys(place(each) for each in sending)
+        spans = said(part) if isinstance(part, Comment) else done(part)
+        return Line(id=part.id, spans=[box, *spans, *stays])
+
+    def fold(key: str, said: str, placed: list[Comment] | list[Marked]) -> Fold:
+        """Return the fold of id `key` holding `placed`'s lines, said in its summary as `said` and how many of them go."""
+        goes = sum(not each.held for each in placed)
+        count = f"{goes}" if goes == len(placed) else f"{goes} of {len(placed)}"
+        return Fold(
+            id=key,
+            kind="sent-to",
+            summary=[Span(text=f"{said}: {count}", tone="strong")],
+            content=[line(each) for each in placed],
+        )
+
+    places: list[Block] = [
+        fold(f"to {to}", to, [each for each in draft.comments if place(each) == to])
+        for to in dict.fromkeys(place(each) for each in draft.comments)
     ]
-    marked: list[Block] = (
-        [
-            Fold(
-                id="marked",
-                kind="sent-to",
-                summary=[Span(text=f"marked: {len(marking)}", tone="strong")],
-                content=[line(each) for each in marking],
-            )
-        ]
-        if marking
-        else []
-    )
-    kept: list[Block] = (
-        [
-            Fold(
-                id="held",
-                kind="sent-to",
-                summary=[Span(text=f"held back: {len(held)}", tone="muted")],
-                content=held,
-            )
-        ]
-        if held
-        else []
-    )
+    marked: list[Block] = [fold("marked", "marked", draft.marks)] if draft.marks else []
+    goes = sum(not each.held for each in parts)
+    count = f"{goes}" if goes == len(parts) else f"{goes} of {len(parts)}"
     return Blocks(
-        blocks=[*places, *marked, *kept],
-        summary=[
-            Span(text=f"draft · {len(sending) + len(marking)} to send", tone="strong")
-        ],
+        blocks=[*places, *marked],
+        summary=[Span(text=f"draft · {count} to send", tone="strong")],
     )

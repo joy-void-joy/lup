@@ -45,6 +45,8 @@ export interface Said {
     readonly to: string;
     readonly outdated: boolean;
     readonly reason: string | null;
+    /** Whether the operator keeps it back from sends. */
+    readonly held: boolean;
 }
 
 /** Say `party` as a comment's line says whom it reaches: what identifies it, as its fields give it, but which of the core's parties it is. */
@@ -466,6 +468,7 @@ export class Comments {
             to: held.comment.to !== null ? named(held.comment.to) : reachesOf(block),
             outdated: (quote.version !== null && shown !== null && shown !== quote.version) || !lines,
             reason: held.comment.reason,
+            held: held.comment.held,
         };
     }
 

@@ -46,7 +46,7 @@ const keys = fc.constantFrom(
     ["u"],
     ["<C-r>"],
     [":w"],
-    ...["fn", "fb", "Fn", "Fb", "fz", "c", "x", "d", "t"].map((typed) => ["<Space>", ...typed]),
+    ...["fn", "fb", "Fn", "Fb", "fz", "c", "x", "d", "t", "h"].map((typed) => ["<Space>", ...typed]),
 );
 
 /** The keys that leave insert mode: vim's own, and Ctrl+Enter, which ends the comment being written. */
@@ -441,7 +441,7 @@ scenario("Space x on a comment's line in the review keeps it back, so a send lea
         expect(memory.draft.comments.map((each) => [each.words, each.held])).toEqual([["keep", true]]);
         await press(opened, ["<C-CR>"]);
         const inner = windowOf(opened);
-        const part = inner.document.node(`root/held/${id}`);
+        const part = inner.document.node(`root/to to what it's on/${id}`);
         expect(part).not.toBeNull();
         if (part === null) {
             return;
@@ -754,7 +754,7 @@ scenario("Space d marks done on the innermost block at the cursor that offers it
     }
 });
 
-scenario("Space x on a mark's line in the review keeps it back from the send, and Space t there sends it the next time", async (by) => {
+scenario("Space x on a mark's line in the review keeps it back from the send, and Space h there sends it the next time", async (by) => {
     const verb = by.any(fc.constantFrom("done", "decline"));
     const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", [verb]) };
     const { shell: opened, memory, parent } = shellOn([item]);
@@ -769,10 +769,10 @@ scenario("Space x on a mark's line in the review keeps it back from the send, an
         expect(memory.sent).toEqual([]);
         expect(memory.draft.marks.map((each) => each.held)).toEqual([true]);
         await press(opened, ["<C-CR>"]);
-        if (!onPart(windowOf(opened), "held", id)) {
+        if (!onPart(windowOf(opened), "marked", id)) {
             return;
         }
-        await press(windowOf(opened), ["<Space>", "t", "<C-CR>"]);
+        await press(windowOf(opened), ["<Space>", "h", "<C-CR>"]);
         expect(memory.sent.map((each) => each.id)).toEqual([id]);
     } finally {
         opened.destroy();
@@ -846,6 +846,28 @@ scenario("Space d over a visual selection marks done on each block whose first l
         await press(opened, ["V", ...Array.from({ length: count - 1 }, () => "j"), "<Space>", "d"]);
         expect(opened.state().mode).toBe("normal");
         expect(memory.draft.marks.map((each) => each.on.block)).toEqual(lines.filter((_, at) => at !== 1).map((each) => each.id));
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("Space h on a comment or a marked block keeps it back, so a send leaves it in the draft, and Space h again lets it go", async (by) => {
+    const marking = by.any(fc.boolean());
+    const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", ["done"]) };
+    const { shell: opened, memory, parent } = shellOn([item]);
+    try {
+        opened.go(0);
+        await press(opened, marking ? ["<Space>", "d"] : ["o", "h", "i", "<Esc>"]);
+        const parts = (): { id: string; held: boolean }[] => [...memory.draft.comments, ...memory.draft.marks].map((each) => ({ id: each.id, held: each.held }));
+        expect(parts().map((each) => each.held)).toEqual([false]);
+        await press(opened, ["<Space>", "h"]);
+        expect(parts().map((each) => each.held)).toEqual([true]);
+        await press(opened, ["<C-CR>"]);
+        await press(windowOf(opened), ["<C-CR>"]);
+        expect(parts().map((each) => each.held)).toEqual([true]);
+        await press(opened, ["<Space>", "h"]);
+        expect(parts().map((each) => each.held)).toEqual([false]);
     } finally {
         opened.destroy();
         parent.remove();
