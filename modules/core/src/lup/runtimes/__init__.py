@@ -17,6 +17,7 @@ from lup.runtimes.records import (
     Refused,
     Returned,
     Said,
+    copied,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "Refused",
     "Returned",
     "Said",
+    "copied",
 ]

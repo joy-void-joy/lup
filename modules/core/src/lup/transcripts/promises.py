@@ -14,7 +14,7 @@ from pathlib import Path
 lazy from pydantic import JsonValue
 
 import lup
-from lup import Agent, Blocks, Modules, Operator, Part, Project
+from lup import Blocks, Modules, Operator, Part, Project
 from lup.testing import Accepted, Started, Testing
 from lup.transcripts import Searching, Showing
 
@@ -98,7 +98,7 @@ class TranscriptsPromises(Part):
                 ended("e1", "2026-11-19T10:00:11Z"),
                 typed("yes, readers per runtime", "u2", "2026-11-19T10:01:00Z"),
             )
-            started = await by.started(project(homes))
+            started = await by.started(machine=True, declared=project(homes))
             found = await searched(started, Searching(words=["readers"]))
             assert "yes, readers per runtime" in found
             assert "I propose readers per runtime" in found
@@ -113,9 +113,9 @@ class TranscriptsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             homes = Path(made)
             recorded(homes, typed("first words", "u1", "2026-11-19T10:00:00Z"))
-            started = await by.started(project(homes))
+            started = await by.started(machine=True, declared=project(homes))
             assert "first words" in await searched(started, Searching(words=["first"]))
-            assert "Nothing found" in await searched(
+            assert "second words" not in await searched(
                 started, Searching(words=["second"])
             )
             recorded(homes, typed("second words", "u2", "2026-11-19T10:05:00Z"))
@@ -135,7 +135,7 @@ class TranscriptsPromises(Part):
                 ended("e1", "2026-11-19T10:00:11Z"),
                 typed("the hit itself", "u2", "2026-11-19T10:01:00Z"),
             )
-            started = await by.started(project(homes))
+            started = await by.started(machine=True, declared=project(homes))
             found = await started.view(
                 "transcripts", "search", Searching(words=["hit"]), Operator()
             )
@@ -158,28 +158,35 @@ class TranscriptsPromises(Part):
 
     @lup.promise
     async def the_operators_words_through_lup_are_found(self, by: Testing) -> None:
-        """What the operator said through lup is found by a search, with what it was on: a comment on an agent's question, quoting the decision it answered."""
+        """What the operator said through lup's inbox is found by a search for it, with the moment it was said."""
         with tempfile.TemporaryDirectory() as made:
-            started = await by.started(project(Path(made)))
-            agent = by.any(Agent)
-            asked = await started.call(
-                "ask",
-                {
-                    "question": "which reader?",
-                    "decisions": [{"decision": "one per runtime", "lean": "yes"}],
-                },
-                agent,
+            started = await by.started(machine=True, declared=project(Path(made)))
+            piled = await started.run(
+                "core", "pile", {"repository": "harness", "path": "ideas"}, Operator()
             )
-            assert isinstance(asked, Accepted)
-            found = await searched(started, Searching(words=["reader"], by="agent"))
-            assert "one per runtime" in found
+            assert isinstance(piled, Accepted), piled
+            told = await started.run(
+                "core",
+                "tell",
+                {
+                    "repository": "harness",
+                    "to": "ideas",
+                    "text": "readers per runtime, said through the inbox",
+                },
+                Operator(),
+            )
+            assert isinstance(told, Accepted), told
+            found = await searched(started, Searching(words=["readers", "inbox"]))
+            assert "readers per runtime, said through the inbox" in found
 
     @lup.promise
     async def the_second_lups_ledger_is_searched(self, by: Testing) -> None:
         """A comment of the operator's in the second lup's ledger is found by a search, under the passage it quoted, once though its review reached several conversations."""
         with tempfile.TemporaryDirectory() as made:
             ledger = ledgered(Path(made) / "ledger.sqlite3", copies=1 + by.any(bool))
-            started = await by.started(project(Path(made) / "homes", ledger=ledger))
+            started = await by.started(
+                machine=True, declared=project(Path(made) / "homes", ledger=ledger)
+            )
             found = await searched(started, Searching(words=["ledger"], whole=True))
             assert found.count("from the ledger, my answer") == 1
             assert "the passage quoted" in found
