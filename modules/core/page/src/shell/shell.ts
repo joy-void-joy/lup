@@ -5,8 +5,8 @@
 import { foldEffect, foldedRanges, foldState, unfoldEffect } from "@codemirror/language";
 import { history } from "@codemirror/commands";
 import { EditorState, Facet, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, WidgetType, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { getCM, vim } from "@replit/codemirror-vim";
+import { Decoration, EditorView, ViewPlugin, WidgetType, drawSelection, highlightActiveLine, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { getCM, vim, Vim } from "@replit/codemirror-vim";
 
 import type { Blocks, Comment, Delivered, Draft, Looks, Marked, Standing, Viewing } from "../generated/read";
 import { depthOf, Document, every, foldKind, foldRange, mountedOf, nodeAt, offsetOf, opening, section, viewKey, type Change, type Node } from "../document/tree";
@@ -153,6 +153,8 @@ export class Shell {
                 doc: "",
                 extensions: [
                     vim(),
+                    // vim hides the browser's own selection, and draws its visual mode's through this layer.
+                    drawSelection(),
                     EditorView.lineWrapping,
                     EditorState.changeFilter.of((transaction) => transaction.annotation(fromCore) === true || shell.comments.allows(transaction)),
                     // vim's `u` and Ctrl+R undo and redo what the operator wrote, never what views answered.
@@ -392,6 +394,51 @@ export class Shell {
     lineId(): string | null {
         const node = nodeAt(this.document.root, this.view.state.selection.main.head);
         return node.block?.block === "line" ? node.block.id : null;
+    }
+
+    /**
+     * Return the range vim's visual mode selects, from the first selected line's start to the last's end; none outside
+     * visual mode.
+     */
+    visual(): { from: number; to: number } | null {
+        const vimState = getCM(this.view)?.state.vim as { visualMode?: boolean } | undefined;
+        if (vimState?.visualMode !== true) {
+            return null;
+        }
+        const { from, to } = this.view.state.selection.main;
+        const doc = this.view.state.doc;
+        return { from: doc.lineAt(from).from, to: doc.lineAt(Math.max(from, to - 1)).to };
+    }
+
+    /**
+     * Return each block whose first line `range` holds and that shows, under no closed fold, outermost first: what a
+     * selection acts on, never what it passes over hidden.
+     */
+    blocksIn(range: { from: number; to: number }): Node[] {
+        return every(this.document.root).filter((node) => {
+            if (node.block === null || node.lines === 0) {
+                return false;
+            }
+            const start = offsetOf(node);
+            if (start < range.from || start > range.to) {
+                return false;
+            }
+            for (let at = node.parent; at !== null; at = at.parent) {
+                if (foldKind(at) !== null && !this.isOpen(at)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }
+
+    /** Leave vim's visual mode, the cursor where it is. */
+    unselect(): void {
+        const cm = getCM(this.view);
+        const vimState = cm?.state.vim as { visualMode?: boolean } | undefined;
+        if (cm !== null && vimState?.visualMode === true) {
+            Vim.handleKey(cm, "<Esc>", "mapping");
+        }
     }
 
     /** Return the innermost fold the cursor is in, of the kind named `kind` where one is named. */

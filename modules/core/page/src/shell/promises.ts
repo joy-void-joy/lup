@@ -781,7 +781,7 @@ scenario("Space x on a mark's line in the review keeps it back from the send, an
 });
 
 /** The shell over blocks each offering some of the core's verbs, which Space and their keys mark. */
-const marking: Machine<Running, { readonly marks: readonly { readonly block: string; readonly verb: string; readonly offered: boolean }[] }, Event> = {
+const marking: Machine<Running, { readonly marks: readonly { readonly id: string; readonly block: string; readonly verb: string; readonly offered: boolean; readonly shown: boolean }[] }, Event> = {
     name: "the shell, its blocks offering verbs",
     start(by) {
         const memory = new Memory();
@@ -792,7 +792,11 @@ const marking: Machine<Running, { readonly marks: readonly { readonly block: str
         return { shell: new Shell(parent, root, looks, memory), memory, parent };
     },
     events: fc
-        .constantFrom(..."j k G gg za zR zM zfn".split(" ").map((typed) => [...typed]), ...["d", "x", "t", "fn", "Fn", "Fb"].map((typed) => ["<Space>", ...typed]), ["<Esc>"])
+        .constantFrom(
+            ..."j k G gg za zR zM zfn V v Vj Vjj vj".split(" ").map((typed) => [...typed]),
+            ...["d", "x", "t", "fn", "Fn", "Fb"].map((typed) => ["<Space>", ...typed]),
+            ["<Esc>"],
+        )
         .map((typed): Event => ({ keys: typed })),
     async apply(running, event) {
         if ("keys" in event) {
@@ -804,10 +808,16 @@ const marking: Machine<Running, { readonly marks: readonly { readonly block: str
             marks: running.memory.draft.marks.map((each) => {
                 // The block the core acts on at the send: the first of the mark's id in its view's answer.
                 const node = quotedIn(running.shell.document.root, each.on);
+                let shown = node !== null;
+                for (let at = node?.parent ?? null; at !== null; at = at.parent) {
+                    shown &&= foldKind(at) === null || running.shell.isOpen(at);
+                }
                 return {
+                    id: `${each.id} ${each.offer.verb}`,
                     block: node?.key ?? "",
                     verb: each.offer.verb,
                     offered: node?.block?.offers.some((offer) => offer.verb === each.offer.verb) === true,
+                    shown,
                 };
             }),
         };
@@ -821,3 +831,23 @@ const marking: Machine<Running, { readonly marks: readonly { readonly block: str
 law(marking, "A verb is only ever marked on a block that offers it, and a block holds one mark at most", (step) =>
     step.after.marks.every((each) => each.offered) && new Set(step.after.marks.map((each) => each.block)).size === step.after.marks.length,
 );
+
+law(marking, "A verb's key marks only what shows, never a block a closed fold hides, whether the cursor, a choice or a selection reached it", (step) => {
+    const before = new Set(step.before.marks.map((each) => each.id));
+    return step.after.marks.every((each) => before.has(each.id) || each.shown);
+});
+
+scenario("Space d over a visual selection marks done on each block whose first line it holds that offers it, and leaves visual mode", async (by) => {
+    const count = by.any(fc.integer({ min: 2, max: 4 }));
+    const lines = Array.from({ length: count }, (_, at) => ({ ...lineOf(`l${at}`, `line ${at}`), offers: offersOf(`l${at}`, at === 1 ? [] : ["done"]) }));
+    const { shell: opened, memory, parent } = shellOn(lines);
+    try {
+        opened.go(0);
+        await press(opened, ["V", ...Array.from({ length: count - 1 }, () => "j"), "<Space>", "d"]);
+        expect(opened.state().mode).toBe("normal");
+        expect(memory.draft.marks.map((each) => each.on.block)).toEqual(lines.filter((_, at) => at !== 1).map((each) => each.id));
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
