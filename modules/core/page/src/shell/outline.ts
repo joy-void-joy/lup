@@ -60,12 +60,35 @@ export class Outline {
     readonly shell: Shell;
     readonly #owner: Shell;
     readonly #source: Given;
+    /** What the outline is drawn in. */
+    readonly #parent: HTMLElement;
 
     /** Outline `owner`'s document in `parent`, by a shell `making` makes. */
     constructor(owner: Shell, parent: HTMLElement, making: Making) {
         this.#owner = owner;
+        this.#parent = parent;
         this.#source = new Given(this.#laidOut());
         this.shell = making(parent, this.#source);
+    }
+
+    /** Say whether the outline's pane shows. */
+    shown(): boolean {
+        return !this.#pane().hidden;
+    }
+
+    /** Hide the outline's pane, or show it again, as `\` does; the keys go to the document where they were in the outline. */
+    toggle(): void {
+        const pane = this.#pane();
+        if (!pane.hidden && this.shell.view.hasFocus) {
+            this.#owner.view.focus();
+        }
+        pane.hidden = !pane.hidden;
+        this.#owner.say(pane.hidden ? "the outline is hidden: \\ shows it" : null);
+    }
+
+    /** Return what hides the outline: the page's pane holding it, its title with it, else what it's drawn in. */
+    #pane(): HTMLElement {
+        return this.#parent.closest<HTMLElement>(".lup-pane") ?? this.#parent;
     }
 
     /** Lay the outline out again as the document stands: after each view answers, and each fold opens or closes. */

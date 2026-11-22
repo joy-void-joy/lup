@@ -288,6 +288,18 @@ export const commands: Readonly<Record<string, Command>> = {
             (shell.owner ?? shell).comments.address(shell.owner === null ? null : shell.lineId());
         },
     },
+    /** Hide the outline beside the document, or show it again: `\`. */
+    "overview": {
+        says: "hide the outline beside the document, or show it again",
+        run: (shell) => {
+            const owner = shell.owner ?? shell;
+            if (owner.outline === null) {
+                shell.say("the page has no outline");
+                return;
+            }
+            owner.outline.toggle();
+        },
+    },
     /** Comment on the innermost block at the cursor whole, rather than on one of its lines: Space `c`. */
     "comment-whole": {
         says: "comment on the block the cursor is in, whole",
@@ -525,6 +537,7 @@ export const vimBindings: readonly Bind[] = [
     { keys: "<Space>wl", command: "pane-right", modes: ["normal"] },
     { keys: "<Space>ww", command: "panes", modes: ["normal"] },
     { keys: "<C-k>", command: "palette", modes: ["normal"] },
+    { keys: "\\", command: "overview", modes: ["normal"] },
     { keys: "]n", command: "comment-next", modes: ["normal"] },
     { keys: "[n", command: "comment-previous", modes: ["normal"] },
     { keys: ":w", command: "draft-write", modes: ["normal"] },
