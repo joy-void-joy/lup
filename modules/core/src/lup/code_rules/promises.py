@@ -9,6 +9,7 @@ what the engine was asked, and the files as they're left, never its words
 pyright's program for real.
 """
 
+import asyncio
 import tempfile
 from contextlib import contextmanager
 from functools import cache
@@ -28,12 +29,15 @@ from lup.code_rules import (
     RuleInfo,
     Span,
 )
+from lup.sessions import CallFinished, CallStarting
 from lup.testing import (
     Accepted,
     Answering,
+    Heeded,
     ProgramRun,
     Refused,
     Responding,
+    Started,
     Testing,
 )
 
@@ -553,3 +557,203 @@ class Placing(Model):
 
     ignore: Ignore
     finding: Finding | None = None
+
+
+class Requested(Model):
+    """A request the engine kept running is asked through its client: what the promises read of it."""
+
+    op: Literal["check", "importers"]
+    sources: list[Source] = []
+
+
+class Answered(Model):
+    """The engine kept running's answer, as its client prints it."""
+
+    build: str = ""
+    stale: bool = False
+    error: str | None = None
+    reports: list[FileReport] = []
+
+
+class Warm(Model, Responding):
+    """node, stood in for as the engine kept running for the worktree at `root`: built as `Engine` builds it, started at once, each file's check answered from the file as it stands, a finding of each rule a line names after `flags`, and an importers pass answered with `importing`."""
+
+    root: Path
+    importing: list[Finding] = []
+
+    def answered(self, arguments: list[str], given: bytes | None) -> Answering | None:
+        """Answer the engine's start, a request through its client, or a step of its build."""
+        match arguments:
+            case [_, "start", *_]:
+                return Answering()
+            case [client, _] if Path(client).name == "client.mjs":
+                asked = Requested.model_validate_json(given or b"")
+                reports = (
+                    [self.report(each.path) for each in asked.sources]
+                    if asked.op == "check"
+                    else [
+                        FileReport(path=each.path, findings=[each])
+                        for each in self.importing
+                    ]
+                )
+                return Answering(output=Answered(reports=reports).model_dump_json())
+            case _:
+                return Engine().answered(arguments, given)
+
+    def report(self, path: str) -> FileReport:
+        """Return the findings of the file at `path` as it stands: one of each rule a line names after `flags`."""
+        file = self.root / path
+        lines = file.read_text().splitlines() if file.is_file() else []
+        rules = ["shape", "spelled", "guessed", "reportUndefinedVariable"]
+        return FileReport(
+            path=path,
+            findings=[
+                finding(path, rule, number)
+                for number, text in enumerate(lines, 1)
+                for rule in rules
+                if f"flags {rule}" in text
+            ],
+        )
+
+
+class Ruled(Model):
+    """Which of the stood-in rules a finding is of: one of each category."""
+
+    rule: Literal["shape", "spelled", "guessed"]
+
+
+class Calls(Model):
+    """How many calls an agent makes after a write."""
+
+    count: Annotated[int, Field(ge=1, le=4)]
+
+
+class Quieting(Model):
+    """What `quiet` is given, as it takes it."""
+
+    lift: bool = False
+
+
+class Writing(Model):
+    """A write a promise makes, and the session it's in: the file written, through a file tool's call, its text before and after."""
+
+    root: Path
+    agent: Agent
+    path: str = "main.py"
+
+    async def wrote(self, started: Started, text: str) -> Heeded:
+        """Write `text` to the file through a call, as a session's file tool does, and return what's told beside it."""
+        file = self.root / self.path
+        call = f"call-{len(started.heard.runs)}"
+        await started.happened(
+            CallStarting(agent=self.agent, call=call, tool="Write", writes=[file])
+        )
+        file.write_text(text)
+        return await started.happened(
+            CallFinished(agent=self.agent, call=call, tool="Write", writes=[file])
+        )
+
+    async def ran(self, started: Started) -> Heeded:
+        """Make a call that writes nothing, as running a command does, and return what's told beside it."""
+        call = f"command-{len(started.heard.runs)}"
+        return await started.happened(
+            CallFinished(agent=self.agent, call=call, tool="Bash")
+        )
+
+
+def told(heeded: Heeded, rule: str) -> bool:
+    """Say whether what's told names a finding of `rule`, as the stand-in engine reported it."""
+    return any(f"{rule}: what the check saw" in each for each in heeded.told)
+
+
+class FindingsPromises(Part):
+    """What an agent can count on of what's told right after their writes."""
+
+    @lup.promise
+    async def a_write_is_told_once_what_it_introduced_where_its_rule_says_so(
+        self, by: Testing
+    ) -> None:
+        """A finding a write introduces on the lines it changed is told beside that write where its rule is a design rule, never where it's a spelling rule or a heuristic, and not again to the same conversation while its line stands."""
+        rule = by.any(Ruled).rule
+        agent = by.any(Agent)
+        with worktree() as at:
+            started = await by.started(
+                project(), programs={**standing(at), "node": Warm(root=at.root)}
+            )
+            writing = Writing(root=at.root, agent=agent)
+            first = await writing.wrote(started, f"held = 1  # flags {rule}\n")
+            again = await writing.wrote(
+                started, f"held = 1  # flags {rule}\nmore = 2\n"
+            )
+        assert told(first, rule) == (rule == "shape")
+        assert not told(again, rule)
+
+    @lup.promise
+    async def a_name_used_before_its_import_waits_until_the_writes_pause(
+        self, by: Testing
+    ) -> None:
+        """An undefined name a write leaves isn't told beside it: it's told at the conversation's next call that writes nothing, where it still stands, and never where a write in between took it away."""
+        fixed = by.any(bool)
+        agent = by.any(Agent)
+        with worktree() as at:
+            started = await by.started(
+                project(), programs={**standing(at), "node": Warm(root=at.root)}
+            )
+            writing = Writing(root=at.root, agent=agent)
+            written = await writing.wrote(
+                started, "held = later  # flags reportUndefinedVariable\n"
+            )
+            if fixed:
+                await writing.wrote(started, "later = 1\nheld = later\n")
+            paused = await writing.ran(started)
+        assert not told(written, "reportUndefinedVariable")
+        assert told(paused, "reportUndefinedVariable") == (not fixed)
+
+    @lup.promise
+    async def quiet_holds_back_what_writes_are_told_and_lifting_tells_it_once(
+        self, by: Testing
+    ) -> None:
+        """While an agent is quiet, nothing is told beside their writes; once they lift it, what stands in the files they wrote meanwhile is told beside their next call, and only that once."""
+        agent = by.any(Agent)
+        with worktree() as at:
+            started = await by.started(
+                project(), programs={**standing(at), "node": Warm(root=at.root)}
+            )
+            writing = Writing(root=at.root, agent=agent)
+            await started.run("code-rules", "quiet", Quieting(), agent)
+            quietly = await writing.wrote(started, "held = 1  # flags shape\n")
+            await started.run("code-rules", "quiet", Quieting(lift=True), agent)
+            lifted = await writing.ran(started)
+            after = await writing.ran(started)
+        assert not quietly.told
+        assert told(lifted, "shape")
+        assert not told(after, "shape")
+
+    @lup.promise
+    async def a_type_error_a_write_causes_in_a_file_importing_it_is_told_once_after(
+        self, by: Testing
+    ) -> None:
+        """A type error the engine finds in a file importing what a write changed is never told beside the write, which doesn't wait for the files importing it, and at most once beside the conversation's later calls."""
+        calls = by.any(Calls).count
+        agent = by.any(Agent)
+        with worktree() as at:
+            broken = finding("calling.py", "reportArgumentType", 3)
+            started = await by.started(
+                project(),
+                programs={
+                    **standing(at),
+                    "node": Warm(root=at.root, importing=[broken]),
+                },
+            )
+            writing = Writing(root=at.root, agent=agent)
+            written = await writing.wrote(
+                started, "def doubled(count: str) -> str: ...\n"
+            )
+            times = 0
+            for _ in range(calls):
+                # The pass runs beside the conversation's calls, which may come
+                # before it ends or after.
+                await asyncio.sleep(0)
+                times += told(await writing.ran(started), "reportArgumentType")
+        assert not told(written, "reportArgumentType")
+        assert times <= 1

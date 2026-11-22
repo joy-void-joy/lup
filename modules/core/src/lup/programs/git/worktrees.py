@@ -31,6 +31,15 @@ def nested(name: str) -> bool:
     return name.endswith("/")
 
 
+class Changed(Model):
+    """A file of a worktree that differs from where its branch and another meet: its path, and its bytes there."""
+
+    path: PurePosixPath
+    """From the worktree's root."""
+    before: bytes | None
+    """Its bytes where the two meet; none for a file added since."""
+
+
 class Worktree(Model):
     """A worktree, as git finds it from a directory in it: its root, the repository's common git directory, and whether that repository is bare."""
 
@@ -147,6 +156,25 @@ class Worktree(Model):
             case _:
                 message = f"git can't read {self.root}'s HEAD: {ran.said()}"
                 raise GitError(message)
+
+    async def changed(self, since: str) -> list[Changed]:
+        """List each file of the worktree that differs from where its `HEAD` and `since` meet, with its bytes there, in order: as the files are, committed or not, those deleted since left out.
+
+        Raise `GitError` where git fails, as where `since` names no commit.
+        """
+        base = line(await self.done("merge-base", "HEAD", since))
+        listed = await self.done(
+            "diff", "-z", "--name-only", "--no-renames", "--diff-filter=d", base, "--"
+        )
+
+        async def before(name: str) -> bytes | None:
+            shown = await self.ran("cat-file", "blob", f"{base}:{name}")
+            return shown.output if shown.status == 0 else None
+
+        return [
+            Changed(path=PurePosixPath(name), before=await before(name))
+            for name in sorted(nul_separated(listed.output))
+        ]
 
     async def staged(self) -> str:
         """Return the tree git would commit the worktree's files as, every change and every file it doesn't ignore added, read through an index of its own, the worktree's own left as it is.

@@ -118,6 +118,19 @@ class Visiting(Model):
     repository: str | None = None
 
 
+class Aiming(Model):
+    """A service call the machine's own parts make, to a part that doesn't run on the machine: the service, and the project it names, where it names one."""
+
+    service: str
+    project: Name | None = None
+
+
+class Aimed(Model):
+    """Where such a call goes: the socket of the container whose part answers it."""
+
+    to: Path
+
+
 class Route(Model):
     """Where a call goes, and the call as it's carried, its `by` this part's word."""
 
@@ -258,6 +271,53 @@ class Carrying(Part, machine=True, shared=True):
         if sharing is None:
             return Route(to=None, call=call)
         return Route(to=sharing.listening(), call=call)
+
+    @lup.service
+    async def aimed(self, aiming: Aiming, by: Machine) -> Aimed:
+        """Say where a service call the machine's own parts make goes, for a part that doesn't run on the machine: the container of a part one for the whole machine, as the home repository's plan says; else the container of the project the call names (`lup.within`) running the part serving it.
+
+        Raise `RefusedError` where the part runs one per project and the call
+        names none, the project named runs no part serving it, or that part
+        isn't running.
+        """
+        del by
+        machinewide = self.hosted.serving("service", aiming.service)
+        if (
+            machinewide is not None
+            and machinewide.holds.shared
+            and not machinewide.holds.machine
+        ):
+            sharing = self.holding(machinewide.named())
+            if sharing is None:
+                message = (
+                    f"the service `{aiming.service}` is `{machinewide.named()}`'s, "
+                    "one for the whole machine, which isn't running"
+                )
+                raise RefusedError(message)
+            return Aimed(to=sharing.listening())
+        if aiming.project is None:
+            message = (
+                f"the service `{aiming.service}` is served one per project: name "
+                "which project's with `lup.within`"
+            )
+            raise RefusedError(message)
+        plan = self.plans.get(aiming.project)
+        serving = None if plan is None else plan.serving("service", aiming.service)
+        if serving is None:
+            message = f"{aiming.project} runs no part serving `{aiming.service}`"
+            raise RefusedError(message)
+        placement = next(
+            (
+                each
+                for each in self.placements
+                if each.repository == aiming.project and serving.named() in each.parts
+            ),
+            None,
+        )
+        if placement is None:
+            message = f"{aiming.project}'s `{serving.named()}` isn't running"
+            raise RefusedError(message)
+        return Aimed(to=placement.listening())
 
     def holding(self, part: str) -> Placement | None:
         """Return the container running the part named `part` (`module.Part`) one for the whole machine; none where none does."""

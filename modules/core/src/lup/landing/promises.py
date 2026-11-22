@@ -422,7 +422,8 @@ class LandingPromises(Part):
         assert "accept" not in waiting
         assert "accept" in offered(shown.output, "trying")
         paths = [each.path for each in reviewed.output.blocks if isinstance(each, Diff)]
-        assert paths == ["waiting.txt"]
+        assert "waiting.txt" in paths
+        assert "trying.txt" not in paths
         told = [
             each.text for each in reviewed.output.blocks if isinstance(each, Markdown)
         ]

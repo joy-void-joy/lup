@@ -23,6 +23,7 @@ from pydantic import BaseModel, JsonValue, SerializeAsAny, TypeAdapter
 from lup.doors.parties import Party
 from lup.errors import LupError
 from lup.types import Model
+lazy from lup.doors.parts import Part
 
 type Answer = BaseModel | str | None
 """What a method a party calls through a door answers: a model, words, or
@@ -30,11 +31,11 @@ nothing, as its door allows."""
 
 type Returned = Answer | Template | bool
 """What a method behind any door returns: what a party's call answers, a
-section of guidance's template (`lup.told`), or a law's verdict
+section of guidance's template (`lup.told`), or an invariant's verdict
 (`lup.testing`), neither of which a party calls."""
 
 type Function = Callable[..., Awaitable[Returned] | bool]
-"""A method as a door takes it: async, or, where its door allows, a law's
+"""A method as a door takes it: async, or, where its door allows, an invariant's
 predicate, which answers its verdict at once."""
 
 type Annotation = type | GenericAlias | UnionType | None
@@ -151,7 +152,7 @@ class Taken(Model, arbitrary_types_allowed=True):
     """Its docstring, which describes it: what an agent reads of a tool."""
     model: inspect.Parameter | None
     """The parameter taking its model: a tool's input, a command's arguments or one mark of a send, a
-    command's arguments or a law's value; none where it takes `by` alone, as a
+    command's arguments or an invariant's value; none where it takes `by` alone, as a
     scenario does."""
     by: inspect.Parameter | None
     """The parameter taking who calls it, typed as who may; none where it's left
@@ -368,7 +369,8 @@ class Method(property):
         return partial(self.function, instance)
 
     def __set_name__(self, owner: type, name: str) -> None:
-        """Refuse a name a base of its class gives a field: the field would hide the method."""
+        """Refuse a class that isn't a part, which nothing serves, and a name a base of its class gives a field, which would hide the method."""
+        refuse_unserved(owner, name, self.door)
         refuse_taken(owner, name)
 
     def parties(self) -> list[type[Party]]:
@@ -393,7 +395,7 @@ class Method(property):
         """Run the method of `instance` on `value`, handing it `by` where it takes who calls it.
 
         Raise `DoorError` where it answers a verdict or a template, as only a
-        law or a section of guidance does: no party calls either.
+        invariant or a section of guidance does: no party calls either.
         """
         if self.taken.by is None:
             called = self.function(instance, value)
@@ -403,7 +405,7 @@ class Method(property):
         if isinstance(answered, bool | Template):
             message = (
                 f"`{self.taken.qualified}` answers a verdict or a template, as a "
-                "law or a section of guidance does, which no party calls"
+                "invariant or a section of guidance does, which no party calls"
             )
             raise DoorError(message)
         return answered
@@ -428,6 +430,19 @@ class Served[S, **P, R: Awaitable[Returned] | bool](Method):
         if instance is None:
             return self
         return partial(self.written, instance)
+
+
+def refuse_unserved(owner: type, name: str, door: Door) -> None:
+    """Raise `DoorError` where `owner` isn't a part: nothing serves a method behind a door of another class, so it would go unserved, and a promise unchecked, without a word."""
+    if issubclass(owner, Part):
+        return
+    method = f"{owner.__qualname__}.{name}"
+    message = (
+        f"`{method}` is {door.called}, but `{owner.__qualname__}` isn't a part, so "
+        "nothing serves it: put it in a class deriving from `Part`, which its "
+        "module lists in `parts`"
+    )
+    raise DoorError(message, about=[method])
 
 
 def refuse_taken(owner: type, name: str) -> None:
@@ -475,6 +490,10 @@ class Rejection(Model):
 
     submitted: JsonValue
     reason: str
+    about: list[str] = []
+    """What it's about, by name, as an error's `about` names it: the method or
+    door a call couldn't reach, or what the method refusing named; none where
+    it names nothing. A caller reads these rather than the reason's words."""
 
 
 class Accepted(Model):

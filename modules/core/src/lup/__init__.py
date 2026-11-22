@@ -56,9 +56,10 @@ from lup.doors.parts import (
     Runtime,
     Secret,
     SshAgent,
+    State,
     UnrunError,
 )
-from lup.doors.service import UncarriedError, heeded, service
+from lup.doors.service import UncarriedError, heeded, service, within
 from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.gate.steps import Step, Steps
@@ -157,6 +158,7 @@ __all__ = [
     "Span",
     "SshAgent",
     "Starting",
+    "State",
     "Step",
     "Steps",
     "Stopping",
@@ -176,4 +178,5 @@ __all__ = [
     "service",
     "tool",
     "view",
+    "within",
 ]

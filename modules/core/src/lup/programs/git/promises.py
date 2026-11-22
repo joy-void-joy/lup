@@ -206,6 +206,44 @@ class GitPromises(lup.Part):
             assert after.tracks
 
     @lup.promise
+    async def changed_is_each_file_since_where_the_branch_left(
+        self, by: Testing
+    ) -> None:
+        """A worktree's changed files since another branch are each file that differs from where the two meet, as the files are, committed or not, with its bytes there: none for a file added since, and a file deleted since left out."""
+        with scratch() as root:
+            worktree = GIT.made(root / "clone")
+            GIT.committed(
+                worktree, {"kept.py": "k\n", "edited.py": "e\n", "gone.py": "g\n"}
+            )
+            GIT.git("switch", "--quiet", "-c", "side", cwd=worktree)
+            (worktree / "gone.py").unlink()
+            GIT.committed(worktree, {"edited.py": "e2\n", "added.py": "a\n"})
+            GIT.git("switch", "--quiet", "dev", cwd=worktree)
+            GIT.committed(worktree, {"elsewhere.py": "x\n"})
+            GIT.git("switch", "--quiet", "side", cwd=worktree)
+            (worktree / "kept.py").write_text("k2\n")
+
+            async def asked() -> list[lup.programs.git.Changed]:
+                found = await lup.programs.git.Git.located(worktree)
+                assert found is not None
+                return await found.changed(since="dev")
+
+            changed = looped(asked)
+            edited = lup.programs.git.Changed(
+                path=PurePosixPath("edited.py"), before=b"e\n"
+            )
+            kept = lup.programs.git.Changed(
+                path=PurePosixPath("kept.py"), before=b"k\n"
+            )
+            added = lup.programs.git.Changed(
+                path=PurePosixPath("added.py"), before=None
+            )
+            assert all(each in changed for each in [edited, kept, added])
+            assert all(
+                each.path.name not in ["gone.py", "elsewhere.py"] for each in changed
+            )
+
+    @lup.promise
     async def a_store_reads_its_own_config_whatever_a_room_plants(
         self, by: Testing
     ) -> None:

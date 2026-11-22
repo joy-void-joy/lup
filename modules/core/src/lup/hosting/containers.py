@@ -380,7 +380,8 @@ class Containers(Part, machine=True, shared=True):
         del by
         ran = await self.podman.ran("stop", "--ignore", "--time=10", named.name)
         if ran.status != 0:
-            message = f"podman couldn't stop {named.name}: {ran.said()}"
+            said = ran.said() or ran.text().strip() or "it said nothing"
+            message = f"podman couldn't stop {named.name} (status {ran.status}): {said}"
             raise ContainerError(message)
         self.running = [each for each in self.running if each.spec.name != named.name]
 
