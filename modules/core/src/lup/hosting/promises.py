@@ -50,6 +50,8 @@ class Planned(Model):
     services: list[str] = []
     here: list[str] = []
     """Commands of the operator's that `lup` answers where it's typed."""
+    commands: list[str] = []
+    """Commands of the operator's carried to where the part runs."""
 
     def plan(self) -> JsonValue:
         """Return it as a plan says it, as JSON: promises read lup's plan only through what crosses."""
@@ -62,6 +64,10 @@ class Planned(Model):
             *(
                 {"door": "command", "name": name, "parties": ["Operator"], "here": True}
                 for name in self.here
+            ),
+            *(
+                {"door": "command", "name": name, "parties": ["Operator"]}
+                for name in self.commands
             ),
         ]
         return {
@@ -1467,7 +1473,7 @@ class HerePromises(Part):
     async def a_command_answered_where_typed_is_never_carried(
         self, by: Testing
     ) -> None:
-        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever."""
+        """A call to a command `lup` answers where it's typed, over that worktree's declaration, is refused by the machine rather than carried to the project's container, where it would mean nothing; the project's other calls are carried as ever, another command of the same part's among them."""
         command = by.any(HereCommand).name
         started = await by.started(
             lup.testing.Repository(declaration=HOME),
@@ -1475,9 +1481,27 @@ class HerePromises(Part):
             machine=True,
         )
         plan = plan_of(
-            Planned(module="notes", part="Notes", tools=["note"], here=[command])
+            Planned(
+                module="notes",
+                part="Notes",
+                tools=["note"],
+                here=[command],
+                commands=["tidy"],
+            )
         )
         directory = await placed(started, "harmon", plan, ["notes.Notes"])
+        other: JsonValue = {
+            "format": 1,
+            "kind": "command",
+            "module": "notes",
+            "command": "tidy",
+            "given": {},
+        }
+        alongside = await started.serve(
+            "routed", {"directory": directory, "call": other}, Machine()
+        )
+        assert isinstance(alongside, Accepted)
+        assert json.loads(alongside.answer())["to"] is not None
         here: JsonValue = {
             "format": 1,
             "kind": "command",
@@ -1603,6 +1627,9 @@ class MachinewidePromises(Part):
         assert data
         assert not any("ro=true" in each for each in data)
         assert not [each for each in mounts if "Keeper" in each]
+        status = await started.run("hosting", "status", {}, lup.Operator())
+        assert isinstance(status, Accepted)
+        assert container in status.answer()
         project = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])
         await started.serve(
             "placed",
@@ -1615,3 +1642,37 @@ class MachinewidePromises(Part):
         )
         assert isinstance(hosted, Accepted)
         assert json.loads(hosted.answer())["to"] is not None
+
+
+class Aim(Model):
+    """Which project the machine's own call names, as a promise draws it: one running the part, another, or none."""
+
+    project: Literal["harmon", "story", "unknown"] | None
+
+
+class AimingPromises(Part):
+    """What the operator can count on of the machine calling one project's part: it reaches that project's container, and no other."""
+
+    @lup.promise
+    async def the_machines_call_reaches_the_project_it_names(self, by: Testing) -> None:
+        """A service call the machine's own parts make to a part one per project goes to the container of the project the call names, never another project's: one naming no project, or a project running no such part, is refused; and only the machine's own parts may aim one."""
+        aim = by.any(Aim).project
+        started = await by.started(
+            lup.testing.Repository(declaration=HOME),
+            programs={"podman": PODMAN},
+            machine=True,
+        )
+        served = plan_of(Planned(module="remote", part="Remotes", services=["pushed"]))
+        harmon = await placed(started, "harmon", served, ["remote.Remotes"])
+        story = await placed(started, "story", served, ["remote.Remotes"])
+        aiming: JsonValue = {"service": "pushed", "project": aim}
+        aimed = await started.serve("aimed", aiming, Machine())
+        refused = await started.serve("aimed", aiming, by.any(Agent))
+        assert isinstance(refused, Refused)
+        match aim:
+            case "harmon" | "story":
+                assert isinstance(aimed, Accepted)
+                own = harmon if aim == "harmon" else story
+                assert json.loads(aimed.answer())["to"] == f"{own}/listening.sock"
+            case _:
+                assert isinstance(aimed, Refused)

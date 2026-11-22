@@ -55,7 +55,7 @@ from lup.doors.parts import (
     State,
     UnrunError,
 )
-from lup.doors.service import UncarriedError, service
+from lup.doors.service import UncarriedError, service, within
 from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.gate.steps import Step, Steps
@@ -170,4 +170,5 @@ __all__ = [
     "service",
     "tool",
     "view",
+    "within",
 ]

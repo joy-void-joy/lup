@@ -527,9 +527,14 @@ class Projects(Part, machine=True, shared=True):
 
     @lup.command
     async def status(self, asking: Statusing, by: Operator) -> str:
-        """Say what the machine runs: each project open, the commit it runs, each of its containers, whether it's running and where what it prints goes, and the parts waiting for a secret; and each project registered that isn't open."""
+        """Say what the machine runs: the containers of its parts one for the whole machine, then each project open, the commit it runs, each of its containers, whether it's running and where what it prints goes, and the parts waiting for a secret; and each project registered that isn't open."""
         del asking, by
-        alive = (await Containers.alive(Clearing())).names if self.projects else []
+        shared = self.machinewides
+        alive = (
+            (await Containers.alive(Clearing())).names
+            if self.projects or shared.containers
+            else []
+        )
 
         def container(name: str) -> str:
             state = "running" if name in alive else "ended"
@@ -549,6 +554,19 @@ class Projects(Part, machine=True, shared=True):
             )
             for each in self.projects.values()
         ]
+        machine = (
+            [
+                "the machine's parts one for the whole machine run in"
+                + (
+                    f", waiting on a secret: {', '.join(shared.waiting)}"
+                    if shared.waiting
+                    else ""
+                ),
+                *(container(name) for name in shared.containers),
+            ]
+            if shared.containers or shared.waiting
+            else []
+        )
         closed = [
             f"{repository} is registered, and not open"
             + (
@@ -559,7 +577,9 @@ class Projects(Part, machine=True, shared=True):
             for repository in self.kept()
             if repository not in self.projects
         ]
-        return "\n".join([*running, *closed]) or "nothing is registered or open"
+        return (
+            "\n".join([*machine, *running, *closed]) or "nothing is registered or open"
+        )
 
     def output(self, container: str) -> Path:
         """Return the file what the container named `container` prints goes to, in memory, which no container mounts."""
