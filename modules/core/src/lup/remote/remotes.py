@@ -29,12 +29,12 @@ import lup
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Codebase, Machine
 from lup.doors.parts import Declared, GitDirectory, Part, Program, SshAgent
-from lup.landing.module import Landing
 from lup.programs.git.answers import line, nul_separated, tab_separated
 from lup.programs.git.running import Git, unconfigured
 from lup.programs.git.stores import Store
 from lup.publishing.events import Changed, Commit, Line, Publishing, Push
 from lup.types import Model
+lazy from lup.landing.module import Landing
 lazy from lup.remote.module import Remote
 
 
@@ -504,10 +504,13 @@ class Remotes(Part):
                 "which moves only when the operator accepts a landing: land your "
                 "branch with `land`"
             )
+        leased = next(
+            (each for each in updates.leases if each.ref == destination), None
+        )
         forced = (
             updates.force
             or update.forced
-            or any(each.ref == destination for each in updates.leases)
+            or (leased is not None and not await self.forward(leased, update))
         )
         if (
             update.source is not None
@@ -523,6 +526,17 @@ class Remotes(Part):
         if update.source is None:
             return await self.undeletable(update, updates, held)
         return None
+
+    async def forward(self, leased: Lease, update: Update) -> bool:
+        """Say whether `update` under `leased` is a fast-forward: its ref isn't on the remote yet, or the object it's to name holds the tip it's leased on, as the operator's accept pushes a merge onto the tip it read."""
+        if update.source is None:
+            return False
+        if int(leased.expected, 16) == 0:
+            return True
+        try:
+            return await self.store().holds(leased.expected, update.source)
+        except RefusedError:
+            return False
 
     async def undeletable(
         self, update: Update, updates: Updates, held: list[Ref]
