@@ -30,6 +30,7 @@ from tenacity import (
 )
 
 import lup
+from lup.command_line.filled import Common, Repository
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Machine, Operator
@@ -62,8 +63,8 @@ PLANS = TypeAdapter[Plan](Plan)
 class Opening(Model):
     """A project to run: its repository, as lup names it, where git keeps it, and its declaration."""
 
-    repository: Name
-    common: Path
+    repository: Repository
+    common: Common
     """Its common git directory on the machine, which the commit approved is
     written out from."""
     declaration: Path = Path("lup_project.py")

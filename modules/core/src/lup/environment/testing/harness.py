@@ -20,7 +20,13 @@ from typing import get_args, get_origin, override
 lazy from datetime import timedelta
 
 from hypothesis import strategies as st
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    JsonValue,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+)
 from pydantic.fields import FieldInfo
 
 from lup.core import Core
@@ -48,7 +54,7 @@ from lup.environment.running.planning import plan_of
 from lup.environment.shell import viewed
 from lup.environment.shell.server import Dashboard, Over, Session, Socket
 from lup.environment.told import rendered
-from lup.running.plan import Plan
+from lup.running.plan import Name, Plan
 from lup.shell.looks import Looks
 from lup.shell.wire import Sent as Frame
 from lup.shell.wire import Told
@@ -95,6 +101,18 @@ JSON = st.recursive(
 
 # lup: ignore("reportArgumentType", why="pydantic types `JsonValue` as a union for a type checker, and makes it the type alias hypothesis registers at run time")
 st.register_type_strategy(JsonValue, JSON)
+
+NAMES = st.from_regex(
+    next(
+        each.pattern
+        for each in get_args(Name.__value__)
+        if isinstance(each, StringConstraints) and each.pattern is not None
+    ),
+    fullmatch=True,
+)
+"""Every name the machine makes a directory's or a container's name from, as a run draws one where a door or a promise takes `Name`, a repository's among them: hypothesis reads none of pydantic's constraints on a string, so it would draw names lup refuses. Drawn from the pattern `Name` itself holds, so the two can't disagree."""
+
+st.register_type_strategy(Name, NAMES)
 
 
 class Run(MutableModel, arbitrary_types_allowed=True):
@@ -681,6 +699,7 @@ class Harness(Testing, arbitrary_types_allowed=True):
         )
         planner = Planner(project=project)
         return Started(
+            repository=repository,
             modules=reached.modules,
             specs=reached.tools(),
             planning=planner,

@@ -5,7 +5,8 @@ the declaration's grammar (`Module`, `Modules`, `Project`, and the selections an
 layers a module's parts are written in, and the profiles a repository's sessions
 run on), and the doors a module's methods are
 reached through (`lup.tool`, `lup.service`, `lup.command`, `lup.on`,
-`lup.promise`), with the parties a method's `by` names, lup's events,
+`lup.promise`), with the parties a method's `by` names, the fields the command
+line fills from where it's typed (`Repository`, `Common`), lup's events,
 and the parts a module is made of (`Part`, listed in its `Parts`, holding its
 `Secret`s, its `Data` and what lasts while it runs, its `Runtime`, what
 every module declares, `Declared`, and what the operator's machine lends it,
@@ -26,6 +27,7 @@ name: alone, its names would read as lup's own (`lup.run`).
 each module lists its promises, which import `lup` itself.
 """
 
+from lup.command_line.filled import Common, Repository
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Layer, Named, Selection
 from lup.declaration.module import Module, Modules
@@ -103,6 +105,7 @@ __all__ = [
     "Codebase",
     "Commented",
     "Commenting",
+    "Common",
     "Core",
     "Data",
     "Declared",
@@ -151,6 +154,7 @@ __all__ = [
     "ProjectError",
     "Recorded",
     "RefusedError",
+    "Repository",
     "Runtime",
     "RuntimeDefaults",
     "Secret",

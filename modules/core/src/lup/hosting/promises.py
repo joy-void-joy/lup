@@ -395,13 +395,13 @@ class HostingPromises(Part):
         await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "token", "value": kept.value},
+            {"repository": "harmon", "name": "token", "value": kept.value},
             operator,
         )
         await started.run(
             "hosting",
             "keep",
-            {"project": "story", "name": "token", "value": other.value},
+            {"repository": "story", "name": "token", "value": other.value},
             operator,
         )
         held = await started.serve(
@@ -429,7 +429,7 @@ class HostingPromises(Part):
         given = await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "token", "value": "x"},
+            {"repository": "harmon", "name": "token", "value": "x"},
             caller,
         )
         assert isinstance(held, Refused)
@@ -609,7 +609,7 @@ class HostingPromises(Part):
             await started.run(
                 "hosting",
                 "keep",
-                {"project": "harmon", "name": "key", "value": "k"},
+                {"repository": "harmon", "name": "key", "value": "k"},
                 lup.Operator(),
             )
         opened = await started.serve("opened", Opens().given(), Machine())
@@ -720,7 +720,7 @@ class HostingPromises(Part):
         await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "key", "value": "k"},
+            {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
         )
         opened = await started.serve("opened", Opens().given(), Machine())
@@ -1042,7 +1042,7 @@ class ApprovalsPromises(Part):
             lup.testing.Repository(declaration=HOME), machine=True
         )
         for each in approvals:
-            asked = {"project": "harmon", "commit": each.commit}
+            asked = {"repository": "harmon", "commit": each.commit}
             if each.landing:
                 await started.serve("landed", asked, Machine())
             else:
@@ -1059,7 +1059,7 @@ class ApprovalsPromises(Part):
         started = await by.started(
             lup.testing.Repository(declaration=HOME), machine=True
         )
-        asked = {"project": "harmon", "commit": by.any(Approved).commit}
+        asked = {"repository": "harmon", "commit": by.any(Approved).commit}
         approved = await started.run("hosting", "approve", asked, caller)
         landed = await started.serve("landed", asked, caller)
         read = await started.serve("approval", {"project": "harmon"}, caller)
@@ -1086,7 +1086,7 @@ class ApprovalsPromises(Part):
         await started.run(
             "hosting",
             "approve",
-            {"project": "harmon", "commit": before.commit},
+            {"repository": "harmon", "commit": before.commit},
             lup.Operator(),
         )
         plan = plan_of(
@@ -1165,7 +1165,7 @@ async def started_approved(
     await started.run(
         "hosting",
         "approve",
-        {"project": "harmon", "commit": approving.commit},
+        {"repository": "harmon", "commit": approving.commit},
         lup.Operator(),
     )
     return started
@@ -1231,7 +1231,7 @@ class ProjectsPromises(Part):
             await started.run(
                 "hosting",
                 "approve",
-                {"project": "harmon", "commit": each.commit},
+                {"repository": "harmon", "commit": each.commit},
                 lup.Operator(),
             )
         opened = await started.serve("opened", Opens().given(), Machine())
@@ -1254,7 +1254,7 @@ class ProjectsPromises(Part):
         await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "key", "value": "k"},
+            {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
         )
         first = await started.serve("opened", Opens().given(), Machine())
@@ -1312,7 +1312,7 @@ class ProjectsPromises(Part):
         await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "key", "value": "k"},
+            {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
         )
         first = await started.serve("opened", Opens().given(), Machine())
@@ -1347,7 +1347,7 @@ class ProjectsPromises(Part):
         await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "key", "value": "k"},
+            {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
         )
         first = await started.serve("opened", Opens().given(), Machine())
@@ -1553,7 +1553,7 @@ class WithoutPromises(Part):
         kept = await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "token", "value": "t"},
+            {"repository": "harmon", "name": "token", "value": "t"},
             lup.Operator(),
         )
         status = await started.run("hosting", "status", {}, lup.Operator())
@@ -1571,7 +1571,7 @@ class WithoutPromises(Part):
         await started.run(
             "hosting",
             "keep",
-            {"project": "harmon", "name": "key", "value": "k"},
+            {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
         )
         opened = await started.serve("opened", Opens().given(), Machine())

@@ -20,6 +20,7 @@ lazy from pathlib import Path
 from pydantic import TypeAdapter
 
 import lup
+from lup.command_line.filled import Repository
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part
 from lup.hosting.trees import Change, Commit, Comparing, Trees
@@ -28,10 +29,10 @@ from lup.types import Model
 
 
 class Approving(Model):
-    """A commit of a project to approve to run."""
+    """A commit of a repository's to approve to run."""
 
-    project: Name
     commit: Commit
+    repository: Repository
 
 
 class Approval(Model):
@@ -122,8 +123,8 @@ class Approvals(Part, machine=True, shared=True):
 
     def kept_with(self, approving: Approving, approval: Approval) -> None:
         """Keep `approval` of `approving`'s project after those before it."""
-        file = self.records.path / f"{approving.project}.json"
-        kept = [*self.kept(approving.project), approval]
+        file = self.records.path / f"{approving.repository}.json"
+        kept = [*self.kept(approving.repository), approval]
         file.write_bytes(APPROVALS.dump_json(kept))
 
     @lup.service
@@ -137,7 +138,7 @@ class Approvals(Part, machine=True, shared=True):
         """Approve a commit of a project to run, as you answer the question asked before it does."""
         del by
         self.kept_with(approving, Approval(commit=approving.commit, how="asked"))
-        return f"approved {approving.commit} of {approving.project} to run"
+        return f"approved {approving.commit} of {approving.repository} to run"
 
     @lup.service
     async def approval(self, asking: Asking, by: Machine) -> Approved:

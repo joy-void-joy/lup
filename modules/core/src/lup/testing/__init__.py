@@ -10,6 +10,7 @@ promise door, `lup.promise`. Checking promises is the environment's
 """
 
 from lup.command_line.answering import Typed
+from lup.command_line.filled import TypedIn
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.events import Heeded
 from lup.doors.tool import ToolSpec
@@ -100,6 +101,7 @@ __all__ = [
     "ToolCall",
     "ToolSpec",
     "Typed",
+    "TypedIn",
     "Unanswered",
     "Unwatch",
     "Viewed",

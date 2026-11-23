@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 from annotated_types import Ge, Lt
 from pydantic import AwareDatetime, BaseModel, JsonValue
 
+from lup.command_line.filled import Repository
 from lup.doors.parties import Agent, Party
 from lup.inbox.records import FRICTIONS, Decision, Item, Ruling, Tone
 from lup.types import Model
@@ -188,7 +189,7 @@ class Reached(Model):
 class Addressing(Model):
     """The operator's words to a party of a repository: an agent, or a pile, where they open a concern."""
 
-    repository: str
+    repository: Repository
     to: str
     text: str
 
@@ -196,7 +197,7 @@ class Addressing(Model):
 class Clearing(Model):
     """What the operator clears: an item or a concern by its number, or a party's buffer by its name."""
 
-    repository: str
+    repository: Repository
     what: str
 
 
@@ -210,7 +211,7 @@ class Declining(Model):
 class Piling(Model):
     """A pile the operator makes, by its path."""
 
-    repository: str
+    repository: Repository
     path: str
 
 
@@ -221,7 +222,7 @@ class Converting(Model):
     """The second lup's ledger: its SQLite file, read and never written."""
     named: str
     """The repository as the ledger names it: the path of its git directory."""
-    repository: str
+    repository: Repository
     """The repository as this lup names it, whose inbox they're brought into."""
 
 
@@ -441,13 +442,13 @@ class SaidSince(Model):
 class PartiesOf(Model):
     """A repository whose parties to show."""
 
-    repository: str
+    repository: Repository
 
 
 class PartyOf(Model):
     """A party whose buffer to show: a repository's, by its name, as `@` cites it."""
 
-    repository: str
+    repository: Repository
     name: str
 
 

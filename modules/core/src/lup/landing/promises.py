@@ -162,16 +162,16 @@ class LandingAsked(Model):
 
 
 class Naming(Model):
-    """A landing, by its project and its branch."""
+    """A landing, by its repository and its branch."""
 
-    project: str = PROJECT
+    repository: str = PROJECT
     branch: str
 
 
 class Reviewing(Model):
     """A landing the operator says yes to, at the tip whose review they read."""
 
-    project: str = PROJECT
+    repository: str = PROJECT
     branch: str
     tip: str
 
@@ -195,16 +195,16 @@ class Approving(Model):
 
 
 class Approval(Model):
-    """A commit of the project the operator approves to run."""
+    """A commit of the repository the operator approves to run."""
 
-    project: str = PROJECT
+    repository: str = PROJECT
     commit: str
 
 
 class TrialOf(Model):
-    """A project whose landings to show."""
+    """A repository whose landings to show."""
 
-    project: str = PROJECT
+    repository: str = PROJECT
 
 
 class Nothing(Model):

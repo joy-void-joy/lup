@@ -25,6 +25,7 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 
 import lup
+from lup.command_line.filled import Repository
 from lup.doors.door import RefusedError
 from lup.doors.events import Heeded, Starting
 from lup.doors.parties import Agent, Machine, Operator
@@ -118,7 +119,7 @@ SESSIONS = TypeAdapter(dict[str, Session])
 class NewSession(Model):
     """A session to start: in which project, on which runtime, called what, where, and the first words it's told."""
 
-    repository: str
+    repository: Repository
     """The project, as lup names it: one running (`lup hosting open`)."""
     runtime: str = "claude"
     """The runtime, by lup's name for it: `claude` or `codex`."""

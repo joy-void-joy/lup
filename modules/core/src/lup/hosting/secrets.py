@@ -11,6 +11,7 @@ from pydantic import Field, TypeAdapter
 from pydantic_settings import EnvSettingsSource
 
 import lup
+from lup.command_line.filled import Repository
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part, variable
 from lup.running.plan import Name
@@ -34,11 +35,11 @@ class Values(Model):
 
 
 class Keeping(Model):
-    """A secret of a project the operator gives, to keep under its name."""
+    """A secret of a repository's the operator gives, to keep under its name."""
 
-    project: Name
     name: str
     value: str = Field(repr=False)
+    repository: Repository
 
 
 class Overrides(Settings):
@@ -87,9 +88,9 @@ class Secrets(Part, machine=True, shared=True):
         """
         del by
         self.store.path.chmod(0o700)
-        kept = {**self.kept_for(keeping.project), keeping.name: keeping.value}
-        file = self.store.path / f"{keeping.project}.json"
+        kept = {**self.kept_for(keeping.repository), keeping.name: keeping.value}
+        file = self.store.path / f"{keeping.repository}.json"
         file.touch(mode=0o600)
         file.chmod(0o600)
         file.write_bytes(STORED.dump_json(kept))
-        return f"kept `{keeping.name}` for {keeping.project}"
+        return f"kept `{keeping.name}` for {keeping.repository}"

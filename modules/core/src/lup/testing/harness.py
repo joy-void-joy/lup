@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, Field, JsonValue, SerializeAsAny
 
 from lup.command_line.answering import Answerer, Here, Offered, Typed
+from lup.command_line.filled import TypedIn
 from lup.declaration.module import Module
 from lup.doors.door import Accepted, Refused
 from lup.doors.events import Event, Heeded
@@ -327,6 +328,9 @@ class Started(Model, arbitrary_types_allowed=True):
     call, and one that doesn't hold raises `BrokenInvariantError`.
     """
 
+    repository: str
+    """The repository whose code it runs as, in whose worktree the command
+    line is typed unless a promise says otherwise (`typed`)."""
     modules: list[Module]
     """The modules it's made of, every layer applied, in order."""
     specs: list[ToolSpec]
@@ -431,6 +435,7 @@ class Started(Model, arbitrary_types_allowed=True):
         command: list[str] | None = None,
         *,
         here: Started | None = None,
+        typed_in: TypedIn | None = None,
     ) -> Typed:
         """Type `words` on the command line, `lup`, as `by` does in their terminal or their room, and say what it did: what it printed and how it ended, what the help it showed listed, and the call it made.
 
@@ -443,18 +448,22 @@ class Started(Model, arbitrary_types_allowed=True):
         it's typed in: a command this lup's plan marks to run where it's typed
         is made through `here`'s doors instead (`Here`). Raise `BlockError`
         where a view it reads names a kind nobody declares, as `view` does.
+        It's typed where `typed_in` says, or, left out, in this lup's repository's
+        worktree, which fills a field naming a repository that's left out
+        (`lup.command_line.filled`).
         """
+        typing = typed_in or TypedIn(directory=Path.cwd(), repository=self.repository)
         harnessed = Harnessed(started=self, by=by, offering=command)
         top = CORE if command is None else next(iter(command), None)
         if here is None:
-            return await line.typed(words, harnessed, "lup", top=top)
+            return await line.typed(words, harnessed, "lup", typed_in=typing, top=top)
         worktree = here
 
         def made(party: Caller) -> Answerer:
             return Harnessed(started=worktree, by=party, offering=command)
 
         return await line.typed(
-            words, Here(through=harnessed, here=made), "lup", top=top
+            words, Here(through=harnessed, here=made), "lup", typed_in=typing, top=top
         )
 
 
