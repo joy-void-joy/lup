@@ -280,6 +280,7 @@ class Comment(Item):
 
     def passage(self) -> str:
         """Return the passage it's on, as it read: of its lines, from `start` to `end`."""
+        # lup: ignore("string-slice", why="the offsets are the ones the page counted in these very lines, kept beside them, so the passage is their own characters")
         return "\n".join(self.lines)[self.start : self.end]
 
 
