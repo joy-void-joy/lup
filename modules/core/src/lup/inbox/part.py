@@ -774,8 +774,9 @@ class Speaking(Part):
     async def inbox(self, said: Reading, by: Agent) -> str:
         """Read the repository's inbox, changing nothing.
 
-        With `number`, one item or concern whole; without, what waits on the
-        operator and the concerns you hold.
+        With `number`, one item or concern whole, each of an item's parts with
+        its id (`@12.3`); with `part` too, that part of it alone; without, what
+        waits on the operator and the concerns you hold.
         """
         return await Inboxes.read(Spoken(agent=by, said=said))
 

@@ -51,7 +51,7 @@ class Notes(Module):
 
 They hold nothing of any module, so every view is drawn, folded and commented on the same way:
 - **`Line`,** made of `Span`s, each in a tone. A span may also tick (`Ticking`: time since a moment, said again by the page as it passes, so nothing is answered again for a clock), measure (`Gauge`: how full something is), or refer (`Viewing`: the view that shows what it names, which following it opens: a concern, an agent, a file).
-- **`Markdown`,** in a tone.
+- **`Markdown`,** in a tone. Its `anchors` say what its lines are cited by, each from its line to the next (`Anchor`: `@12.3`, an item's part): the page's header says the one the cursor's line is under, and the text form says each after its line. A block cited line by line stays one block, so a selection, a comment and `]]` take it as one; a comment says where in the block's lines it starts (`Commenting.line`), so its module knows what's cited there.
 - **`Fold`:** a summary line and what's under it, of a fold kind; its content given, or read from a view as it opens (`Viewing`), so a long view sends only what's open. Whether it starts open is its kind's, unless its view says otherwise (`open`).
 - **`Code` and `Diff`:** a file as it stands, or as it changed, under a fold of the shell's `file` kind, its bodies in `body` folds and its runs of unchanged lines in `lines` folds, with `Mark`s on its lines of kinds its module declares.
 
