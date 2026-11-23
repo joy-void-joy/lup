@@ -33,6 +33,8 @@ export class Given implements Source {
 
     mark(_marked: Marked): void {}
 
+    seen(_viewing: Viewing, _block: string): void {}
+
     erase(_id: string): void {}
 
     send(): void {}

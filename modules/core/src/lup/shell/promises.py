@@ -57,6 +57,7 @@ from lup.testing import (
     Repository,
     Responding,
     Reviewed,
+    Seen,
     Send,
     Started,
     Testing,
@@ -95,6 +96,9 @@ class NotesPart(Part):
     """What each comment it took said, in the order they came."""
     cleared: list[int] = []
     """The number of each note cleared, in the order they were."""
+    sighted: list[int] = []
+    """The number of each note that's been on the operator's screen, in the
+    order they were."""
     released: asyncio.Event = Field(default_factory=asyncio.Event)
     """Set once the comments it holds may go through, where its module holds
     them (`Notes.holding`)."""
@@ -110,6 +114,7 @@ class NotesPart(Part):
                     summary=[Span(text=title, tone="title")],
                     content=Viewing.of(NotesPart.note, NoteOf(number=number)),
                     reaches=Pile(repository="harness", path=f"notes/note-{number}"),
+                    sighted=Offer.of(NotesPart.see, Clearing(number=number)),
                     offers=[
                         Offer.of(NotesPart.clear, Clearing(number=number)),
                         Offer.of(NotesPart.comment, NoteOf(number=number)),
@@ -170,6 +175,23 @@ class NotesPart(Part):
             f"{self.module.titled} {number}"
             for number in range(1, self.module.notes + 1)
         ]
+
+    @lup.command(verb="seen", says="seen")
+    async def see(self, seeing: Clearing, by: lup.Operator) -> str:
+        """Say a note's been on the operator's screen."""
+        self.sighted.append(seeing.number)
+        return f"seen {seeing.number}"
+
+    @lup.view
+    async def seen(self, of: PileOf) -> Blocks:
+        """Show each note that's been on the operator's screen, a line each, in the order they were."""
+        return Blocks.of(
+            *(
+                Line(id=str(at), spans=[Span(text=str(number))])
+                for at, number in enumerate(self.sighted)
+            ),
+            summary=[Span(text=f"{of.pile} · {len(self.sighted)} seen")],
+        )
 
     @lup.command(verb="done", says="clear it")
     async def clear(self, clearing: Clearing, by: lup.Operator) -> str:
@@ -493,6 +515,26 @@ class ShellPromises(Part):
         assert sent.went == going
         assert [each.id for each in drafted.draft.marks] == [f"m{notes}"]
         assert await gone(started) == list(range(1, notes))
+        await page.leave()
+
+    @lup.promise
+    async def a_block_seen_runs_what_being_seen_does(self, by: Testing) -> None:
+        """A block the page says has been on the operator's screen runs what being seen does, as the block offers it when the server reads it, and the views the page watches are read again; a block that's gone runs nothing."""
+        notes = by.any(Counted).count
+        started = await by.started(noted(notes))
+        page = await opened(started)
+        seeing = Viewing(module="notes", view="seen", given={"pile": "p"})
+        await page.say(Watch(watch=5, viewing=seeing))
+        told = await heard(page)
+        assert isinstance(told, Answered)
+        assert told.blocks.blocks == []
+        await page.say(Seen(viewing=pile_of("p"), block="gone"))
+        for number in range(1, notes + 1):
+            await page.say(Seen(viewing=pile_of("p"), block=f"note-{number}"))
+        while len(told.blocks.blocks) < notes:
+            told = await heard(page)
+            assert isinstance(told, Answered), told
+        assert sorted(await looked(started)) == list(range(1, notes + 1))
         await page.leave()
 
     @lup.promise
@@ -821,6 +863,18 @@ async def taken(started: Started) -> list[str]:
 async def gone(started: Started) -> list[int]:
     """Return the number of each note the pile cleared, as its `gone` view shows it."""
     answered = await started.view("notes", "gone", PileOf(pile="p"), Operator())
+    assert isinstance(answered, Accepted)
+    assert isinstance(answered.output, Blocks)
+    return [
+        int("".join(span.text for span in each.spans))
+        for each in answered.output.blocks
+        if isinstance(each, Line)
+    ]
+
+
+async def looked(started: Started) -> list[int]:
+    """Return the number of each note that's been on the operator's screen, as the pile's `seen` view shows it."""
+    answered = await started.view("notes", "seen", PileOf(pile="p"), Operator())
     assert isinstance(answered, Accepted)
     assert isinstance(answered.output, Blocks)
     return [

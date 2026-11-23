@@ -124,6 +124,10 @@ export class Server implements Source {
         this.#send({ kind: "mark", marked });
     }
 
+    seen(viewing: Viewing, block: string): void {
+        this.#send({ kind: "seen", viewing, block });
+    }
+
     erase(id: string): void {
         this.#send({ kind: "erase", id });
     }

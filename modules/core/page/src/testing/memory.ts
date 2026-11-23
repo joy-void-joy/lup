@@ -19,6 +19,8 @@ export class Memory implements Source {
     draft: Draft = { comments: [], marks: [] };
     /** Every mark sent, in the order sends sent them: the actions the core ran. */
     sent: Marked[] = [];
+    /** Every block said seen, by its view's key and its id, in the order they were. */
+    sighted: string[] = [];
 
     /** Set what `viewing` answers, and push it to every watch of it. */
     set(viewing: Viewing, blocks: Blocks): void {
@@ -111,6 +113,10 @@ export class Memory implements Source {
             comments: kept ? this.draft.comments.map((each) => (each.id === comment.id ? comment : each)) : [...this.draft.comments, comment],
         };
         this.#reviewed();
+    }
+
+    seen(viewing: Viewing, block: string): void {
+        this.sighted = [...this.sighted, `${viewKey(viewing)}\n${block}`];
     }
 
     mark(marked: Marked): void {

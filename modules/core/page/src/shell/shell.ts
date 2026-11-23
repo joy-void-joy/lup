@@ -14,6 +14,7 @@ import { fromCore, redrawn, standsInMargin } from "./annotations";
 import { Comments } from "./comments";
 import { Kinds } from "./looks";
 import { glyphOf, Marks } from "./marks";
+import { Sightings } from "./sighted";
 import { markdown, sourced, sourcesOf, unindented } from "./markdown";
 import { standings } from "./palette";
 import { framed } from "./frame";
@@ -29,6 +30,8 @@ export interface Source {
     write(comment: Comment): void;
     /** Keep `marked` in the draft, in place of the mark of its id where there's one. */
     mark(marked: Marked): void;
+    /** Say the block of id `block` of `viewing` has been on the operator's screen, so what being seen does runs. */
+    seen(viewing: Viewing, block: string): void;
     /** Take the comment or mark of id `id` out of the draft. */
     erase(id: string): void;
     /** Send the draft. */
@@ -60,6 +63,8 @@ export interface Placing {
     readonly outlining?: readonly Extension[];
     /** Whether a line longer than the editor is wide wraps onto the next row; the outline's are cut, a row each. */
     readonly wraps?: boolean;
+    /** How long, in milliseconds, a block shows before it counts as seen (`Sightings`); the document's own alone says any seen. */
+    readonly dwell?: number;
 }
 
 
@@ -92,6 +97,8 @@ export class Shell {
     readonly comments: Comments;
     /** The verbs marked on the document's blocks, waiting in the draft. */
     readonly marks: Marks;
+    /** What of the document has been on the operator's screen long enough to count as seen; none for the window's and the outline's. */
+    readonly sightings: Sightings | null;
     /** The document's shell, where this one draws its window; none for the document's own. */
     readonly owner: Shell | null;
     /** The page's window, under the document: none for a window's own shell. */
@@ -126,6 +133,7 @@ export class Shell {
         this.document = new Document(section("root", root, { blocks: [], summary: [], offers: [] }));
         this.comments = new Comments(this);
         this.marks = new Marks(this);
+        this.sightings = this.owner === null ? new Sightings(this, placing.dwell ?? 1500) : null;
         this.#header = placing.header ?? null;
         this.#keys = placing.keys ?? null;
         const extensions = placing.extensions ?? [];
@@ -180,6 +188,9 @@ export class Shell {
                         if (update.viewportChanged || update.docChanged) {
                             shell.outline?.viewed();
                         }
+                        if (update.viewportChanged || update.docChanged || update.transactions.some((each) => each.effects.some((effect) => effect.is(redrawn)))) {
+                            shell.sightings?.viewed();
+                        }
                         (shell.owner ?? shell).reframe();
                     }),
                     foldState,
@@ -230,6 +241,7 @@ export class Shell {
         this.#stopReviews();
         this.comments.destroy();
         this.marks.destroy();
+        this.sightings?.destroy();
         this.#stop();
         for (const watched of this.#watching.values()) {
             watched.stop();
