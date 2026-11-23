@@ -532,7 +532,7 @@ class Projects(Part, machine=True, shared=True):
         if opened is None or opening is None:
             message = (
                 f"{locating.repository} isn't running: open it first, which runs "
-                "the commit you approved last (`lup hosting open`)"
+                "the commit you approved last (`lup machine open`)"
             )
             raise RefusedError(message)
         return Located(opening=opening, opened=opened)

@@ -332,7 +332,7 @@ class CommandLinePromises(Part):
         telling = by.any(Telling)
         started = await by.started(jotting())
         piled = await started.run(
-            "core",
+            "inbox",
             "pile",
             {"repository": started.repository, "path": "ideas"},
             Operator(),

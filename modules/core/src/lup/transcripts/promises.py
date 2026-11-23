@@ -162,11 +162,11 @@ class TranscriptsPromises(Part):
         with tempfile.TemporaryDirectory() as made:
             started = await by.started(machine=True, declared=project(Path(made)))
             piled = await started.run(
-                "core", "pile", {"repository": "harness", "path": "ideas"}, Operator()
+                "inbox", "pile", {"repository": "harness", "path": "ideas"}, Operator()
             )
             assert isinstance(piled, Accepted), piled
             told = await started.run(
-                "core",
+                "inbox",
                 "address",
                 {
                     "repository": "harness",

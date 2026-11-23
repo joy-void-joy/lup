@@ -312,10 +312,10 @@ async def machine(by: Testing, at: Places) -> Started:
         git=at.project / ".git",
     )
     registered = await started.run(
-        "hosting", "register", Registering(common=at.project / ".git"), Operator()
+        "machine", "register", Registering(common=at.project / ".git"), Operator()
     )
     first = await started.run(
-        "hosting", "approve", Approval(commit=at.git("rev-parse", "dev")), Operator()
+        "machine", "approve", Approval(commit=at.git("rev-parse", "dev")), Operator()
     )
     assert isinstance(registered, Accepted)
     assert isinstance(first, Accepted)

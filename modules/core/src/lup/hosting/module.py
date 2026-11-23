@@ -35,10 +35,12 @@ class Hosting(Module):
     """What runs on your machine, and what you approved to run.
 
     Starting every container lup runs, and, as they're built, carrying calls,
-    keeping approvals and secrets, and brokering credentials.
+    keeping approvals and secrets, and brokering credentials. Typed `lup
+    machine …`: its name says what it's for, where its package's and its
+    class's say how it runs.
     """
 
-    name = "hosting"
+    name = "machine"
     parts: Parts = Parts.of(
         Containers,
         Secrets,

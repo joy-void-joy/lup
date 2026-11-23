@@ -23,7 +23,7 @@ from lup.types import JsonObject, Model
 CORE = "core"
 """The core's name: the module every project holds, whose tools, commands and
 views `lup` types at its top level (`lup init`), since the core is lup itself,
-where every other module's go under its name (`lup hosting open`)."""
+where every other module's go under its name (`lup machine open`)."""
 
 type Offerable = Literal["tool", "command", "view"]
 """The doors the command line offers a method behind: a service is code's."""
@@ -32,8 +32,8 @@ type Offerable = Literal["tool", "command", "view"]
 def typed(name: str) -> str:
     """Return a method's or a module's name as the command line types it: each `_` a `-`, lowered, typer's way.
 
-    >>> typed("concern_view"), typed("hosting")
-    ('concern-view', 'hosting')
+    >>> typed("concern_view"), typed("machine")
+    ('concern-view', 'machine')
     """
     # lup: ignore("string-replace", why="typer's own rule for a command's name (`typer.main.get_command_name`), said once here for the plan, the declaration's check and the command line, so a name the core takes and a module's are compared as both are typed")
     return name.lower().replace("_", "-")
@@ -87,8 +87,8 @@ class Doorway(Model):
     def said(self, module: str) -> str:
         """Name it as a refusal does, with its module where its name is the module's alone: a tool's or a service's name is the project's, a command's or a view's its module's.
 
-        >>> Doorway(door="command", name="keep", parties=[]).said("hosting")
-        'the command `keep` of `hosting`'
+        >>> Doorway(door="command", name="keep", parties=[]).said("machine")
+        'the command `keep` of `machine`'
         """
         match self.door:
             case "tool" | "service":

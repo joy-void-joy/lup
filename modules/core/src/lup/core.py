@@ -1,6 +1,7 @@
 """`Core`: the module every project holds, which packages what every project has, and lists its submodules' promises."""
 
 from pathlib import Path
+from typing import ClassVar
 
 from lup.command_line.promises import CommandLinePromises
 from lup.declaration.module import Module
@@ -8,9 +9,7 @@ from lup.declaration.profiles import DEFAULT, DirectoryName, Profile, Profiles
 from lup.declaration.promises import DeclarationPromises, ProfilesPromises
 from lup.doors.parts import Parts
 from lup.doors.promises import DoorsPromises, EventsPromises, PartsPromises
-from lup.inbox.part import Inboxes, Speaking
-from lup.inbox.promises import InboxPromises
-from lup.inbox.records import EDGES, NODES
+from lup.inbox.module import Inbox
 from lup.programs.git.promises import GitPromises
 from lup.programs.promises import ProgramsPromises
 from lup.rooms.packages import Packages, standard
@@ -26,7 +25,6 @@ from lup.shell.kinds import (
     SHELL_FOLDS,
     SHELL_TONES,
     SHELL_VERBS,
-    FoldKind,
     Folds,
     Tones,
     Verbs,
@@ -34,26 +32,26 @@ from lup.shell.kinds import (
 from lup.shell.pages import Dashboarding, Pages
 from lup.shell.promises import PagesPromises, ShellPromises
 from lup.store.promises import StorePromises
-from lup.store.records import Recorded
 from lup.testing.promises import TestingPromises
 from lup.told.promises import GuidancePromises
 
 
 class Core(Module):
-    """What every project has, the inbox among it.
+    """What every project has, the inbox beside it.
 
     What every project has: loading the declaration and its layers, the doors its
     modules are reached through, checking their promises, running programs, the shell's
-    kinds, the inbox, rendering guidance, the command line, setting a repository up for
+    kinds, rendering guidance, the command line, setting a repository up for
     lup, and the profiles its sessions run on; the core's other submodules as they're
-    built.
+    built. It requires the inbox (`lup.inbox.module.Inbox`), a module of its own,
+    typed `lup inbox …`.
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a
-    module named `core` fails. What it serves is its submodules' parts and
-    promises, the inbox's among them; what it declares, the shell's tones and
-    fold kinds, which every module's views may name, and which a layer changes
-    as any field, and the kinds of record the inbox keeps in the store.
+    module named `core` fails, and so does one without the inbox it requires.
+    What it serves is its submodules' parts and promises; what it declares, the
+    shell's tones, fold kinds and verbs, which every module's views and commands
+    may name, and which a layer changes as any field.
     """
 
     name = CORE
@@ -71,9 +69,6 @@ class Core(Module):
         Pages,
         PagesPromises,
         StorePromises,
-        Inboxes,
-        Speaking,
-        InboxPromises,
         ProgramsPromises,
         GitPromises,
         GuidancePromises,
@@ -81,39 +76,18 @@ class Core(Module):
         Setup,
         SetupPromises,
     )
+    requires: ClassVar[list[type[Module]]] = [Inbox]
     tones: Tones = Tones.of(*SHELL_TONES)
-    verbs: Verbs = Verbs.of(*SHELL_VERBS)
-    """The shell's verbs: done, decline, toggle, tell and seen, which every
-    module's commands may be offered under."""
     """The shell's tones: plain, muted, strong, and the operator's own words."""
-    folds: Folds = Folds.of(
-        *SHELL_FOLDS,
-        FoldKind(
-            name="concern",
-            letter="c",
-            called="concern",
-            level=1,
-            colour="cyan",
-            outlined=True,
-        ),
-        FoldKind(
-            name="friction",
-            letter="r",
-            called="friction",
-            level=1,
-            colour="purple",
-            outlined=True,
-        ),
-    )
+    verbs: Verbs = Verbs.of(*SHELL_VERBS)
+    """The shell's verbs: show, done, decline, toggle, tell and seen, which
+    every module's commands may be offered under."""
+    folds: Folds = Folds.of(*SHELL_FOLDS)
     """The shell's fold kinds: a party's section, a file, a body, a run of
-    unchanged lines; and the inbox's, a concern, and a friction, a concern
-    opened by what got in an agent's way, its letter and colour in the margin
-    saying which it is."""
+    unchanged lines, and where a draft's parts go."""
     dashboard: Dashboarding = Dashboarding()
     """Whether the machine serves the dashboard, and on which port; read from
     the home repository's declaration with the machine's layer over it."""
-    kinds: Recorded = Recorded.of(*NODES, *EDGES)
-    """The kinds of record the core's submodules keep in the store: the inbox's."""
     document: Viewing | None = None
     """The view the dashboard's document is, its root: a view listing the
     parties, each a fold of the `party` kind whose content reads what's shown of

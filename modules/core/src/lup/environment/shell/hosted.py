@@ -36,8 +36,8 @@ from lup.doors.parties import Machine
 from lup.environment.declaration import Resolved, load, resolve
 from lup.environment.running.calling import Calling
 from lup.environment.shell.layout import DashboardPlaces, ShellLayout
+from lup.inbox.module import Inbox
 from lup.inbox.said import PartiesOf
-from lup.running.plan import CORE
 from lup.shell.blocks import Viewing
 from lup.shell.pages import BuiltPage, PageSource
 from lup.types import MutableModel
@@ -190,7 +190,7 @@ async def started(
         looks=resolved.looks,
         root=core.document
         or Viewing.of(
-            Inboxes.parties, PartiesOf(repository=host.repository), module=CORE
+            Inboxes.parties, PartiesOf(repository=host.repository), module=Inbox.name
         ),
         kept=Keeping.at(places.draft()),
         token=token_at(places.token()),

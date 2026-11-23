@@ -68,7 +68,7 @@ from lup.shell.wire import (
     Write,
 )
 from lup.types import Model, MutableModel
-lazy from lup.core import Core
+lazy from lup.inbox.module import Inbox
 lazy from lup.inbox.part import Inboxes
 
 if TYPE_CHECKING:
@@ -315,7 +315,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         except ValidationError:
             return f"nothing tells {said} a comment"
         offer = Offer.of(Inboxes.comment_to, reached).model_copy(
-            update={"module": Core.name}
+            update={"module": Inbox.name}
         )
         return Taken(offer=offer, to=f"to {said}")
 
