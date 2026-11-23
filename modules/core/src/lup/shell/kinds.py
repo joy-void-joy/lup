@@ -130,6 +130,46 @@ context around a change, which `zr` opens last; and, in the review of the
 draft, each place its parts go."""
 
 
+class Verb(Model):
+    """A verb: what the operator does to a thing, by one word on the command line and one key on the dashboard, whatever module's thing it is.
+
+    A block offers a command under a verb (`@lup.command(verb=…)`), and the
+    verb's key on that block, or `lup <verb> <thing>` naming it, runs what it
+    offers: one verb, done to a concern, clears it, to a landing, puts it on
+    trial. A module declares a verb of its own as it declares a fold kind.
+    """
+
+    name: str
+    """Its word: what's typed, `lup done @12`, and what a command names it by."""
+    letter: str | None = None
+    """The key the dashboard takes it by, after Space: `d` for done; none for
+    a verb no key runs, as being seen runs `seen`."""
+    says: str
+    """What it does, in a line, as help lists it: `do what's done with it`."""
+
+
+class Verbs(Named[Verb]):
+    """The verbs a module's commands may be offered under, beside the core's, each by its name."""
+
+    @override
+    def named(self, entry: Verb) -> str:
+        return entry.name
+
+
+SHELL_VERBS = [
+    Verb(name="show", says="Show it: what its block opens."),
+    Verb(name="done", letter="d", says="Do what's done with it: clear it, approve it."),
+    Verb(name="decline", letter="x", says="Decline it: nothing more is done with it."),
+    Verb(name="toggle", letter="t", says="Toggle it: put it in, or take it out."),
+    Verb(name="tell", letter="c", says="Say something to it, or on it."),
+    Verb(name="seen", says="Say it's been on your screen."),
+]
+"""The verbs every module's commands may be offered under: what's done with a
+thing, declining it, toggling it, telling it something, and saying it's been
+seen; and `show`, which runs no command but shows what a thing's block opens,
+as following it does on the dashboard."""
+
+
 class MarkKind(Model):
     """A kind of mark on a file's lines: its name, its colour, and what a line of it says it is, as a judge's `held`."""
 

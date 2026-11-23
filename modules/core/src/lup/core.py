@@ -22,7 +22,15 @@ from lup.runtimes.runtime import Runtimes
 from lup.setup.part import Setup
 from lup.setup.promises import SetupPromises
 from lup.shell.blocks import Viewing
-from lup.shell.kinds import SHELL_FOLDS, SHELL_TONES, FoldKind, Folds, Tones
+from lup.shell.kinds import (
+    SHELL_FOLDS,
+    SHELL_TONES,
+    SHELL_VERBS,
+    FoldKind,
+    Folds,
+    Tones,
+    Verbs,
+)
 from lup.shell.pages import Dashboarding, Pages
 from lup.shell.promises import PagesPromises, ShellPromises
 from lup.store.promises import StorePromises
@@ -74,6 +82,9 @@ class Core(Module):
         SetupPromises,
     )
     tones: Tones = Tones.of(*SHELL_TONES)
+    verbs: Verbs = Verbs.of(*SHELL_VERBS)
+    """The shell's verbs: done, decline, toggle, tell and seen, which every
+    module's commands may be offered under."""
     """The shell's tones: plain, muted, strong, and the operator's own words."""
     folds: Folds = Folds.of(
         *SHELL_FOLDS,

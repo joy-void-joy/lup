@@ -63,6 +63,13 @@ class Doorway(Model):
     """Whether it's a command or a view `lup` answers where it's typed, over
     the declaration of the worktree it's typed in, never carried to where the
     project runs (`@lup.command(here=True)`, `@lup.view(here=True)`)."""
+    verb: str | None = None
+    """The verb a command is reached by, on what offers it, rather than by
+    its name; none for one typed by its name, and for a tool, a service or a
+    view."""
+    alone: bool = False
+    """Whether it's a command its verb runs with nothing cited
+    (`@lup.command(alone=True)`)."""
 
     def typed(self) -> str:
         """Name it as the command line types it (`typed`)."""

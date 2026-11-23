@@ -22,8 +22,12 @@ type Filled = Literal["repository", "common"]
 """What the command line fills a field with where it's left out: the repository
 whose worktree it's typed in, or that repository's common git directory."""
 
+type Marked = Filled | Literal["words"]
+"""What a field's mark says of it (`MARK`): filled from where it's typed, or
+the words said with a verb."""
+
 MARK = "x-lup-filled"
-"""The key of a field's JSON Schema saying what fills it (`Filled`)."""
+"""The key of a field's JSON Schema saying what fills it (`Marked`)."""
 
 type Repository = Annotated[Name, Field(json_schema_extra={MARK: "repository"})]
 """A repository, as lup names it. Typed, `-r` or `--repository`; left out, the
@@ -35,6 +39,13 @@ type Common = Annotated[Path, Field(json_schema_extra={MARK: "common"})]
 shares. Typed, the option named for its field; left out, the one of the
 repository whose worktree the command line is typed in, and refused outside
 any."""
+
+
+type Words = Annotated[str, Field(json_schema_extra={MARK: "words"})]
+"""What's said with a verb: the words typed after what's cited, `lup tell @12
+"go on"`, or the comment written on the block a verb's key marks, on the
+dashboard. A command offered under a verb takes them in the field typed so, as
+a comment's words or a decline's reason; one with none takes no words."""
 
 
 class TypedIn(Model):

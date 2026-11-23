@@ -109,14 +109,18 @@ def part_plan(serves: Serves, entries: list[Entry], root: Path | None) -> PartPl
 def doorway(entry: Entry) -> Doorway | None:
     """Return how calls to the method behind `entry` are routed; none behind a door no party calls, a hook's or a promise's."""
     here = False
+    verb: str | None = None
+    alone = False
     match entry.method.door:
         case ToolDoor():
             door = "tool"
         case ServiceDoor():
             door = "service"
-        case CommandDoor(here=typed_here):
+        case CommandDoor(here=typed_here, verb=offered, alone=standing):
             door = "command"
             here = typed_here
+            verb = offered
+            alone = standing
         case ViewDoor(here=typed_here):
             door = "view"
             here = typed_here
@@ -131,6 +135,8 @@ def doorway(entry: Entry) -> Doorway | None:
         description=taken.description,
         input_schema=schema_of(model) if is_model(model) else {},
         here=here,
+        verb=verb,
+        alone=alone,
     )
 
 

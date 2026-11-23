@@ -17,12 +17,14 @@ from lup.inbox.said import (
     OnItem,
     PartyOf,
     Pile,
+    Reached,
     Showing,
 )
 from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Offer, Span, Viewing
+from lup.store.records import Node
 from lup.types import Model
-lazy from lup.doors.parties import Party
-lazy from lup.inbox.inbox import Inbox
+lazy from lup.doors.parties import Agent
+lazy from lup.inbox.inbox import Inbox, InboxError
 
 
 class Shows(Model, arbitrary_types_allowed=True):
@@ -31,12 +33,15 @@ class Shows(Model, arbitrary_types_allowed=True):
     party: Method
     concern: Method
     comment: Method
+    tell: Method
+    """Telling a party what's said on a block that offers no comment of its
+    own: an agent, or a pile, where it opens a concern."""
     clear: Method
     decline: Method
     seen: Method
 
 
-def reached(inbox: Inbox, party: PartyRecord) -> Party | None:
+def reached(inbox: Inbox, party: PartyRecord) -> Agent | Pile | None:
     """Return the party a comment on `party`'s blocks reaches: the agent, or the pile, which keeps it; none for the operator, whose own they are."""
     match party:
         case AgentRecord():
@@ -48,7 +53,8 @@ def reached(inbox: Inbox, party: PartyRecord) -> Party | None:
 
 
 def party_fold(inbox: Inbox, party: PartyRecord, shows: Shows) -> Fold:
-    """Return `party` as a fold of a list: its name, what it holds, and what of it is new or waits; its buffer read as it opens."""
+    """Return `party` as a fold of a list: its name, what it holds, and what of it is new or waits; its buffer read as it opens, and offering to tell it something, where it's an agent or a pile."""
+    reaches = reached(inbox, party)
     held = inbox.holding(party)
     new = len(inbox.new_involving(party))
     done = sum(1 for each in held if inbox.standing(each).waits())
@@ -69,7 +75,10 @@ def party_fold(inbox: Inbox, party: PartyRecord, shows: Shows) -> Fold:
             shows.party,
             PartyOf(repository=inbox.repository, name=inbox.called(party)),
         ),
-        reaches=reached(inbox, party),
+        reaches=reaches,
+        offers=[]
+        if reaches is None
+        else [Offer.of(shows.tell, Reached(party=reaches))],
     )
 
 
@@ -198,6 +207,20 @@ def concern(inbox: Inbox, concern: Concern, shows: Shows) -> Blocks:
             for block in item_blocks(inbox, item, shows)
         ),
     )
+
+
+def cited(inbox: Inbox, node: Node, shows: Shows) -> Blocks:
+    """Return what's cited, as the views it shows in lay it out, offering what's done with it: an item's blocks, a concern's fold, a party's fold."""
+    match node:
+        case Item():
+            return Blocks.of(*item_blocks(inbox, node, shows))
+        case Concern():
+            return Blocks.of(concern_fold(inbox, node, shows))
+        case PartyRecord():
+            return Blocks.of(party_fold(inbox, node, shows))
+        case _:
+            message = f"{inbox.called(node)} is no item, concern nor party"
+            raise InboxError(message, about=[inbox.called(node)])
 
 
 def waiting(inbox: Inbox, shows: Shows) -> Blocks:

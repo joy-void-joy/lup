@@ -56,28 +56,41 @@ class CommandDoor(Door):
     """Whether it runs where it's typed: `lup` answers it in its own process,
     over the declaration of the worktree it's typed in, never carrying it to
     where the project runs."""
+    alone: bool = False
+    """Whether it's what `lup <verb>` runs with nothing cited, done to where
+    it's typed or to lup's machine rather than to a thing a block shows, as the
+    gate's check is `lup check`: at most one command of a project for each
+    verb, refused as the declaration resolves."""
     longest: int = 60
     """The most characters its summary, its docstring's first line, may take:
     what the command line's help lists it by, beside its name, in 80 columns."""
 
     @model_validator(mode="after")
     def keyed(self) -> Self:
-        """Refuse a verb without what it says, or what it says without a verb."""
+        """Refuse a verb without what it says, what it says without a verb, or a command run with nothing cited that names no verb."""
         if (self.verb is None) != (self.says is None):
             message = (
                 "a command the dashboard offers names its `verb` and what it "
                 "`says`, both, and one the command line alone runs names neither"
             )
             raise DoorError(message)
+        if self.alone and self.verb is None:
+            message = (
+                "a command run with nothing cited (`alone=True`) is what its verb "
+                "does with nothing cited, so it names its `verb`"
+            )
+            raise DoorError(message)
         return self
 
     def contract(self, taken: Taken) -> None:
         """Raise `DoorError` where `taken` isn't a command's: one model in, or a list of it where the dashboard offers it, and a model, `str` or nothing out; or where it runs where it's typed and names a verb, which the dashboard, typed in no worktree, can't run."""
-        if self.here and self.verb is not None:
+        if self.here and self.verb is not None and not self.alone:
             message = (
                 f"the command `{taken.qualified}` runs where it's typed "
                 "(`here=True`), which is the command line's alone, and names a "
-                "`verb`: the dashboard has no worktree it's typed in"
+                "`verb` a block may offer it under: the dashboard has no worktree "
+                "it's typed in. Run with nothing cited (`alone=True`), its verb "
+                "reaches it on the command line alone"
             )
             raise DoorError(message)
         if not is_model(taken.one()):
@@ -123,7 +136,9 @@ def command[S, I: BaseModel, O: Done, **P](
     method: Callable[Concatenate[S, I, P], Awaitable[O]], /
 ) -> Served[S, Concatenate[I, P], Awaitable[O]]: ...
 @overload
-def command(*, verb: str, says: str) -> CommandDoor: ...
+def command(
+    *, verb: str, says: str, alone: bool = False, here: bool = False
+) -> CommandDoor: ...
 @overload
 def command(*, here: bool) -> CommandDoor: ...
 def command[S, I: BaseModel, O: Done, **P](
@@ -132,9 +147,10 @@ def command[S, I: BaseModel, O: Done, **P](
     *,
     verb: str | None = None,
     says: str | None = None,
+    alone: bool = False,
     here: bool = False,
 ) -> Served[S, Concatenate[I, P], Awaitable[O]] | CommandDoor:
-    """Make a method a command, run by its name under its module's on the command line; given a verb and what it says, the door that also puts it under that key in the dashboard; given `here`, one `lup` answers where it's typed, over that worktree's declaration.
+    """Make a method a command, run by its name under its module's on the command line; given a verb and what it says, one reached by that verb on what offers it, `lup <verb> <thing>` or its key in the dashboard, or, `alone`, by `lup <verb>` with nothing cited; given `here`, one `lup` answers where it's typed, over that worktree's declaration.
 
     The fields of the model it takes are its arguments and options, its
     docstring its help. It says who may run it, `by: Operator`, `by: Agent` or
@@ -142,5 +158,5 @@ def command[S, I: BaseModel, O: Done, **P](
     agent's room the agent's. It answers a `lup.Done`, or a union of them, and
     raises `RefusedError` to refuse, saying why.
     """
-    door = CommandDoor(verb=verb, says=says, here=here)
+    door = CommandDoor(verb=verb, says=says, here=here, alone=alone)
     return door if method is None else door(method)

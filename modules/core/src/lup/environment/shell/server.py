@@ -293,7 +293,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
     def taking(self, comment: Comment, placed: Placed) -> Taken | str:
         """Return what takes `comment`, and whom it reaches: its block's own comment, unless the operator chose whom it reaches; else the inbox, telling the party chosen, the one what it's on reaches, or the No agent pile where it reaches none; why nothing does, where nothing does."""
         offers = placed.block.offers
-        offer = next((each for each in offers if each.verb == "comment"), None)
+        offer = next((each for each in offers if each.verb == "tell"), None)
         if comment.to is None and offer is not None:
             reaches = placed.reaches
             to = (

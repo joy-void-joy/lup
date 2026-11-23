@@ -30,10 +30,11 @@ import typer
 from pydantic_core import to_json
 from typer.main import get_command
 
-from lup.command_line.answering import Answerer, Offered, Runnable, Typed
+from lup.command_line.answering import TOOLS, Answerer, Offered, Runnable, Typed
 from lup.command_line.filled import TypedIn
 from lup.command_line.parameters import Parameter, Parsed, parameters, sent
 from lup.command_line.printing import draw, refuse
+from lup.command_line.verbs import Acted, Verbing, acted, verb_command
 from lup.running.wire import (
     Answered,
     Call,
@@ -53,10 +54,17 @@ if TYPE_CHECKING:
     from typer.core import MarkupMode
 
 
+TOOLED = "Tools, an agent's door, typed by whoever may call them."
+"""What help says of the group of tools."""
+
+
 class Parsing(MutableModel):
-    """What parsing the words came to: the call they make, once a method's command takes them, and whether its answer is printed as its data."""
+    """What parsing the words came to: the call they make, once a method's command takes them, or the verb typed, and whether its answer is printed as its data."""
 
     call: Call | None = None
+    verbing: Verbing | None = None
+    """The verb typed, `lup done @12`, which reads what's cited before it
+    calls anything."""
     data: bool = False
     """Whether `--json` asked for the answer's data, as JSON, rather than
     its lines."""
@@ -81,14 +89,13 @@ def command(
 ) -> Callable[..., None]:
     """Return the function typer builds `runnable`'s command from: its signature the fields of what it takes, and its body keeping the call they make in `parsing`, made once parsing is done, each field marked so filled from where it's typed (`typed_in`)."""
     taken: list[Parameter] = parameters(runnable.doorway.input_schema)
-    asking = "lup_json"
 
-    def parsed(**values: Parsed) -> None:
-        parsing.data = values.pop(asking) is True
+    def parsed(*, lup_json: bool = False, **values: Parsed) -> None:
+        parsing.data = lup_json
         parsing.call = called(runnable, sent(taken, values, typed_in))
 
     data = inspect.Parameter(
-        asking,
+        "lup_json",
         inspect.Parameter.KEYWORD_ONLY,
         annotation=Annotated[
             bool,
@@ -109,8 +116,18 @@ def modules() -> None:
 
 
 def grouped(offered: Offered, top: str | None) -> list[str]:
-    """List the modules typed by their name: each with something the party may call, but the one at the top level, named `top`."""
-    return [each for each in offered.modules() if each != top]
+    """List the groups typed by their name: each module with something the party may call by its name, but the one at the top level, named `top`; then `tool`, where they may call a tool."""
+    return [
+        *(each for each in offered.modules() if each != top),
+        *([TOOLS] if offered.tools() else []),
+    ]
+
+
+def under(offered: Offered, group: str) -> list[Runnable]:
+    """List what's typed under the group named `group`: every tool the party may call, under `tool`; else the module's methods they may call by name."""
+    if group == TOOLS:
+        return offered.tools()
+    return [each for each in offered.named() if each.module == group]
 
 
 def built(
@@ -136,10 +153,16 @@ def built(
         rich_markup_mode=markup,
     )
     line.callback()(modules)
-    runnable = offered.runnable()
     groups = grouped(offered, top)
     if module not in groups:
-        for one in runnable:
+        for verb in offered.verbs():
+            alone = offered.alone(verb.name)
+            line.command(
+                verb.name,
+                help=verb.says if alone is None else alone.doorway.description,
+                short_help=verb.says,
+            )(verb_command(verb, offered, parsing, typed_in))
+        for one in offered.named():
             if one.module == top:
                 line.command(
                     one.doorway.typed(),
@@ -148,19 +171,18 @@ def built(
                 )(command(one, parsing, typed_in))
     for each in groups:
         methods = typer.Typer(
-            help=offered.described(each) or None,
-            short_help=offered.summarized(each) or None,
+            help=TOOLED if each == TOOLS else offered.described(each) or None,
+            short_help=TOOLED if each == TOOLS else offered.summarized(each) or None,
             add_completion=False,
             rich_markup_mode=markup,
         )
         if each == module:
-            for one in runnable:
-                if one.module == each:
-                    methods.command(
-                        one.doorway.typed(),
-                        help=one.doorway.description,
-                        short_help=one.doorway.summary(),
-                    )(command(one, parsing, typed_in))
+            for one in under(offered, each):
+                methods.command(
+                    one.doorway.typed(),
+                    help=one.doorway.description,
+                    short_help=one.doorway.summary(),
+                )(command(one, parsing, typed_in))
         line.add_typer(methods, name=each)
     return line
 
@@ -175,24 +197,21 @@ def reached(words: list[str]) -> list[str]:
 
 
 def listed(offered: Offered, named: list[str], top: str | None) -> list[str] | None:
-    """Return what the help shown where `named` reaches lists, as each is typed: at the top, the methods of the module named `top` and the other modules; under a module, its methods; none for a method's own."""
+    """Return what the help shown where `named` reaches lists, as each is typed: at the top, the verbs, the methods of the module named `top` typed by name, then the other groups; under a group, what's typed under it; none for a method's own."""
     groups = grouped(offered, top)
     match named:
         case []:
             return [
+                *(each.name for each in offered.verbs()),
                 *(
                     each.doorway.typed()
-                    for each in offered.runnable()
+                    for each in offered.named()
                     if each.module == top
                 ),
                 *groups,
             ]
-        case [module] if module in groups:
-            return [
-                each.doorway.typed()
-                for each in offered.runnable()
-                if each.module == module
-            ]
+        case [group] if group in groups:
+            return [each.doorway.typed() for each in under(offered, group)]
         case _:
             return None
 
@@ -256,15 +275,19 @@ async def typed(
             status = 0
         except SystemExit as ended:
             status = ended.code if isinstance(ended.code, int) else 1
-    call = parsing.call
-    if call is None:
-        return Typed(
-            status=status,
-            output=kept_out.getvalue(),
-            error=kept_error.getvalue(),
-            listed=listed(offered, named, top) if status == 0 else None,
-        )
-    reply = await answerer.answered(call)
+    match parsing.verbing, parsing.call:
+        case Verbing() as verbing, _:
+            done = await acted(verbing, offered, answerer, typed_in)
+        case None, None:
+            return Typed(
+                status=status,
+                output=kept_out.getvalue(),
+                error=kept_error.getvalue(),
+                listed=listed(offered, named, top) if status == 0 else None,
+            )
+        case None, parsed:
+            done = Acted(call=parsed, reply=await answerer.answered(parsed))
+    call, reply = done.call, done.reply
     match reply:
         case Answered(output=output):
             blocks = shown(call, reply)

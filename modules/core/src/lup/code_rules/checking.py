@@ -76,7 +76,7 @@ UNUSED_IGNORE = RuleInfo(
         "An `ignore` that keeps nothing hides the next finding that comes on its "
         "line, unseen."
     ),
-    steer="Remove it: `lup gate check --fix` does.",
+    steer="Remove it: `lup check --fix` does.",
     category="design",
     examples=Examples(),
 )
