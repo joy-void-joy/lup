@@ -23,6 +23,7 @@ from lup.doors.parts import Data, Declared, Part
 from lup.inbox import conversion, views
 from lup.inbox.conversion import Converted
 from lup.inbox.inbox import Inbox, InboxError, first_line
+from lup.inbox.parts import ItemPart
 from lup.inbox.records import (
     NODES,
     AgentRecord,
@@ -316,7 +317,7 @@ class Inboxes(Part, approved=True, shared=True):
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
         with refusing():
-            return inbox.read(agent, given.said.number)
+            return inbox.read(agent, given.said.number, given.said.part)
 
     @lup.service
     async def standing(self, given: Nothing, by: Codebase) -> Inboxed:
@@ -371,6 +372,7 @@ class Inboxes(Part, approved=True, shared=True):
                     by=inbox.writer(each),
                     kind=each.kind,
                     text=inbox.told_as(each, agent),
+                    on=inbox.on(each),
                 )
                 for each in items
             ]
@@ -521,8 +523,11 @@ class Inboxes(Part, approved=True, shared=True):
         del by
         inbox = self.inbox(clearing.repository)
         with refusing():
-            node = inbox.cited(clearing.what)
-            inbox.cleared(node)
+            found = inbox.cited(clearing.what)
+            if isinstance(found, ItemPart):
+                message = f"{found.cited()} is a part of an item: clear the item whole"
+                raise InboxError(message, about=[clearing.what])
+            inbox.cleared(found)
         return NodeCleared(what=clearing.what)
 
     @lup.command(verb="decline", says="decline it")
@@ -630,14 +635,14 @@ class Inboxes(Part, approved=True, shared=True):
     async def cited(self, citing: Citing) -> Blocks:
         """Show what's cited, offering what's done with it.
 
-        An item, a concern or a party, laid out as the views it shows in lay
-        it out, with what each offers under each verb: what `lup <verb>
+        An item or a part of one, a concern or a party, laid out as the views it
+        shows in lay it out, with what each offers under each verb: what `lup <verb>
         <thing>` reaches, as the verb's key does on the dashboard.
         """
         inbox = self.inbox(citing.repository)
         with refusing():
-            node = inbox.cited(citing.cite)
-            return views.cited(inbox, node, self.shows())
+            found = inbox.cited(citing.cite)
+            return views.cited(inbox, found, self.shows())
 
     @lup.view
     async def waiting(self, of: PartiesOf) -> Blocks:
@@ -784,8 +789,9 @@ class Speaking(Part):
     async def inbox(self, said: Reading, by: Agent) -> str:
         """Read the repository's inbox, changing nothing.
 
-        With `number`, one item or concern whole; without, what waits on the
-        operator and the concerns you hold.
+        With `number`, one item or concern whole, each of an item's parts with
+        its id (`@12.3`); with `part` too, that part of it alone; without, what
+        waits on the operator and the concerns you hold.
         """
         return await Inboxes.read(Spoken(agent=by, said=said))
 

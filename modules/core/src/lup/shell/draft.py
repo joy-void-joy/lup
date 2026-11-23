@@ -165,6 +165,8 @@ class Commenting(Model):
     what's cited (`lup tell @12 "go on"`)."""
     lines: list[str] = []
     """The block's lines the comment quotes, whole, as they read when it was written."""
+    line: int = 0
+    """Where the lines it quotes start among the block's own, from 0."""
     start: int = 0
     """Where the passage it's on starts in its lines, joined by newlines."""
     end: int | None = None

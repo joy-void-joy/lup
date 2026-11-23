@@ -15,6 +15,7 @@ import { press } from "../testing/keys";
 import { Memory, looks } from "../testing/memory";
 import { law, scenario, type Machine } from "../testing/promise";
 import { quotedIn } from "./comments";
+import { framed } from "./frame";
 import { bindVim, vimBindings } from "./keymap";
 import { hiddenOn } from "./markdown";
 import { beside, cursorFolds, type Beside } from "./margin";
@@ -586,7 +587,7 @@ scenario("A fold read as it opens reads its view once opened, and shows its answ
 
 /** Return a Markdown block saying `text`, keyed `id`. */
 function written(id: string, text: string): Markdown {
-    return { block: "markdown", id, version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], text, tone: "plain" };
+    return { block: "markdown", id, version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], text, tone: "plain", anchors: [] };
 }
 
 /** Return where the Markdown hides marks on the line `number` of `shell`'s text, from 1, as stretches from the line's start. */
@@ -724,7 +725,7 @@ function offering(made: readonly Block[], pick: (id: string) => readonly string[
 
 scenario("Space d marks done on the innermost block at the cursor that offers it, Space x puts decline in its place there, and the second Ctrl+Enter sends what's marked", async (by) => {
     const item: Line = { ...lineOf("item", "an item"), offers: offersOf("item", ["done"]) };
-    const body: Markdown = { block: "markdown", id: "body", version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], text: by.any(fc.constantFrom("the body", "a\nb")), tone: "plain" };
+    const body: Markdown = { block: "markdown", id: "body", version: null, offers: [], reaches: null, sighted: null, standing: null, aside: [], text: by.any(fc.constantFrom("the body", "a\nb")), tone: "plain", anchors: [] };
     const concern: Fold = { ...foldOf("c", [item, body]), offers: offersOf("c", ["done", "decline"]) };
     const { shell: opened, memory, parent } = shellOn([concern]);
     try {
@@ -961,6 +962,33 @@ scenario("A block offering what being seen does is said seen once it has shown, 
         await press(opened, ["z", "o"]);
         await settled();
         expect(memory.sighted.map((each) => each.split("\n").at(-1))).toEqual(["shown", "hidden"]);
+    } finally {
+        opened.destroy();
+        parent.remove();
+    }
+});
+
+scenario("The header says what cites the line the cursor is on, the nearest anchor at it or before it, a comment under a line as the line, and a comment over lines cited apart quotes them all", async (by) => {
+    const lines = [...by.any(fc.array(fc.constantFrom("a", "- b", "", "c d"), { minLength: 2, maxLength: 5 })), "the end"];
+    const at = by.any(fc.integer({ min: 0, max: lines.length - 1 }));
+    const starts = by.any(fc.uniqueArray(fc.integer({ min: 1, max: lines.length - 1 }), { maxLength: 3 }));
+    const anchors = [0, ...starts].sort((one, other) => one - other).map((line, place) => ({ line, cited: `@7.${place + 1}` }));
+    const item: Markdown = { ...written("item-7-text", lines.join("\n")), anchors, offers: offersOf("item-7-text", ["comment"]) };
+    const { shell: opened, memory, parent } = shellOn([item]);
+    try {
+        const header = document.createElement("div");
+        const saidAt = (line: number): string => {
+            opened.go(opened.view.state.doc.line(line + 1).from);
+            framed(opened, header, null);
+            return header.textContent ?? "";
+        };
+        const cited = anchors.findLast((each) => each.line <= at)?.cited ?? "";
+        expect(saidAt(at)).toContain(cited);
+        opened.go(0);
+        await press(opened, ["V", "G", "c", "w", "h", "y", "<Esc>"]);
+        expect(memory.draft.comments.map((each) => each.on.lines)).toEqual([lines]);
+        framed(opened, header, null);
+        expect(header.textContent).toContain(anchors.at(-1)?.cited);
     } finally {
         opened.destroy();
         parent.remove();

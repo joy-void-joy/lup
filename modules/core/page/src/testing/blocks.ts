@@ -38,6 +38,7 @@ export function markdown(id: string): fc.Arbitrary<Markdown> {
         aside: [],
         text: lines.join("\n"),
         tone: "plain",
+        anchors: [],
     }));
 }
 

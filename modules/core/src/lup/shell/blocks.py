@@ -13,6 +13,7 @@ module declares (`MarkKind`), and who a comment on a block reaches is a party
 """
 
 import hashlib
+import io
 from collections import Counter
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -350,13 +351,54 @@ class Line(Shown):
         ]
 
 
+def broken(text: str) -> list[str]:
+    r"""Return `text`'s lines, broken where the page and a Markdown parser break them: at `\r\n`, `\r` and `\n` alike, and nowhere else.
+
+    >>> broken("a\r\nb\rc\x0cd\n")
+    ['a', 'b', 'c\x0cd']
+    """
+    return [line.removesuffix("\n") for line in io.StringIO(text, newline=None)]
+
+
+class Anchor(Model):
+    """What a `Markdown` block's lines are cited by from one of them on, to the next anchor's: as `@12.3` cites an item's third part."""
+
+    line: int
+    """The first line it cites, from 0, of the block's own."""
+    cited: str
+    """What cites them, as a reader writes it: `@12.3`."""
+
+
 class Markdown(Shown):
-    """Text the page shows as Markdown, in a tone; its text form is the Markdown itself."""
+    """Text the page shows as Markdown, in a tone; its text form is the Markdown itself, what cites its lines after each anchor's."""
 
     block: Literal["markdown"] = "markdown"
     text: str
     tone: str = "plain"
+    anchors: list[Anchor] = []
+    """What its lines are cited by, in order: the page's header says the one
+    the cursor's line is under, and its text form says each after its line. A
+    comment says which of the block's lines it's on (`Commenting.line`), so its
+    module knows what's cited there. None for a text cited whole."""
     shows: ClassVar[dict[str, bool]] = {"text": True}
+
+    def runs(self, indent: str = "") -> list[list[Run]]:
+        r"""Return its text form as lines of runs, each after `indent` but a blank one: its Markdown in its tone, and, set back after the line each anchor is at, what cites it from there.
+
+        >>> text = Markdown(id="1", text="One.\n\n- two", anchors=[Anchor(line=2, cited="@1.2")])
+        >>> [joined(each) for each in text.runs()]
+        ['One.', '', '- two  · @1.2']
+        """
+        cited = {each.line: each.cited for each in self.anchors}
+
+        def said(at: int, line: str) -> list[Run]:
+            """Return the line at `at` as runs, what cites it after it."""
+            return [
+                *([Run(text=f"{indent}{line}", tone=self.tone)] if line else []),
+                *([Run(text=f"  · {cited[at]}", tone="muted")] if at in cited else []),
+            ]
+
+        return [said(at, line) for at, line in enumerate(broken(self.text))]
 
 
 class Fold(Shown):
@@ -637,10 +679,7 @@ def runs(blocks: list[Block], indent: str = "") -> list[list[Run]]:
             case Line():
                 return [block.runs(indent)]
             case Markdown():
-                return [
-                    [Run(text=f"{indent}{line}", tone=block.tone)] if line else []
-                    for line in block.text.splitlines()
-                ]
+                return block.runs(indent)
             case Fold():
                 return block.runs(indent, opened=block.open is not False)
             case Code() | Diff():

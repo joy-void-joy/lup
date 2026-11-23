@@ -15,6 +15,16 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from lup.inbox.parts import (
+    ItemPart,
+    Quoted,
+    opening,
+    part_cited,
+    parts,
+    quoted,
+    stretches,
+    whole,
+)
 from lup.inbox.records import (
     NO_AGENT,
     AgentRecord,
@@ -54,10 +64,13 @@ from lup.inbox.said import (
     Comments,
     ConcernSaid,
     Inboxed,
+    On,
+    Parts,
     Placed,
     SaidItem,
     Telling,
 )
+from lup.shell.blocks import lines
 from lup.store.database import Database
 from lup.store.errors import StoreError
 from lup.store.records import Edge, Node, named
@@ -352,8 +365,30 @@ class Inbox(Model, arbitrary_types_allowed=True):
         )
         return found if isinstance(found, Concern) else None
 
-    def cited(self, what: str) -> Node:
-        """Return what `what` names: an item or a concern by its number, or a party or a concern by its name; raise `InboxError` where nothing is."""
+    def cited(self, what: str) -> Node | ItemPart:
+        """Return what `what` names: an item or a concern by its number, a part of an item by its place in it (`@12.3`), or a party or a concern by its name; raise `InboxError` where nothing is."""
+        named = part_cited(what)
+        if named is None:
+            return self.node(what)
+        item = self.node(str(named.item))
+        if not isinstance(item, Item):
+            message = f"`{what}` names a part, and @{named.item} is no item"
+            raise InboxError(message, about=[what])
+        return self.part(item, named.place)
+
+    def part(self, item: Item, place: int) -> ItemPart:
+        """Return the part of `item` at `place`, from 1; raise `InboxError` where it has none there."""
+        found = parts(item)
+        for each in found:
+            if each.part.place == place:
+                return each
+        message = (
+            f"@{item.number} has {len(found)} parts: none is `@{item.number}.{place}`"
+        )
+        raise InboxError(message, about=[f"{item.number}.{place}"])
+
+    def node(self, what: str) -> Node:
+        """Return the node `what` names: an item or a concern by its number, or a party or a concern by its name; raise `InboxError` where nothing is."""
         bare = what.removeprefix("@")
         found = (
             self.database.numbered(int(bare))
@@ -448,22 +483,33 @@ class Inbox(Model, arbitrary_types_allowed=True):
             f"{self.called(standing.holder)}{f', {said}' if said else ''}."
         )
 
-    def read(self, agent: AgentRecord, number: int | None) -> str:
-        """Read the inbox for `agent`, changing nothing: one item or concern whole, by its number, or what waits on the operator and the concerns they hold."""
+    def read(
+        self, agent: AgentRecord, number: int | None, part: int | None = None
+    ) -> str:
+        """Read the inbox for `agent`, changing nothing: one item or concern whole, by its number, each of an item's parts with its id; the part of an item at `part` alone; or what waits on the operator and the concerns they hold."""
+        if part is not None:
+            if number is None:
+                message = "a part is read by its item's number and its place in it"
+                raise InboxError(message, about=[str(part)])
+            found = self.part(self.item(str(number)), part)
+            return (
+                f"{found.cited()} from {self.writer(found.item)}:\n{found.part.text()}"
+            )
         if number is not None:
-            found = self.cited(str(number))
+            found = self.node(str(number))
             match found:
                 case Concern():
                     words = [
-                        f"{self.called(each)}: {each.text}"
+                        f"{self.called(each)}: {each.words()}"
                         for each in self.said_in(found)
                     ]
                     return "\n".join(
                         [self.described(found), found.body, *words]
                     ).strip()
                 case Item():
-                    return (
-                        f"{self.called(found)} from {self.writer(found)}: {found.text}"
+                    said = lines([each.block() for each in stretches(found)])
+                    return "\n".join(
+                        [f"{self.called(found)} from {self.writer(found)}:", *said]
                     )
                 case _:
                     return self.called(found)
@@ -727,10 +773,24 @@ class Inbox(Model, arbitrary_types_allowed=True):
         return answer
 
     def commented(self, on: Item, said: Commenting, part: int | None = None) -> Comment:
-        """Keep the operator's comment `said` on `on`, or a part of it: told to whoever wrote it, and to each it was for where an agent wrote it to another."""
+        """Keep the operator's comment `said` on `on`: told to whoever wrote it, and to each it was for where an agent wrote it to another.
+
+        It's on the part of it at `part`, where one is given; else on the
+        parts the lines it quotes are in; else on the item whole. Its heading
+        alone, who wrote it, is none of its lines, and picks nothing out of it.
+        Raise `InboxError` where it has no part at `part`.
+        """
         operator = self.operator()
         writer = [] if on.by is None or on.by == operator.key else [on.by]
         readers = [each for each in on.to if each != operator.key]
+        on_parts = (
+            quoted(on, said.lines, said.line)
+            if part is None
+            else Quoted(part=self.part(on, part).part.place)
+        )
+        heading = said.lines == [self.writer(on)]
+        if heading and (part is not None or on_parts is None):
+            said = Commenting(words=said.words, version=said.version)
         comment = self.database.kept(
             Comment(
                 repository=self.repository,
@@ -739,14 +799,21 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 to=list(dict.fromkeys([*writer, *readers])),
                 text=said.words,
                 on=on.key,
-                part=part,
+                part=None if on_parts is None else on_parts.part,
+                last=None if on_parts is None else on_parts.last,
                 lines=said.lines,
                 start=said.start,
                 end=said.end,
                 version=said.version,
             )
         )
-        self.edge(Answers, on, comment, operator, part=part)
+        self.edge(
+            Answers,
+            on,
+            comment,
+            operator,
+            part=None if on_parts is None else on_parts.part,
+        )
         return comment
 
     def told_party(self, party: PartyRecord, said: Commenting) -> Comment:
@@ -895,12 +962,61 @@ class Inbox(Model, arbitrary_types_allowed=True):
             or item.by == party.key
             or self.holder(friction).key == party.key
         ):
-            return item.text
+            return item.words()
         pile = self.under(friction)
         where = "" if pile is None else f" in {self.called(pile)}"
         return (
             f"{self.writer(item)} filed a friction, @{friction.number}{where}: "
             f"{friction.title}"
+        )
+
+    def on(self, item: Item) -> On | None:
+        """Return what `item` is on, as whoever it's for is told: for a comment, the item or the parts of it, and the passage picked out of them, whole, or, on them whole, how they begin; on no item, the lines it quotes; for an answer or an outcome, the item it answers; none for anything else."""
+        match item:
+            case Comment(on=int() as key):
+                target = self.database.found(key)
+                return self.on_item(item, target) if isinstance(target, Item) else None
+            case Comment() if item.passage().strip():
+                return On(quote=item.passage())
+            case Answer() | Outcome():
+                targets = [
+                    found
+                    for edge in self.database.drawn_from(item.key, Answers)
+                    if isinstance(found := self.database.found(edge.target), Item)
+                ]
+                return next(
+                    (
+                        On(item=each.number, opening=opening(each.words()))
+                        for each in targets
+                    ),
+                    None,
+                )
+            case _:
+                return None
+
+    def on_item(self, comment: Comment, target: Item) -> On:
+        """Return what `comment` is on of `target`, the item it's on: an item of one part by its number alone, which names the part too."""
+        passage = comment.passage()
+        found = parts(target)
+        begins = next(
+            (each.part.text() for each in found if each.part.place == comment.part),
+            target.words(),
+        )
+        on = On(
+            item=target.number,
+            part=comment.part if len(found) > 1 else None,
+            last=comment.last if len(found) > 1 else None,
+        )
+        picked = (
+            passage.strip() != ""
+            if comment.part is None
+            else "\n".join(comment.lines) != passage
+            or not whole(
+                target, Quoted(part=comment.part, last=comment.last), comment.lines
+            )
+        )
+        return on.model_copy(
+            update={"quote": passage} if picked else {"opening": opening(begins)}
         )
 
     def settled_by(self, question: Item) -> list[Item] | None:
@@ -918,23 +1034,22 @@ class Inbox(Model, arbitrary_types_allowed=True):
         def said(answer: Item) -> str:
             match answer:
                 case Answer():
-                    rulings = [
-                        f"{each.number}. {each.verdict or 'no verdict'}"
-                        + (f": {each.comment}" if each.comment else "")
-                        for each in answer.rulings
-                    ]
                     words = [answer.text] if answer.text else []
                     return "\n".join(
                         [
                             f"The operator answered @{question.number} (@{answer.number}):",
-                            *rulings,
+                            *answer.beyond(),
                             *words,
                         ]
                     )
                 case _:
+                    on = self.on(answer)
+                    named = None if on is None else on.named()
+                    quote = None if on is None else on.quote
+                    passage = "" if quote is None else f", on “{quote}”"
                     return (
-                        f"{self.writer(answer)} on @{question.number} "
-                        f"(@{answer.number}): {answer.text}"
+                        f"{self.writer(answer)} on @{named or question.number} "
+                        f"(@{answer.number}){passage}: {answer.text}"
                     )
 
         if not answers:
@@ -1071,9 +1186,28 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 new=[each.number or 0 for each in self.new_to_operator()],
                 told=told,
                 comments=[
-                    Comments(item=each.number or 0, reaches=len(each.to))
+                    Comments(
+                        item=each.number or 0,
+                        reaches=len(each.to),
+                        on=None if target is None else target.number,
+                        places=[
+                            place
+                            for place in [each.part, each.last]
+                            if place is not None
+                        ],
+                    )
                     for each in items
                     if isinstance(each, Comment)
+                    for target in [
+                        None if each.on is None else self.database.found(each.on)
+                    ]
+                ],
+                parts=[
+                    Parts(
+                        item=each.number or 0,
+                        parts=[one.part.text() for one in parts(each)],
+                    )
+                    for each in items
                 ],
             )
 
@@ -1083,8 +1217,16 @@ class Inbox(Model, arbitrary_types_allowed=True):
         match item:
             case Comment(on=int() as on):
                 target = self.database.found(on)
+                part = next(
+                    (
+                        each.part.text()
+                        for each in (parts(target) if isinstance(target, Item) else [])
+                        if each.part.place == item.part
+                    ),
+                    None,
+                )
                 return self.said_item(
-                    item, writer, item.text, target, "\n".join(item.lines) or None
+                    item, writer, item.words(), target, "\n".join(item.lines) or part
                 )
             case Answer():
                 asked = next(
@@ -1099,33 +1241,13 @@ class Inbox(Model, arbitrary_types_allowed=True):
                 )
                 decisions = asked.decisions if asked is not None else []
                 ruled = "\n".join(
-                    " ".join(
-                        part
-                        for part in [
-                            f"{each.number}.",
-                            each.verdict or "",
-                            each.comment,
-                        ]
-                        if part
-                    )
-                    for each in item.rulings
-                )
-                quoted = "\n".join(
                     f"{number}. {each.decision}"
                     for number, each in enumerate(decisions, start=1)
                     if any(ruling.number == number for ruling in item.rulings)
                 )
-                text = "\n\n".join(each for each in [item.text, ruled] if each)
-                return self.said_item(item, writer, text, asked, quoted or None)
-            case Question():
-                decided = "\n".join(
-                    f"{number}. {each.decision}\n   lean: {each.lean}"
-                    for number, each in enumerate(item.decisions, start=1)
-                )
-                text = "\n\n".join(each for each in [item.text, decided] if each)
-                return self.said_item(item, writer, text, None, None)
+                return self.said_item(item, writer, item.words(), asked, ruled or None)
             case _:
-                return self.said_item(item, writer, item.text, None, None)
+                return self.said_item(item, writer, item.words(), None, None)
 
     def said_item(
         self,

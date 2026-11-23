@@ -35,7 +35,7 @@ from lup.hosting.carrying import Carrying, Hearing, Leaving, Naming, SessionRoom
 from lup.hosting.containers import Named
 from lup.hosting.projects import Locating, Projects, Telling
 from lup.inbox.part import Inboxes
-from lup.inbox.said import Ended, Ending, ToldItem, Untelling
+from lup.inbox.said import Ended, Ending, On, ToldItem, Untelling
 from lup.inbox.said import Naming as Named2
 from lup.rooms.layout import Kept
 from lup.rooms.part import RoomFor, Rooms, WorktreeFor
@@ -168,14 +168,33 @@ class SessionFinished(Done):
 
 
 def said(item: ToldItem) -> str:
-    r"""Return an item told to an agent, as a tag saying whose it is.
+    r"""Return an item told to an agent, as a tag saying whose it is and what it's on: before its words, the passage picked out, or how what it's on whole begins.
 
     >>> said(ToldItem(number=12, by="operator", kind="message", text="Go on."))
     '<item item="12" from="operator" kind="message">\nGo on.\n</item>'
+    >>> on = On(item=7, part=3, quote="safer")
+    >>> print(said(ToldItem(number=12, by="operator", kind="comment", text="Why?", on=on)))
+    <item item="12" from="operator" kind="comment" on="7.3">
+    <quote>safer</quote>
+    Why?
+    </item>
     """
+    on = item.on or On()
+    quote = [] if on.quote is None else [f"<quote>{on.quote}</quote>"]
+    opening = [] if on.opening is None else [f"<opening>{on.opening}</opening>"]
+    return "\n".join([tag(item), *quote, *opening, item.text, "</item>"])
+
+
+def tag(item: ToldItem) -> str:
+    """Return the tag an item told to an agent opens with: its number, whose it is, its kind, and what it's on.
+
+    >>> tag(ToldItem(number=12, by=None, kind="outcome", text="", on=On(item=7)))
+    '<item item="12" from="lup" kind="outcome" on="7">'
+    """
+    named = None if item.on is None else item.on.named()
+    on = "" if named is None else f' on="{named}"'
     return (
-        f'<item item="{item.number}" from="{item.by or "lup"}" kind="{item.kind}">\n'
-        f"{item.text}\n</item>"
+        f'<item item="{item.number}" from="{item.by or "lup"}" kind="{item.kind}"{on}>'
     )
 
 
@@ -504,8 +523,7 @@ class Held(Part, machine=True, shared=True):
         if len(whole) <= self.module.telling:
             return whole
         return "\n".join(
-            f'<item item="{each.number}" from="{each.by or "lup"}" kind="{each.kind}">'
-            f"{len(each.text)} characters, read whole with `inbox` and number {each.number}</item>"
+            f"{tag(each)}{len(each.text)} characters, read whole with `inbox` and number {each.number}</item>"
             for each in told.items
         )
 
