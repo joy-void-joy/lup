@@ -18,6 +18,7 @@ from pydantic import Field
 import lup
 from lup import (
     Agent,
+    Anchor,
     Blocks,
     Commented,
     Done,
@@ -83,6 +84,21 @@ class NoteOf(Model):
     number: int
 
 
+class CitedText(Model):
+    """A text, a line at a time, and the lines of it something cites, from 0."""
+
+    lines: list[Literal["a", "- b", ""]] = Field(min_length=1, max_length=6)
+    cited: list[Literal[0, 1, 2, 3, 4, 5]] = Field(max_length=4)
+
+    def said(self) -> list[str]:
+        """Return its lines, the last saying something."""
+        return [*self.lines, "the end"]
+
+    def apart(self) -> list[int]:
+        """Return the lines cited, each once, in order."""
+        return sorted(dict.fromkeys(self.cited))
+
+
 class Clearing(Model):
     """The note to clear."""
 
@@ -144,6 +160,17 @@ class NotesPart(Part):
     async def note(self, of: NoteOf) -> Blocks:
         """Show a note's text."""
         return Blocks.of(Markdown(id=f"text-{of.number}", text=f"note {of.number}"))
+
+    @lup.view
+    async def cited(self, of: CitedText) -> Blocks:
+        """Show a text, some of its lines cited."""
+        anchors = [
+            Anchor(line=line, cited=f"@7.{place}")
+            for place, line in enumerate(of.apart(), start=1)
+        ]
+        return Blocks.of(
+            Markdown(id="cited", text="\n".join(of.said()), anchors=anchors)
+        )
 
     @lup.view
     async def unknown(self, of: PileOf) -> Blocks:
@@ -311,6 +338,20 @@ class ShellPromises(Part):
                 )
                 for fold in folds
             )
+
+    @lup.promise
+    async def a_text_says_what_cites_its_lines(self, by: Testing) -> None:
+        """A Markdown block's text form says each of its lines, and after each line something cites from there on, what cites it, and after no other."""
+        of = by.any(CitedText)
+        started = await by.started(noted(0))
+        answered = await started.view("notes", "cited", of, Operator())
+        assert isinstance(answered, Accepted)
+        assert isinstance(answered.output, Blocks)
+        text = answered.output.text().splitlines()
+        assert len(text) == len(of.said())
+        for at, (line, shown) in enumerate(zip(of.said(), text, strict=True)):
+            assert shown.startswith(line)
+            assert ("@7." in shown) == (at in of.apart())
 
     @lup.promise
     async def a_view_says_in_text_what_the_operator_sees(self, by: Testing) -> None:

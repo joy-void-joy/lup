@@ -392,10 +392,11 @@ class Markdown(Shown):
         cited = {each.line: each.cited for each in self.anchors}
 
         def said(at: int, line: str) -> list[Run]:
-            if not line:
-                return []
-            after = [Run(text=f"  · {cited[at]}", tone="muted")] if at in cited else []
-            return [Run(text=f"{indent}{line}", tone=self.tone), *after]
+            """Return the line at `at` as runs, what cites it after it."""
+            return [
+                *([Run(text=f"{indent}{line}", tone=self.tone)] if line else []),
+                *([Run(text=f"  · {cited[at]}", tone="muted")] if at in cited else []),
+            ]
 
         return [said(at, line) for at, line in enumerate(broken(self.text))]
 
