@@ -9,8 +9,9 @@ import asyncio
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar
+from typing import ClassVar, Literal
 
+from pydantic import Field
 from sqlalchemy import Column, Integer, MetaData, Table, Text, create_engine, insert
 from sqlalchemy.engine import URL
 
@@ -55,6 +56,7 @@ from lup.inbox import (
     Naming,
     NoteSaid,
     Nothing,
+    On,
     OnItem,
     PartiesOf,
     PartyOf,
@@ -64,6 +66,7 @@ from lup.inbox import (
     Posting,
     Question,
     Reached,
+    Reading,
     Ruling,
     SaidSince,
     SendSaid,
@@ -76,7 +79,19 @@ from lup.inbox import (
     Untold,
     WithdrawSaid,
 )
-from lup.testing import Accepted, Refused, Started, Step, Testing
+from lup.testing import (
+    Accepted,
+    Comment,
+    Delivered,
+    Hello,
+    Quote,
+    Refused,
+    Send,
+    Started,
+    Step,
+    Testing,
+    Write,
+)
 
 HERE = Codebase(repository="harness")
 """The harness's project's own code, which calls the inbox's services for its agents."""
@@ -453,8 +468,317 @@ def changed(step: Step[Everywhere]) -> list[Changed]:
     ]
 
 
+class Written(Model):
+    """Markdown an agent writes, a line at a time: the beginnings of its blocks, and what goes on with them."""
+
+    lines: list[
+        Literal[
+            "a paragraph",
+            "- an item",
+            "  - nested in it",
+            "1. a first",
+            "# a heading",
+            "> a quote",
+            "```",
+            "    set in",
+            "| a | b |",
+            "|---|---|",
+            "---",
+            "<div>",
+            "[a]: https://x.y",
+            "",
+        ]
+    ] = Field(min_length=1, max_length=8)
+
+    def text(self) -> str:
+        """Return what's written."""
+        return "\n".join(self.lines)
+
+
+class Pointing(Model):
+    """Which line the operator points at, the last where there are fewer."""
+
+    line: int = Field(ge=0, le=8)
+
+
+class Highlight(Model):
+    """A phrase the operator picks out of a line, and what the line says around it."""
+
+    before: Literal["", "so, "]
+    phrase: Literal["safer", "shorter by far"]
+    after: Literal[", since nothing is deleted", " than that"]
+
+    def line(self) -> str:
+        """Return the line whole, an item of a list."""
+        return f"- {self.before}{self.phrase}{self.after}"
+
+    def starts(self) -> int:
+        """Return where the phrase starts in its line."""
+        return len(f"- {self.before}")
+
+    def ends(self) -> int:
+        """Return where the phrase ends in its line."""
+        return self.starts() + len(self.phrase)
+
+
+class Deciding(Model):
+    """How many decisions a question asks."""
+
+    count: int = Field(ge=1, le=3)
+
+
+async def asked(started: Started, text: str, agent: Agent, decisions: int = 0) -> int:
+    """Ask the operator `text` as `agent`, with as many decisions, without waiting, and return the question's number."""
+    asking = AskSaid(
+        question=text,
+        decisions=[
+            Decision(decision=f"decide {number}", lean=f"lean {number}")
+            for number in range(1, decisions + 1)
+        ],
+        wait=False,
+    )
+    await said(started, "ask", asking, agent)
+    return max((await inboxed(started)).waiting)
+
+
+async def texts(started: Started, number: int) -> list[Markdown]:
+    """Return the blocks saying item `number`'s words, as the operator's view of what waits lays them out."""
+    shown = await viewed(started, "waiting", PartiesOf(repository="harness"))
+    return [
+        each
+        for each in shown.blocks
+        if isinstance(each, Markdown) and each.id.startswith(f"item-{number}-")
+    ]
+
+
+async def commented(started: Started, comment: Commented[OnItem]) -> None:
+    """Comment on an item as the operator does, which must be kept."""
+    kept = await started.run("core", "comment", comment, Operator())
+    assert isinstance(kept, Accepted), kept
+
+
+async def told_on(started: Started, agent: Agent, words: str) -> On:
+    """Tell `agent` what's for them, and return what the item saying `words` is said to be on, which it must be."""
+    [on] = [
+        each.on
+        for each in (await told(started, agent)).items
+        if each.text == words and each.on is not None
+    ]
+    return on
+
+
 class InboxPromises(Part):
     """What agents and the operator can count on of the inbox."""
+
+    @lup.promise
+    def a_parts_id_names_the_same_words(self, step: Step[Everywhere]) -> bool:
+        """A part's id names the same words for as long as its item is kept."""
+        before = {
+            each.item: each.parts
+            for inbox in step.before.inboxes
+            for each in inbox.parts
+        }
+        return all(
+            before.get(each.item, each.parts) == each.parts
+            for inbox in step.after.inboxes
+            for each in inbox.parts
+        )
+
+    @lup.promise
+    def a_comment_on_a_part_names_one_its_item_has(
+        self, step: Step[Everywhere]
+    ) -> bool:
+        """A comment on a part of an item names a part that item has."""
+        counted = {
+            each.item: len(each.parts)
+            for inbox in step.after.inboxes
+            for each in inbox.parts
+        }
+        return all(
+            each.on is not None and 1 <= place <= counted.get(each.on, 0)
+            for inbox in step.after.inboxes
+            for each in inbox.comments
+            for place in each.places
+        )
+
+    @lup.promise
+    async def every_line_said_is_in_one_part(self, by: Testing) -> None:
+        """Each line an agent says that says something is in one part, and the parts in order are what they said."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        written = by.any(Written)
+        await said(started, "note", NoteSaid(remark=written.text()), agent)
+        [found] = (await inboxed(started)).parts
+        assert [line for part in found.parts for line in part.splitlines() if line] == [
+            line for line in written.lines if line
+        ]
+
+    @lup.promise
+    async def a_comment_on_a_line_is_told_with_what_cites_it(self, by: Testing) -> None:
+        """A comment the operator writes on a line of an item, in the dashboard, is told to its writer as on the part the view says cites that line, or on the item where it's one part alone."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        lines = [*by.any(Written).lines, "the end"]
+        number = await asked(started, "\n".join(lines), agent)
+        [text] = await texts(started, number)
+        at = min(by.any(Pointing).line, len(lines) - 1)
+        page = await started.dashboard()
+        await page.say(Hello(token=page.token))
+        quote = Quote(
+            viewing=Viewing(
+                module="core", view="waiting", given={"repository": "harness"}
+            ),
+            block=text.id,
+            lines=[lines[at]],
+            line=at,
+        )
+        await page.say(Write(comment=Comment(id="c", on=quote, words="why?")))
+        await page.say(Send())
+        while not isinstance(sent := await page.told(), Delivered):
+            assert sent is not None, "the page was told nothing more before the send"
+        assert sent.went == ["c"]
+        above = [each for each in reversed(text.anchors) if each.line <= at]
+        cited = next((each.cited for each in [*above, *text.anchors]), f"@{number}")
+        on = await told_on(started, agent, "why?")
+        assert f"@{on.named()}" == cited
+
+    @lup.promise
+    async def what_the_operator_picks_out_is_told_whole(self, by: Testing) -> None:
+        """A phrase the operator picks out of an item is told whole, with the part it's in; a comment on whole parts is told by their ids and how they begin, over several with the first and the last; one on the item's heading is on the item whole."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        picked = by.any(Highlight)
+        number = await asked(started, f"Which way?\n\n{picked.line()}\n- or not", agent)
+        shown = await viewed(started, "waiting", PartiesOf(repository="harness"))
+        heading = "".join(
+            span.text
+            for each in shown.blocks
+            if isinstance(each, Line) and each.id == f"item-{number}"
+            for span in each.spans
+        )
+        on = OnItem(item=number)
+        await commented(
+            started,
+            Commented[OnItem](
+                on=on,
+                words="a phrase",
+                lines=[picked.line()],
+                line=2,
+                start=picked.starts(),
+                end=picked.ends(),
+            ),
+        )
+        phrase = await told_on(started, agent, "a phrase")
+        assert (phrase.part, phrase.quote) == (2, picked.phrase)
+        await commented(
+            started,
+            Commented[OnItem](on=on, words="a part", lines=[picked.line()], line=2),
+        )
+        part = await told_on(started, agent, "a part")
+        assert (part.part, part.last, part.quote) == (2, None, None)
+        assert part.opening is not None
+        await commented(
+            started,
+            Commented[OnItem](
+                on=on, words="both", lines=[picked.line(), "- or not"], line=2
+            ),
+        )
+        both = await told_on(started, agent, "both")
+        assert (both.part, both.last, both.quote) == (2, 3, None)
+        await commented(
+            started, Commented[OnItem](on=on, words="it all", lines=[heading])
+        )
+        whole = await told_on(started, agent, "it all")
+        assert (whole.item, whole.part, whole.quote) == (number, None, None)
+
+    @lup.promise
+    async def each_decision_is_shown_and_answered_by_its_part(
+        self, by: Testing
+    ) -> None:
+        """A question's decisions each show as a part of their own after its text's, and a comment on one is told to the asker as on that part; a comment on a part it hasn't is refused."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        count = by.any(Deciding).count
+        number = await asked(started, "Which way?", agent, decisions=count)
+        shown = await texts(started, number)
+        assert len(shown) == 1 + count
+        for place, block in enumerate(shown, start=1):
+            assert [each.cited for each in block.anchors] == [f"@{number}.{place}"]
+        for place, block in enumerate(shown[1:], start=2):
+            assert f"decide {place - 1}" in block.text
+            assert f"lean {place - 1}" in block.text
+            [offer] = [each for each in block.offers if each.command == "comment"]
+            words = f"on {place}"
+            await commented(
+                started,
+                Commented[OnItem](on=OnItem.model_validate(offer.given), words=words),
+            )
+            on = await told_on(started, agent, words)
+            assert (on.item, on.part) == (number, place)
+        beyond = OnItem(item=number, part=count + 2)
+        refused = await started.run(
+            "core", "comment", Commented[OnItem](on=beyond, words="no"), Operator()
+        )
+        assert isinstance(refused, Refused)
+
+    @lup.promise
+    async def an_answers_rulings_are_told_at_a_later_call(self, by: Testing) -> None:
+        """An answer to a question nobody waits on is told at its asker's next call with each ruling, its comment whole, and the question it answers."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        number = await asked(started, "Which way?", agent, decisions=1)
+        comment = by.any(Highlight).phrase
+        ruling = Ruling(number=1, verdict="leaning", comment=comment)
+        answering = Answering(question=number, rulings=[ruling])
+        answered = await started.run("core", "answer", answering, Operator())
+        assert isinstance(answered, Accepted), answered
+        [answer] = (await told(started, agent)).items
+        assert comment in answer.text
+        assert answer.on is not None
+        assert answer.on.item == number
+
+    @lup.promise
+    async def words_on_no_item_are_told_with_the_lines_they_are_on(
+        self, by: Testing
+    ) -> None:
+        """A comment to a party on lines no item holds, as a conversation's, is told with what it picks out of them, whole."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        picked = by.any(Highlight)
+        await said(started, "note", NoteSaid(remark="here"), agent)
+        kept = await started.run(
+            "core",
+            "comment_to",
+            Commented[Reached](
+                on=Reached(party=agent),
+                words="what's this?",
+                lines=[picked.line()],
+                start=picked.starts(),
+                end=picked.ends(),
+            ),
+            Operator(),
+        )
+        assert isinstance(kept, Accepted), kept
+        on = await told_on(started, agent, "what's this?")
+        assert (on.item, on.quote) == (None, picked.phrase)
+
+    @lup.promise
+    async def a_part_is_read_by_its_id(self, by: Testing) -> None:
+        """An agent reads a part of an item alone by the item's number and its place, or the item whole with each part's id; a place it hasn't is refused, and so is clearing a part."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        picked = by.any(Highlight)
+        number = await asked(started, f"Which way?\n\n{picked.line()}", agent)
+        part = await said(started, "inbox", Reading(number=number, part=2), agent)
+        assert picked.line() in part
+        assert "Which way?" not in part
+        whole = await said(started, "inbox", Reading(number=number), agent)
+        assert all(f"@{number}.{place}" in whole for place in [1, 2])
+        missing = Reading(number=number, part=3)
+        assert isinstance(await started.call("inbox", missing, agent), Refused)
+        clearing = Clearing(repository="harness", what=f"{number}.2")
+        cleared = await started.run("core", "clear", clearing, Operator())
+        assert isinstance(cleared, Refused)
 
     @lup.promise
     def nothing_is_told_twice(self, step: Step[Everywhere]) -> bool:

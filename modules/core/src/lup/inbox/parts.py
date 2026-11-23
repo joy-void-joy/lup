@@ -163,12 +163,12 @@ class Stretch(Model):
 
 
 def stretches(item: Item) -> list[Stretch]:
-    """Return the stretches of `item`'s words, in order: its text, where it isn't blank, then each thing it says beyond it, their parts numbered on."""
+    """Return the stretches of `item`'s words, in order: its text, where it has one, then each thing it says beyond it, their parts numbered on."""
     own = parted(item.text)
     beyond = item.beyond()
     of = len(own) + len(beyond)
     return [
-        *([Stretch(item=item, text=item.text, parts=own, of=of)] if own else []),
+        *([Stretch(item=item, text=item.text, parts=own, of=of)] if item.text else []),
         *(
             Stretch(
                 item=item,
