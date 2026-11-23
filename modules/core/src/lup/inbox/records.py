@@ -135,6 +135,15 @@ class Item(Node):
         """Return how the operator's views lay it out beyond its words; none for its words alone, as every kind of the inbox's own is."""
         return None
 
+    def beyond(self) -> list[str]:
+        """Return what it says beyond its text, as Markdown, each a part of its own after its text's: the base says nothing beyond it."""
+        return []
+
+    def words(self) -> str:
+        """Return its words whole: its text, then what it says beyond it."""
+        said = [self.text, "\n".join(self.beyond())]
+        return "\n\n".join(each for each in said if each)
+
 
 type Tone = Literal["note", "problem", "disagreement", "question"]
 """What a message is: news, or one of the three that want their reader's answer."""
@@ -177,6 +186,13 @@ class Question(Item):
         """Say that a question waits until it's answered."""
         return True
 
+    def beyond(self) -> list[str]:
+        """Return its decisions, each numbered as its ruling names it, its lean on a line of its own."""
+        return [
+            f"{number}. {each.decision}\n   lean: {each.lean}"
+            for number, each in enumerate(self.decisions, start=1)
+        ]
+
 
 type Verdict = Literal["leaning", "undecided", "leave open"]
 """What the operator says to one decision: go with the lean, not yet, or leave it open."""
@@ -195,6 +211,14 @@ class Answer(Item):
 
     kind: str = "inbox:answer"
     rulings: list[Ruling] = []
+
+    def beyond(self) -> list[str]:
+        """Return its rulings, each by its decision's number."""
+        return [
+            f"{each.number}. {each.verdict or 'no verdict'}"
+            + (f": {each.comment}" if each.comment else "")
+            for each in self.rulings
+        ]
 
 
 class Felt(Item):
