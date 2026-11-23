@@ -121,7 +121,11 @@ from {self.package()}.promises import {self.called()}Promises
 
 
 class {self.called()}(Module):
-    """What {self.name} does, in a sentence: lup shows it wherever it names the module."""
+    """What {self.name} does, in a line.
+
+    lup's help lists the module by this docstring's first line, standing alone,
+    60 characters at most; the rest says more.
+    """
 
     name = "{self.name}"
     parts: Parts = Parts.of({self.called()}Promises)

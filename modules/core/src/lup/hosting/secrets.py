@@ -7,11 +7,14 @@ room mounts it. Kept as one JSON file per project, readable and writable by the
 operator alone (`README.md` here, *Secrets*).
 """
 
+from typing import ClassVar
+
 from pydantic import Field, TypeAdapter
 from pydantic_settings import EnvSettingsSource
 
 import lup
 from lup.command_line.filled import Repository
+from lup.doors.done import Done
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part, variable
 from lup.running.plan import Name
@@ -40,6 +43,14 @@ class Keeping(Model):
     name: str
     value: str = Field(repr=False)
     repository: Repository
+
+
+class SecretKept(Done):
+    """A secret of a repository's kept under its name, its value never said."""
+
+    line: ClassVar[str] = "kept {name} for {repository}"
+    name: str
+    repository: str
 
 
 class Overrides(Settings):
@@ -81,10 +92,11 @@ class Secrets(Part, machine=True, shared=True):
         )
 
     @lup.command
-    async def keep(self, keeping: Keeping, by: Operator) -> str:
-        """Keep a project's secret under its name, in place of one kept before.
+    async def keep(self, keeping: Keeping, by: Operator) -> SecretKept:
+        """Keep a project's secret under its name.
 
-        It's the operator's alone, written to a file only they read.
+        In place of one kept before. It's the operator's alone, written to a
+        file only they read.
         """
         del by
         self.store.path.chmod(0o700)
@@ -93,4 +105,4 @@ class Secrets(Part, machine=True, shared=True):
         file.touch(mode=0o600)
         file.chmod(0o600)
         file.write_bytes(STORED.dump_json(kept))
-        return f"kept `{keeping.name}` for {keeping.repository}"
+        return SecretKept(name=keeping.name, repository=keeping.repository)

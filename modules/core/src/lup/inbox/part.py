@@ -21,6 +21,7 @@ from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import Data, Declared, Part
 from lup.inbox import conversion, views
+from lup.inbox.conversion import Converted
 from lup.inbox.inbox import Inbox, InboxError, first_line
 from lup.inbox.records import (
     NODES,
@@ -39,6 +40,8 @@ from lup.inbox.said import (
     Awaited,
     Awaiting,
     Clearing,
+    CommentKept,
+    ConcernDeclined,
     ConcernOf,
     ConcernSaid,
     Converting,
@@ -48,20 +51,25 @@ from lup.inbox.said import (
     Everywhere,
     FrictionSaid,
     Inboxed,
+    ItemsSeen,
     Naming,
+    NodeCleared,
     NoteSaid,
     Nothing,
     OnItem,
     PartiesOf,
     PartyOf,
     Pile,
+    PileMade,
     Piling,
     Posted,
     Posting,
+    QuestionAnswered,
     Reached,
     Reading,
     SaidSince,
     SendSaid,
+    SentTo,
     Settling,
     Showing,
     Since,
@@ -449,87 +457,121 @@ class Inboxes(Part, approved=True, shared=True):
     # The operator's acts
 
     @lup.command
-    async def answer(self, answering: Answering, by: Operator) -> str:
-        """Answer a question: a ruling on each decision, and your words."""
+    async def answer(self, answering: Answering, by: Operator) -> QuestionAnswered:
+        """Answer a question: a ruling on each decision, your words.
+
+        Each decision gets its ruling, and your words go with them.
+        """
         del by
         with refusing():
             question = self.numbered(answering.question, Question)
             inbox = self.inbox(question.repository)
             answer = inbox.answered(question, answering.rulings, answering.text)
-        return f"Answered @{question.number}, @{answer.number}."
+        return QuestionAnswered(
+            question=question.number or 0, answer=answer.number or 0
+        )
 
     @lup.command(verb="comment", says="comment on it")
-    async def comment(self, commented: Commented[OnItem], by: Operator) -> str:
-        """Keep your comment on an item, or a part of it: it reaches whoever wrote it, and each party it was for."""
+    async def comment(self, commented: Commented[OnItem], by: Operator) -> CommentKept:
+        """Keep your comment on an item, or on a part of it.
+
+        It reaches whoever wrote the item, and each party it was for.
+        """
         del by
         with refusing():
             item = self.numbered(commented.on.item, Item)
             inbox = self.inbox(item.repository)
             comment = inbox.commented(item, commented, commented.on.part)
-        return f"Commented, @{comment.number}."
+        return CommentKept(item=item.number or 0, comment=comment.number or 0)
 
     @lup.command(verb="comment", says="comment to them")
-    async def comment_to(self, commented: Commented[Reached], by: Operator) -> str:
-        """Keep your comment on a block that offers none of its own, for the party it reaches: an agent, or a pile, where it opens a concern."""
+    async def comment_to(self, commented: Commented[Reached], by: Operator) -> SentTo:
+        """Keep your comment for the party a block reaches.
+
+        For a block that offers no comment of its own: the party it reaches is
+        an agent, or a pile, where the comment opens a concern.
+        """
         del by
         with refusing():
             found = self.reached(commented.on.party)
             inbox = self.inbox(found.repository)
             comment = inbox.told_party(found, commented)
-        return f"Sent to {inbox.called(found)}, @{comment.number}."
+        return SentTo(to=inbox.called(found), comment=comment.number or 0)
 
     @lup.command
-    async def tell(self, addressing: Addressing, by: Operator) -> str:
-        """Send your words to a party: an agent, or a pile, where they open a concern."""
+    async def tell(self, addressing: Addressing, by: Operator) -> SentTo:
+        """Send your words to an agent, or to a pile.
+
+        A pile keeps them as a concern it opens.
+        """
         del by
         inbox = self.inbox(addressing.repository)
         with refusing():
             party = inbox.party(addressing.to)
             comment = inbox.told_party(party, Commenting(words=addressing.text))
-        return f"Sent to {inbox.called(party)}, @{comment.number}."
+        return SentTo(to=inbox.called(party), comment=comment.number or 0)
 
     @lup.command(verb="done", says="clear it")
-    async def clear(self, clearing: Clearing, by: Operator) -> str:
-        """Clear an item, a concern, or a party's buffer whole, until something new happens there."""
+    async def clear(self, clearing: Clearing, by: Operator) -> NodeCleared:
+        """Clear an item, a concern, or a party's buffer whole.
+
+        It stays cleared until something new happens there.
+        """
         del by
         inbox = self.inbox(clearing.repository)
         with refusing():
             node = inbox.cited(clearing.what)
             inbox.cleared(node)
-        return f"Cleared {clearing.what}."
+        return NodeCleared(what=clearing.what)
 
     @lup.command(verb="decline", says="decline it")
-    async def decline(self, declining: Declining, by: Operator) -> str:
-        """Decline a concern, saying why: nothing more will be done about it."""
+    async def decline(self, declining: Declining, by: Operator) -> ConcernDeclined:
+        """Decline a concern, saying why.
+
+        Nothing more will be done about it.
+        """
         del by
         with refusing():
             concern = self.numbered(declining.concern, Concern)
             self.inbox(concern.repository).declined(concern, declining.why)
-        return f"Declined @{concern.number}."
+        return ConcernDeclined(concern=concern.number or 0)
 
     @lup.command
-    async def pile(self, piling: Piling, by: Operator) -> str:
-        """Make a pile, by its path, and each pile above it not there yet."""
+    async def pile(self, piling: Piling, by: Operator) -> PileMade:
+        """Make a pile by its path, and each pile above it.
+
+        Each pile above it that isn't there yet is made too.
+        """
         del by
         inbox = self.inbox(piling.repository)
         with refusing():
             made = inbox.pile(piling.path, inbox.operator())
-        return f"Made {inbox.called(made)}."
+        return PileMade(pile=inbox.called(made))
 
     @lup.command
-    async def convert(self, converting: Converting, by: Operator) -> str:
-        """Bring a repository's frictions and concerns over from the second lup's ledger, once: each a friction or a concern by the tool its first words were filed with, with its title, bodies, place, holder, done mark and the words filed in it; the agents who held or wrote them read as ended."""
+    async def convert(self, converting: Converting, by: Operator) -> Converted:
+        """Bring frictions and concerns over from the second lup.
+
+        From its ledger, once: each a friction or a concern by the tool its
+        first words were filed with, with its title, bodies, place, holder,
+        done mark and the words filed in it; the agents who held or wrote them
+        read as ended, so what they held waits in `no-agent`, saying who left
+        it, until they start here.
+        """
         del by
         # lup: defer(issue=13, why="the second lup's ledger is read once, at the switch, and the command goes with the second lup")
         inbox = self.inbox(converting.repository)
         with refusing():
             ledger = conversion.read(converting.ledger, converting.named)
-            converted = conversion.converted(inbox, ledger)
-        return converted.said()
+            return conversion.converted(inbox, ledger)
 
     @lup.command(verb="seen", says="seen")
-    async def shown(self, showing: Showing, by: Operator) -> str:
-        """Say what's been on your screen: each isn't new to you after, and stays where it is until you clear it."""
+    async def shown(self, showing: Showing, by: Operator) -> ItemsSeen:
+        """Say what's been on your screen.
+
+        Each item isn't new to you after, and stays where it is until you
+        clear it.
+        """
         del by
         with refusing():
             items = [self.numbered(each, Item) for each in showing.items]
@@ -537,7 +579,7 @@ class Inboxes(Part, approved=True, shared=True):
             self.inbox(repository).shown(
                 [each for each in items if each.repository == repository]
             )
-        return f"{len(items)} shown."
+        return ItemsSeen(count=len(items), items=showing.items)
 
     # What the operator reads
 
@@ -554,12 +596,19 @@ class Inboxes(Part, approved=True, shared=True):
 
     @lup.view
     async def parties(self, of: PartiesOf) -> Blocks:
-        """Show a repository's parties: each agent no other spawned and each pile at the top, each opening on its buffer."""
+        """Show a repository's parties, each opening on its buffer.
+
+        Each agent no other spawned, and each pile at the top.
+        """
         return views.parties(self.inbox(of.repository), self.shows())
 
     @lup.view
     async def party(self, of: PartyOf) -> Blocks:
-        """Show a party's buffer: the concerns it holds, the parties under it, and what it said or was told outside any concern."""
+        """Show a party's buffer.
+
+        The concerns it holds, the parties under it, and what it said or was
+        told outside any concern.
+        """
         inbox = self.inbox(of.repository)
         with refusing():
             found = inbox.party(of.name)
@@ -567,14 +616,20 @@ class Inboxes(Part, approved=True, shared=True):
 
     @lup.view
     async def concern_view(self, of: ConcernOf) -> Blocks:
-        """Show a concern whole: its body, the concerns under it, and what's been said in it."""
+        """Show a concern whole.
+
+        Its body, the concerns under it, and what's been said in it.
+        """
         with refusing():
             found = self.numbered(of.number, Concern)
         return views.concern(self.inbox(found.repository), found, self.shows())
 
     @lup.view
     async def waiting(self, of: PartiesOf) -> Blocks:
-        """Show what waits on you: each item you're to answer, then each concern its agent says is done."""
+        """Show what waits on you.
+
+        Each item you're to answer, then each concern its agent says is done.
+        """
         return views.waiting(self.inbox(of.repository), self.shows())
 
     def reached(self, party: Agent | Pile) -> PartyRecord:

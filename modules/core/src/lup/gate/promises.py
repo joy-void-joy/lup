@@ -89,7 +89,10 @@ class Ruff(Model, Responding):
 
 
 class Noting(Module):
-    """A module of the project's own declaring a step of its own beside the gate's."""
+    """A step of the project's own, beside the gate's.
+
+    A module of the project's own declaring a step of its own beside the gate's.
+    """
 
     name = "noting"
     steps: Steps = Steps.of(Step(name="notes", command=["notes", "--all"]))

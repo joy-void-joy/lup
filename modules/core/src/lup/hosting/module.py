@@ -28,10 +28,15 @@ from lup.hosting.promises import (
 )
 from lup.hosting.secrets import Secrets
 from lup.hosting.trees import Trees
+from lup.shell.kinds import FoldKind, Folds, Tone, Tones
 
 
 class Hosting(Module):
-    """What runs on the operator's machine: starting every container lup runs, and, as they're built, carrying calls, keeping approvals and secrets, and brokering credentials."""
+    """What runs on your machine, and what you approved to run.
+
+    Starting every container lup runs, and, as they're built, carrying calls,
+    keeping approvals and secrets, and brokering credentials.
+    """
 
     name = "hosting"
     parts: Parts = Parts.of(
@@ -54,3 +59,21 @@ class Hosting(Module):
         MachinewidePromises,
         AimingPromises,
     )
+    tones: Tones = Tones.of(
+        Tone(name="up", colour="ok"),
+        Tone(name="down", colour="err"),
+        Tone(name="waiting", colour="warn"),
+    )
+    """How `status` says a container stands: running, ended or failed, or a
+    part waiting on what it needs."""
+    folds: Folds = Folds.of(
+        FoldKind(
+            name="project",
+            letter="p",
+            called="project",
+            starts_open=True,
+            colour="cyan",
+        )
+    )
+    """A project `status` shows, its containers under it, or the machine's own
+    parts."""

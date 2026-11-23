@@ -42,6 +42,7 @@ from lup.declaration.profiles import (
 )
 from lup.declaration.project import Project
 from lup.doors.command import command
+from lup.doors.done import Done
 from lup.doors.door import DoorError, RefusedError
 from lup.doors.events import Event, Starting, Stopping
 from lup.doors.on import on
@@ -110,6 +111,7 @@ __all__ = [
     "Data",
     "Declared",
     "Diff",
+    "Done",
     "DoorError",
     "Edge",
     "Event",

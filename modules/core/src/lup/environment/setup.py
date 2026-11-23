@@ -13,7 +13,7 @@ import sys
 
 from pydantic import ValidationError
 
-from lup.doors.door import RefusedError, served
+from lup.doors.door import RefusedError, is_model, served
 from lup.environment.command_line import InProcess, machine
 from lup.environment.running.calling import Calling
 from lup.environment.running.loader import Loader, LoaderError, Places
@@ -23,7 +23,7 @@ from lup.programs import ProgramError
 from lup.programs.git import Git
 from lup.running.plan import CORE
 from lup.running.wire import Answered, Call, CommandCalled, Declined, Reply
-from lup.setup.part import SetUp, Setup
+from lup.setup.part import SetUp, Setup, Unregistered
 
 
 class SettingUp(InProcess):
@@ -36,8 +36,13 @@ class SettingUp(InProcess):
             case CommandCalled(module=module, command=command), Answered(
                 output=output
             ) if module == CORE and command in served(Setup):
-                done = await registered(SetUp.model_validate(output))
-                return Answered(output=done.model_dump(mode="json"))
+                returned = served(Setup)[command].taken.returned
+                answer = returned if is_model(returned) else SetUp
+                set_up = answer.model_validate(output)
+                if not isinstance(set_up, SetUp):
+                    return reply
+                done = await registered(set_up)
+                return Answered(output=done.model_dump(mode="json"), shown=done.shown())
             case _:
                 return reply
 
@@ -46,21 +51,18 @@ async def registered(done: SetUp) -> SetUp:
     """Tell the operator's lup of the repository `done` set up, through `hosting register`, and return `done` saying whether it did, and why not where it didn't."""
     calling = LupSettings().lup_calling
     if calling is None and shutil.which("podman") is None:
-        return done.model_copy(
-            update={
-                "unregistered": (
-                    "podman isn't here, so no machine of lup's runs to list it: "
-                    "once one does, `lup hosting register` lists it"
-                )
-            }
+        why = (
+            "podman isn't here, so no machine of lup's runs to list it: once one "
+            "does, `lup hosting register` lists it"
         )
+        return done.model_copy(update={"unregistered": Unregistered(why=why)})
     try:
         worktree = await Git.located(done.root)
         if worktree is None:
             message = (
                 f"{done.root} is in no git worktree, so there's no repository to list"
             )
-            return done.model_copy(update={"unregistered": message})
+            return done.model_copy(update={"unregistered": Unregistered(why=message)})
         opening = Opening(
             repository=worktree.main.name,
             common=worktree.common,
@@ -82,9 +84,10 @@ async def registered(done: SetUp) -> SetUp:
             )
         )
     except (ProgramError, ValidationError, LoaderError, RefusedError) as failed:
-        return done.model_copy(update={"unregistered": str(failed)})
+        return done.model_copy(update={"unregistered": Unregistered(why=str(failed))})
     match reply:
         case Answered():
-            return done.model_copy(update={"registered": True, "unregistered": ""})
+            return done.model_copy(update={"registered": True, "unregistered": None})
         case Declined(rejection=rejection):
-            return done.model_copy(update={"unregistered": rejection.reason})
+            why = Unregistered(why=rejection.reason)
+            return done.model_copy(update={"unregistered": why})

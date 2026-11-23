@@ -37,7 +37,10 @@ class Actions(Named[str]):
 
 
 class GitHub(Module):
-    """The tools sessions act on GitHub through, with the operator's own login, within what the declaration allows.
+    """Acting on GitHub with your login, within limits.
+
+    The tools sessions act on GitHub through, with the operator's own login, within what
+    the declaration allows.
 
     Each project's is one part, in a container of its own, holding the
     operator's GitHub login alone (`Forge`). It writes to the project's own

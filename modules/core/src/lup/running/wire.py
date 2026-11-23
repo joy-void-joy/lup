@@ -16,11 +16,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
+from lup.doors.done import Done
 from lup.doors.door import Accepted, Refused, Rejection
 from lup.doors.parties import Agent, Codebase, Machine, Operator
 from lup.doors.parts import SshAgent
 from lup.errors import LupError
 from lup.running.plan import Plan
+from lup.shell.blocks import Blocks
 from lup.types import Model
 
 type Caller = Annotated[
@@ -177,11 +179,15 @@ class Offer(Model):
 
 
 class Answered(Model):
-    """A call the method ran: what it answered, as JSON."""
+    """A call the method ran: what it answered, as JSON, and, for a command, the line said of what it did, which the command line prints."""
 
     format: int = 1
     kind: Literal["answered"] = "answered"
     output: JsonValue = None
+    shown: Blocks | None = None
+    """What the command line prints of a command's answer, a `Done`: its line,
+    and those of the `Done`s it holds (`Done.shown`), made where the call is
+    answered, which has the class; none for any other call."""
 
 
 class Declined(Model):
@@ -199,6 +205,8 @@ type Reply = Annotated[Answered | Declined, Field(discriminator="kind")]
 def replied(answered: Accepted | Refused) -> Reply:
     """Return a call's answer as it crosses: what the method answered, as JSON, or the refusal."""
     match answered:
+        case Accepted(output=Done() as done):
+            return Answered(output=done.model_dump(mode="json"), shown=done.shown())
         case Accepted(output=BaseModel() as model):
             return Answered(output=model.model_dump(mode="json"))
         case Accepted(output=str() as words):

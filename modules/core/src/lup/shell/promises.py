@@ -11,7 +11,7 @@ import csv
 import json
 import tempfile
 from pathlib import Path
-from typing import Literal, get_args
+from typing import ClassVar, Literal, get_args
 
 from pydantic import Field
 
@@ -20,6 +20,7 @@ from lup import (
     Agent,
     Blocks,
     Commented,
+    Done,
     Fold,
     FoldKind,
     Folds,
@@ -88,6 +89,20 @@ class Clearing(Model):
     number: int
 
 
+class NoteDone(Done):
+    """A note acted on: seen, cleared, or commented on."""
+
+    line: ClassVar[str] = "note {number}"
+    number: int
+
+
+class Released(Done):
+    """A pile's comments let through."""
+
+    line: ClassVar[str] = "{pile}: comments let through"
+    pile: str
+
+
 class NotesPart(Part):
     """A pile of notes, each a fold under its title, its text read as it opens, and the comments it took."""
 
@@ -137,7 +152,11 @@ class NotesPart(Part):
 
     @lup.view
     async def reaching(self, of: PileOf) -> Blocks:
-        """Show a line that reaches the pile's own pile in the inbox, and one that reaches no party, neither offering a comment of its own."""
+        """Show a line reaching the pile's pile, and one reaching none.
+
+        One line reaches the pile's own pile in the inbox, and one no party,
+        neither offering a comment of its own.
+        """
         return Blocks.of(
             Line(
                 id="reaches",
@@ -149,7 +168,10 @@ class NotesPart(Part):
 
     @lup.view
     async def taken(self, of: PileOf) -> Blocks:
-        """Show what each comment the pile took said, a line each, in the order they came."""
+        """Show what each comment the pile took said, a line each.
+
+        In the order they came.
+        """
         return Blocks.of(
             *(
                 Line(id=str(at), spans=[Span(text=words)])
@@ -177,14 +199,17 @@ class NotesPart(Part):
         ]
 
     @lup.command(verb="seen", says="seen")
-    async def see(self, seeing: Clearing, by: lup.Operator) -> str:
+    async def see(self, seeing: Clearing, by: lup.Operator) -> NoteDone:
         """Say a note's been on the operator's screen."""
         self.sighted.append(seeing.number)
-        return f"seen {seeing.number}"
+        return NoteDone(number=seeing.number)
 
     @lup.view
     async def seen(self, of: PileOf) -> Blocks:
-        """Show each note that's been on the operator's screen, a line each, in the order they were."""
+        """Show each note that's been on your screen, a line each.
+
+        In the order they were.
+        """
         return Blocks.of(
             *(
                 Line(id=str(at), spans=[Span(text=str(number))])
@@ -194,30 +219,33 @@ class NotesPart(Part):
         )
 
     @lup.command(verb="done", says="clear it")
-    async def clear(self, clearing: Clearing, by: lup.Operator) -> str:
+    async def clear(self, clearing: Clearing, by: lup.Operator) -> NoteDone:
         """Clear a note."""
         self.cleared.append(clearing.number)
-        return f"cleared {clearing.number}"
+        return NoteDone(number=clearing.number)
 
     @lup.command(verb="comment", says="comment on it")
-    async def comment(self, commented: Commented[NoteOf], by: lup.Operator) -> str:
-        """Take a comment on a note, once the pile lets comments through where it holds them."""
+    async def comment(self, commented: Commented[NoteOf], by: lup.Operator) -> NoteDone:
+        """Take a comment on a note, once the pile lets it through.
+
+        Where the pile holds the comments it takes, until it's released.
+        """
         del by
         if self.module.holding:
             await self.released.wait()
         self.heard.append(commented.words)
-        return f"note {commented.on.number}: {commented.words}"
+        return NoteDone(number=commented.on.number)
 
     @lup.command(verb="release", says="let the comments held through")
-    async def release(self, of: PileOf, by: lup.Operator) -> str:
+    async def release(self, of: PileOf, by: lup.Operator) -> Released:
         """Let every comment held, and every one after, through."""
         del by
         self.released.set()
-        return f"{of.pile}: comments let through"
+        return Released(pile=of.pile)
 
 
 class Notes(Module):
-    """Notes in a pile: an example module the shell's promises read views of."""
+    """Notes in a pile, whose views the shell's promises read."""
 
     name = "notes"
     notes: int = 0
@@ -233,7 +261,7 @@ class Notes(Module):
 
 
 class Echoes(Module):
-    """Another module, declaring a fold kind on a letter the notes' takes."""
+    """A fold kind on a letter the notes' takes."""
 
     name = "echoes"
     folds: Folds = Folds.of(FoldKind(name="echo", letter="n", called="echo"))

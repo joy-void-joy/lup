@@ -8,6 +8,7 @@ containers from it and routes calls by it; a part holding something runs apart,
 in a container of its own (`README.md` here, *The plan*).
 """
 
+import pydoc
 from collections import Counter
 from typing import Annotated, Literal, get_args
 
@@ -16,6 +17,7 @@ from pydantic import StringConstraints
 from lup.doors.parts import Holds
 from lup.doors.tool import ToolSpec
 from lup.rooms.packages import Package
+from lup.shell.looks import Looks
 from lup.types import JsonObject, Model
 
 CORE = "core"
@@ -58,13 +60,22 @@ class Doorway(Model):
     """The JSON Schema of the model it takes, or of each where it takes a list
     of it: what the command line reads its arguments and options from."""
     here: bool = False
-    """Whether it's a command `lup` answers where it's typed, over the
-    declaration of the worktree it's typed in, never carried to where the
-    project runs (`@lup.command(here=True)`)."""
+    """Whether it's a command or a view `lup` answers where it's typed, over
+    the declaration of the worktree it's typed in, never carried to where the
+    project runs (`@lup.command(here=True)`, `@lup.view(here=True)`)."""
 
     def typed(self) -> str:
         """Name it as the command line types it (`typed`)."""
         return typed(self.name)
+
+    def summary(self) -> str:
+        r"""Return what help lists it by: its docstring's first line, standing alone, which its door holds to a length; the whole first line where it runs on.
+
+        >>> Doorway(door="command", name="keep", parties=[], description="Keep a secret.\n\nOne of a project's.").summary()
+        'Keep a secret.'
+        """
+        line, _ = pydoc.splitdoc(self.description)
+        return line or next(iter(self.description.splitlines()), "")
 
     def said(self, module: str) -> str:
         """Name it as a refusal does, with its module where its name is the module's alone: a tool's or a service's name is the project's, a command's or a view's its module's.
@@ -80,10 +91,12 @@ class Doorway(Model):
 
 
 class ModulePlan(Model):
-    """One of the project's modules, as the command line names it: its name, and its one sentence."""
+    """One of the project's modules, as the command line names it: its name, its summary, and its one sentence."""
 
     name: str
     description: str = ""
+    summary: str = ""
+    """Its docstring's first line, standing alone: what help lists it by."""
 
 
 class PartPlan(Model):
@@ -133,6 +146,9 @@ class Plan(Model):
     """The files of the project loading the declaration imported, relative to
     its root: what an approval may point at, never what it approves, which is
     the commit whole."""
+    looks: Looks = Looks()
+    """Every tone, fold kind and mark kind its modules declare: what the
+    command line draws a view's spans and folds in, as the page does."""
 
     def together(self) -> list[PartPlan]:
         """Return the parts holding nothing, which run in the project's own container, but those run in each session's own room."""
@@ -192,7 +208,7 @@ class Plan(Model):
         >>> Plan(modules=[ModulePlan(name="core"), ModulePlan(name="harmon")]).only(
         ...     ["harmon"]
         ... ).modules
-        [ModulePlan(name='harmon', description='')]
+        [ModulePlan(name='harmon', description='', summary='')]
         """
         return self.model_copy(
             update={

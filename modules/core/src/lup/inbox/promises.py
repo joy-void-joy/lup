@@ -9,6 +9,7 @@ import asyncio
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import ClassVar
 
 from sqlalchemy import Column, Integer, MetaData, Table, Text, create_engine, insert
 from sqlalchemy.engine import URL
@@ -92,6 +93,13 @@ class Change(Model):
     change: str
 
 
+class ChangeAccepted(lup.Done):
+    """A change accepted."""
+
+    line: ClassVar[str] = "accepted {change}"
+    change: str
+
+
 class ChangeWaits(Item):
     """A change waiting on the operator's review: the reviewing module's own kind of item, laid out as a fold opening on its view, offering its command."""
 
@@ -122,14 +130,18 @@ class Reviews(Part):
         return Blocks.of(Line.of("change", change.change))
 
     @lup.command(verb="done", says="accept it")
-    async def accept(self, change: Change, by: Operator) -> str:
+    async def accept(self, change: Change, by: Operator) -> ChangeAccepted:
         """Accept a change."""
         del by
-        return f"accepted {change.change}"
+        return ChangeAccepted(change=change.change)
 
 
 class Reviewing(Module):
-    """Reviewing: an example module the inbox's promises check a module's own kind of item with."""
+    """Reviewing changes, an item kind of a module's own.
+
+    Reviewing: an example module the inbox's promises check a module's own kind of item
+    with.
+    """
 
     name = "reviewing"
     parts: Parts = Parts.of(Reviews)

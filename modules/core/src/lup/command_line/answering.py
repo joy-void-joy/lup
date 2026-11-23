@@ -19,7 +19,7 @@ from typing import get_args
 from lup.doors.door import Rejection
 from lup.errors import LupError
 from lup.running.plan import Doorway, Offerable, Plan
-from lup.running.wire import Call, Caller, CommandCalled, Declined, Reply
+from lup.running.wire import Call, Caller, CommandCalled, Declined, Reply, ViewCalled
 from lup.types import Model, MutableModel
 
 
@@ -63,6 +63,12 @@ class Offered(Model):
         """Return the module named `module`'s one sentence, or nothing where the plan says none."""
         return next(
             (each.description for each in self.plan.modules if each.name == module), ""
+        )
+
+    def summarized(self, module: str) -> str:
+        """Return what help lists the module named `module` by, its summary, or nothing where the plan says none."""
+        return next(
+            (each.summary for each in self.plan.modules if each.name == module), ""
         )
 
 
@@ -116,8 +122,11 @@ class Here(MutableModel, Answerer, arbitrary_types_allowed=True):
         """Answer `call` in this process where it's a command `through`'s plan marks to run where it's typed, else send it through."""
         offered = await self.through.offered()
         match call:
-            case CommandCalled(module=module, command=name) if any(
-                way.door == "command" and way.name == name and way.here
+            case (
+                CommandCalled(module=module, command=name)
+                | ViewCalled(module=module, view=name)
+            ) if any(
+                way.door == call.kind and way.name == name and way.here
                 for part in offered.plan.parts
                 if part.module == module
                 for way in part.doorways

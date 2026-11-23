@@ -27,7 +27,10 @@ class Notes(Module):
 
 
 class Jottings(Module):
-    """Keeping jottings, as notes: an example module declaring the same kind as `Notes`."""
+    """Jottings, declaring the same kind as `Notes`.
+
+    Keeping jottings, as notes: an example module declaring the same kind as `Notes`.
+    """
 
     name = "jottings"
     kinds: Recorded = Recorded.of(Note)

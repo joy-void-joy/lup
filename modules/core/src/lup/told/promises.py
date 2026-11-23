@@ -50,7 +50,10 @@ class GuidedPart(Part):
 
 
 class Guided(Module):
-    """A module with something to tell sessions: an example the guidance's promises render."""
+    """Something to tell sessions, which promises render.
+
+    A module with something to tell sessions: an example the guidance's promises render.
+    """
 
     name = "guided"
     runner: str = "uv run"

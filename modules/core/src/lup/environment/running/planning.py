@@ -50,7 +50,9 @@ def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> 
     }
     return Plan(
         modules=[
-            ModulePlan(name=each.name, description=each.sentence())
+            ModulePlan(
+                name=each.name, description=each.sentence(), summary=each.summary()
+            )
             for each in resolved.modules
         ],
         parts=[
@@ -59,6 +61,7 @@ def plan_of(resolved: Resolved, loaded: list[str], root: Path | None = None) -> 
         ],
         tools=resolved.doors.tools(),
         files=loaded,
+        looks=resolved.looks,
         packages=[
             package for each in resolved.modules for package in each.held(Packages)
         ],
@@ -114,8 +117,9 @@ def doorway(entry: Entry) -> Doorway | None:
         case CommandDoor(here=typed_here):
             door = "command"
             here = typed_here
-        case ViewDoor():
+        case ViewDoor(here=typed_here):
             door = "view"
+            here = typed_here
         case _:
             return None
     taken = entry.method.taken

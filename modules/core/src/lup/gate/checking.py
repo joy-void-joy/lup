@@ -11,9 +11,11 @@ import hashlib
 import tempfile
 from itertools import groupby
 from pathlib import Path
+from typing import ClassVar, Literal
 
 import lup
 from lup.declaration.layout import MachineLayout, RepositoryLayout
+from lup.doors.done import Done
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Operator
 from lup.doors.parts import Declared, Part, Program, UnrunError
@@ -34,6 +36,62 @@ class Checking(Model):
     """Run every step even where a pass is recorded for these files."""
     directory: Path | None = None
     """A directory in the worktree to check; left out, where it's typed."""
+
+
+class Printed(Done):
+    """A line a step printed, as a step that tells what it prints says it."""
+
+    line: ClassVar[str] = "{text}"
+    text: str
+
+
+class Found(Done):
+    """Something a step found without failing, to be filed."""
+
+    line: ClassVar[str] = "found by {step}, about {about}: {title}"
+    step: str
+    about: str
+    title: str
+
+
+class StepPassed(Done):
+    """A step that passed, how long it took, and what it printed where it tells it."""
+
+    line: ClassVar[str] = "{outcome}  {step}  {seconds:.1f} s"
+    outcome: Literal["passed"] = "passed"
+    step: str
+    seconds: float
+    printed: list[Printed] = []
+
+
+class FixFailed(Done):
+    """A step's fix that failed, the step passing after, with what it printed."""
+
+    line: ClassVar[str] = "the fix of {step} failed"
+    step: str
+    printed: list[Printed] = []
+
+
+class GatePassed(Done):
+    """The gate, passed on a worktree's files, each step as it went."""
+
+    line: ClassVar[str] = "the gate passed in {seconds:.0f} s, recorded for tree {tree}"
+    seconds: float
+    tree: str
+    """The tree git would commit the files as: running the gate again on them,
+    or landing them, runs nothing."""
+    fixes: list[FixFailed] = []
+    steps: list[StepPassed] = []
+    found: list[Found] = []
+
+
+class PassedBefore(Done):
+    """The gate, passed on these files before, so nothing ran."""
+
+    line: ClassVar[str] = (
+        "the gate passed on tree {tree} already: nothing ran (`--again` runs it)"
+    )
+    tree: str
 
 
 class Ran(Model):
@@ -118,10 +176,13 @@ class Gating(Part):
     the gate runs in a worktree, which git always has."""
 
     @lup.command(here=True)
-    async def check(self, checking: Checking, by: Agent | Operator) -> str:
-        """Run every module's gate steps on this worktree's files, each from its root, every one even after one fails, and say how each went; refused where one fails.
+    async def check(
+        self, checking: Checking, by: Agent | Operator
+    ) -> GatePassed | PassedBefore:
+        """Run every module's gate steps on this worktree's files.
 
-        A pass is recorded by the files it passed on, so running it again on
+        Each runs from the worktree's root, every one even after one fails, and
+        says how it went; refused where one fails, saying what it printed. A pass is recorded by the files it passed on, so running it again on
         them, here or in another worktree, runs nothing (`--again` runs it
         anyway). `--fix` runs each step's fix first.
         """
@@ -144,10 +205,7 @@ class Gating(Part):
         tree = await worktree.staged()
         key = keyed(tree, layout.local)
         if not checking.again and passed(recorded, key) is not None:
-            return (
-                f"The gate passed on these files already (tree `{tree}`), so "
-                "nothing ran. `--again` runs it anyway."
-            )
+            return PassedBefore(tree=tree)
         ran = [
             each
             for batch in batches(steps)
@@ -156,14 +214,37 @@ class Gating(Part):
             )
         ]
         took = asyncio.get_running_loop().time() - start
-        report = reported(fixed, ran, took)
         failed = [each.step.name for each in ran if not each.passed()]
         kept(recorded, key, Run.of(tree, ran))
         if failed:
-            raise RefusedError(report, about=failed)
-        return (
-            f"{report}\nIt's recorded for these files (tree `{tree}`), so running "
-            "it again on them, or landing them, runs nothing."
+            raise RefusedError(reported(fixed, ran, took), about=failed)
+        return GatePassed(
+            seconds=took,
+            tree=tree,
+            fixes=[
+                FixFailed(
+                    step=each.step.name,
+                    printed=[Printed(text=line) for line in each.said.splitlines()],
+                )
+                for each in fixed
+                if not each.passed()
+            ],
+            steps=[
+                StepPassed(
+                    step=each.step.name,
+                    seconds=each.seconds,
+                    printed=[
+                        Printed(text=line)
+                        for line in (each.said.splitlines() if each.step.tells else [])
+                    ],
+                )
+                for each in ran
+            ],
+            found=[
+                Found(step=each.step.name, about=finding.about, title=finding.title)
+                for each in ran
+                for finding in each.findings
+            ],
         )
 
     async def ran(self, step: Step, words: list[str], root: Path) -> Ran:

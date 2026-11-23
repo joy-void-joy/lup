@@ -9,7 +9,7 @@ how it ended, never the words of its help or of a refusal (`README.md` here,
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import Field
 
@@ -18,6 +18,7 @@ from lup import (
     Agent,
     Blocks,
     Common,
+    Done,
     Line,
     Model,
     Module,
@@ -33,9 +34,10 @@ from lup.testing import Accepted, Testing, TypedIn, raises
 lazy from lup import Core
 
 
-class Jotted(Model):
-    """A jot, as it's typed: its text an argument, the rest options."""
+class Jotted(Done):
+    """A jot, as it's typed: its text an argument, the rest options; and as it's answered, what was jotted."""
 
+    line: ClassVar[str] = "jotted {text}"
     text: str
     loud: bool = False
     tags: list[str] = []
@@ -65,9 +67,31 @@ class Clearing(Model):
     number: int = Field(ge=0, le=99)
 
 
-class Posting(Model):
+class Cleared(Done):
+    """A jot cleared."""
+
+    line: ClassVar[str] = "cleared {number}"
+    number: int
+
+
+class Sealed(Done):
+    """A jot sealed."""
+
+    line: ClassVar[str] = "sealed {number}"
+    number: int
+
+
+class Stamped(Done):
+    """A jot stamped."""
+
+    line: ClassVar[str] = "stamped {number}"
+    number: int
+
+
+class Posting(Done):
     """A jot posted to a repository's board, kept where git keeps the repository: both filled from where it's typed, where they're left out."""
 
+    line: ClassVar[str] = "posted {text} to {repository}"
     text: str
     repository: Repository
     common: Common
@@ -97,13 +121,13 @@ class Jotting(Part):
         return jotted
 
     @lup.command
-    async def clear(self, clearing: Clearing, by: Operator) -> str:
+    async def clear(self, clearing: Clearing, by: Operator) -> Cleared:
         """Clear a jot."""
-        return f"cleared {clearing.number}"
+        return Cleared(number=clearing.number)
 
     @lup.command
     async def post(self, posting: Posting, by: Operator) -> Posting:
-        """Post a jot to a repository's board, answering what was posted."""
+        """Post a jot to a repository's board."""
         return posting
 
     @lup.tool(reads=True)
@@ -118,7 +142,7 @@ class Jotting(Part):
 
 
 class Jot(Module):
-    """Jots in piles: an example module the command line's promises type at."""
+    """Jots in piles, typed at by the command line's promises."""
 
     name = "jot"
     parts: Parts = Parts.of(Jotting)
@@ -128,9 +152,9 @@ class Sealing(Part):
     """What only the operator runs."""
 
     @lup.command
-    async def seal(self, clearing: Clearing, by: Operator) -> str:
+    async def seal(self, clearing: Clearing, by: Operator) -> Sealed:
         """Seal a jot."""
-        return f"sealed {clearing.number}"
+        return Sealed(number=clearing.number)
 
 
 class Seal(Module):
@@ -144,9 +168,9 @@ class Stamping(Part):
     """A command a project adds to the core, as the core's own are typed: at `lup`'s top level."""
 
     @lup.command
-    async def stamp(self, clearing: Clearing, by: Operator) -> str:
+    async def stamp(self, clearing: Clearing, by: Operator) -> Stamped:
         """Stamp a jot."""
-        return f"stamped {clearing.number}"
+        return Stamped(number=clearing.number)
 
 
 class Stamp(Module):
@@ -155,9 +179,10 @@ class Stamp(Module):
     name = "stamp"
 
 
-class Tallied(Model):
+class Tallied(Done):
     """Which lup answered a tally, and who it was for."""
 
+    line: ClassVar[str] = "tallied where {where}, for {by}"
     where: str
     by: str
 
@@ -179,7 +204,10 @@ class Tallying(Part):
 
 
 class Tally(Module):
-    """Tallying: a module with a command run where it's typed, saying which lup answers."""
+    """Tallying, where it's typed and where the project runs.
+
+    A module with a command run where it's typed, saying which lup answers.
+    """
 
     name = "tally"
     where: str = "machine"
@@ -201,11 +229,12 @@ def stamping() -> Project:
     )
 
 
-def words(jotted: Jotted) -> list[str]:
-    """Return the words that type `jotted` for `jot down`, each option given its value in its own word, and the text after `--`, so no value reads as an option."""
+def words(jotted: Jotted, *, data: bool = False) -> list[str]:
+    """Return the words that type `jotted` for `jot down`, each option given its value in its own word, and the text after `--`, so no value reads as an option; with `data`, asking for what it answers as JSON."""
     return [
         "jot",
         "jot-down",
+        *(["--json"] if data else []),
         *(["--loud"] if jotted.loud else []),
         *(f"--tags={each}" for each in jotted.tags),
         f"--shade={jotted.shade}",
@@ -268,20 +297,22 @@ class CommandLinePromises(Part):
 
     @lup.promise
     async def a_command_prints_what_it_answers(self, by: Testing) -> None:
-        """A command's fields are its arguments and options, a flag a `bool`'s and a repeated option a `list`'s, and what it answers is printed: a model as its JSON, words as they are."""
+        """A command's fields are its arguments and options, a flag a `bool`'s and a repeated option a `list`'s, and what it answers is printed: its line, or, with `--json`, its data."""
         jotted = by.any(Jotted)
+        agent = by.any(Agent)
         started = await by.started(jotting())
-        typed = await started.typed(words(jotted), by.any(Agent))
-        assert typed.status == 0
-        assert json.loads(typed.output) == jotted.model_dump(mode="json")
+        data = await started.typed(words(jotted, data=True), agent)
+        assert data.status == 0
+        assert json.loads(data.output) == jotted.model_dump(mode="json")
         number = by.any(Clearing).number
         cleared = await started.typed(["jot", "clear", str(number)], Operator())
         answered = await started.run(
             "jot", "clear", Clearing(number=number), Operator()
         )
         assert isinstance(answered, Accepted)
-        assert isinstance(answered.output, str)
-        assert cleared.output.splitlines() == answered.output.splitlines()
+        assert isinstance(answered.output, Cleared)
+        shown = answered.output.shown().text()
+        assert cleared.output.splitlines() == shown.splitlines()
 
     @lup.promise
     async def a_repository_left_out_is_the_one_typed_in(self, by: Testing) -> None:
@@ -295,9 +326,11 @@ class CommandLinePromises(Part):
             common=None if within is None else Path("/srv") / f"{within}.git",
         )
         other = Path("/srv") / f"{typing.other}.git"
-        left = await started.typed(["jot", "post", "hi"], Operator(), typed_in=where)
+        left = await started.typed(
+            ["jot", "post", "--json", "hi"], Operator(), typed_in=where
+        )
         named = await started.typed(
-            ["jot", "post", "-r", typing.other, f"--common={other}", "hi"],
+            ["jot", "post", "--json", "-r", typing.other, f"--common={other}", "hi"],
             Operator(),
             typed_in=where,
         )
@@ -361,8 +394,8 @@ class CommandLinePromises(Part):
             Project(modules=Modules.default().add(Tally(where="worktree")))
         )
         party = by.any(Agent) if by.any(bool) else Operator()
-        here = await machine.typed(["tally", "tally"], party, here=worktree)
-        through = await machine.typed(["tally", "peek"], party, here=worktree)
+        here = await machine.typed(["tally", "tally", "--json"], party, here=worktree)
+        through = await machine.typed(["tally", "peek", "--json"], party, here=worktree)
         assert here.status == 0
         assert through.status == 0
         tallied = Tallied.model_validate_json(here.output)

@@ -7,12 +7,13 @@ operator's commands take what they do (`Answering`, `Clearing`…).
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from annotated_types import Ge, Lt
 from pydantic import AwareDatetime, BaseModel, JsonValue
 
 from lup.command_line.filled import Repository
+from lup.doors.done import Done
 from lup.doors.parties import Agent, Party
 from lup.inbox.records import FRICTIONS, Decision, Item, Ruling, Tone
 from lup.types import Model
@@ -224,6 +225,62 @@ class Converting(Model):
     """The repository as the ledger names it: the path of its git directory."""
     repository: Repository
     """The repository as this lup names it, whose inbox they're brought into."""
+
+
+class QuestionAnswered(Done):
+    """A question the operator answered, and their answer."""
+
+    line: ClassVar[str] = "answered @{question}, @{answer}"
+    question: Cited
+    answer: Cited
+
+
+class CommentKept(Done):
+    """The operator's comment kept on an item."""
+
+    line: ClassVar[str] = "commented on @{item}, @{comment}"
+    item: Cited
+    comment: Cited
+
+
+class SentTo(Done):
+    """The operator's words sent to a party, kept as a comment."""
+
+    line: ClassVar[str] = "sent to {to}, @{comment}"
+    to: str
+    """The party, as `@` cites it."""
+    comment: Cited
+
+
+class NodeCleared(Done):
+    """An item, a concern or a party's buffer the operator cleared."""
+
+    line: ClassVar[str] = "cleared {what}"
+    what: str
+    """What was cleared, as it was named."""
+
+
+class ConcernDeclined(Done):
+    """A concern the operator declined."""
+
+    line: ClassVar[str] = "declined @{concern}"
+    concern: Cited
+
+
+class PileMade(Done):
+    """A pile the operator made, with each above it not there before."""
+
+    line: ClassVar[str] = "made {pile}"
+    pile: str
+    """The pile, as `@` cites it."""
+
+
+class ItemsSeen(Done):
+    """What's been on the operator's screen, by number, none of it new to them any more."""
+
+    line: ClassVar[str] = "{count} seen"
+    count: int
+    items: list[Cited] = []
 
 
 class Naming(Model):

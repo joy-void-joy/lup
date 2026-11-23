@@ -215,6 +215,33 @@ type Standing = Literal["new", "waiting", "done", "held"]
 waiting on them, done, or held back from a send."""
 
 
+class Run(Model):
+    """A run of a block's text form, and what draws it: a span's tone, how its block stands, or its fold's kind, each in its colour where the text form is drawn in colour, as the command line's is in a terminal; none of them for text the shell adds plain."""
+
+    text: str
+    tone: str | None = None
+    """The tone of the span it says: one of the shell's, or one its module
+    declares."""
+    standing: Standing | None = None
+    """How its block stands, where it says that."""
+    kind: str | None = None
+    """The fold kind whose marker it is, where it's a fold's or a file's."""
+
+
+def joined(runs: list[Run]) -> str:
+    """Say a line of runs as plain text.
+
+    >>> joined([Run(text="a"), Run(text="b", tone="strong")])
+    'ab'
+    """
+    return "".join(each.text for each in runs)
+
+
+def spoken(spans: list[Span]) -> list[Run]:
+    """Return `spans` as runs, each in its span's tone."""
+    return [Run(text=each.text, tone=each.tone) for each in spans]
+
+
 class Shown(Model):
     """What every block has: the id its module keeps from one answer to the next, the version of what it shows, what it offers, and who a comment on it reaches.
 
@@ -274,8 +301,18 @@ class Shown(Model):
         >>> Line(id="1", aside=[Span(text="note"), Span(text="@12")]).aside_said()
         '  · note · @12'
         """
+        return joined(self.aside_runs())
+
+    def aside_runs(self) -> list[Run]:
+        """Return what's said of it apart from its line as runs, set back: none where nothing is."""
         said = " · ".join(span.text for span in self.aside if span.text)
-        return f"  · {said}" if said else ""
+        return [Run(text=f"  · {said}", tone="muted")] if said else []
+
+    def standing_runs(self) -> list[Run]:
+        """Return how it stands, as its text form says it after its line, in brackets: none where there's nothing to say."""
+        if self.standing is None:
+            return []
+        return [Run(text=f"  [{self.standing}]", standing=self.standing)]
 
     def own_version(self) -> str:
         """Return a version of what the block shows itself: a digest of the fields saying it, which changes as they do."""
@@ -302,6 +339,15 @@ class Line(Shown):
     def said(self) -> str:
         """Say the line as text."""
         return "".join(span.text for span in self.spans)
+
+    def runs(self, indent: str = "") -> list[Run]:
+        """Return its text form after `indent` as runs: its spans, how it stands, and what's said of it apart."""
+        return [
+            *([Run(text=indent)] if indent else []),
+            *spoken(self.spans),
+            *self.standing_runs(),
+            *self.aside_runs(),
+        ]
 
 
 class Markdown(Shown):
@@ -342,15 +388,26 @@ class Fold(Shown):
         >>> Fold(id="1", kind="call", summary=[Span(text="Bash: ls")], content=loaded).said(opened=False)
         ['▸ Bash: ls  [call call=c1]']
         """
-        summary = "".join(span.text for span in self.summary)
-        if self.standing is not None:
-            summary = f"{summary}  [{self.standing}]"
-        summary = f"{summary}{self.aside_said()}"
-        if isinstance(self.content, Viewing):
-            return [f"{indent}▸ {summary}  [{self.content.said()}]"]
-        if not opened:
-            return [f"{indent}▸ {summary}"]
-        return [f"{indent}▾ {summary}", *lines(self.content, f"{indent}  ")]
+        return [joined(each) for each in self.runs(indent, opened=opened)]
+
+    def runs(self, indent: str = "", *, opened: bool) -> list[list[Run]]:
+        """Return its text form as lines of runs, as `said` says it: its marker in its kind, its summary in its spans' tones, how it stands, what's said of it apart, and, open, its content."""
+        loaded = isinstance(self.content, Viewing)
+        marker = "▾ " if opened and not loaded else "▸ "
+        summary = [
+            *([Run(text=indent)] if indent else []),
+            Run(text=marker, kind=self.kind),
+            *spoken(self.summary),
+            *self.standing_runs(),
+            *self.aside_runs(),
+        ]
+        match self.content:
+            case Viewing() as viewing:
+                return [[*summary, Run(text=f"  [{viewing.said()}]", tone="muted")]]
+            case list() as content if opened:
+                return [summary, *runs(content, f"{indent}  ")]
+            case list():
+                return [summary]
 
 
 class FileText(Model):
@@ -569,20 +626,29 @@ type Block = Annotated[
 
 def lines(blocks: list[Block], indent: str = "") -> list[str]:
     """Say `blocks` as lines of text, each after `indent` but a blank one, a fold whose open state its view leaves to its kind said open."""
+    return [joined(each) for each in runs(blocks, indent)]
 
-    def said(block: Block) -> list[str]:
+
+def runs(blocks: list[Block], indent: str = "") -> list[list[Run]]:
+    """Return `blocks` as lines of runs, as `lines` says them: each run in what draws it, a file's header in the shell's `file` kind."""
+
+    def said(block: Block) -> list[list[Run]]:
         match block:
-            case Line(standing=str() as standing):
-                return [f"{indent}{block.said()}  [{standing}]{block.aside_said()}"]
             case Line():
-                return [f"{indent}{block.said()}{block.aside_said()}"]
+                return [block.runs(indent)]
             case Markdown():
                 return [
-                    f"{indent}{line}" if line else ""
+                    [Run(text=f"{indent}{line}", tone=block.tone)] if line else []
                     for line in block.text.splitlines()
                 ]
-            case Fold() | Code() | Diff():
-                return block.said(indent, opened=block.open is not False)
+            case Fold():
+                return block.runs(indent, opened=block.open is not False)
+            case Code() | Diff():
+                said = block.said(indent, opened=block.open is not False)
+                return [
+                    [Run(text=line, kind="file" if at == 0 else None)]
+                    for at, line in enumerate(said)
+                ]
 
     return [line for block in blocks for line in said(block)]
 
@@ -619,8 +685,12 @@ class Blocks(Model):
         you: hi
         ▸ called Bash, Read
         """
-        summary = "".join(span.text for span in self.summary)
-        return "\n".join([*([summary] if summary else []), *lines(self.blocks)])
+        return "\n".join(joined(each) for each in self.runs())
+
+    def runs(self) -> list[list[Run]]:
+        """Return the view's text form as lines of runs, as `text` says it: its summary, then its blocks."""
+        summary = spoken(self.summary)
+        return [*([summary] if joined(summary) else []), *runs(self.blocks)]
 
     def versioned(self) -> Blocks:
         """Return the view with a version on every block that gives none, worked out from what it shows itself (`Shown.own_version`), a fold's given content among them."""

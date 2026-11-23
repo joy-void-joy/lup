@@ -29,7 +29,11 @@ standard library, lup and what it needs, and the project's own code
 
 
 class Gate(Module):
-    """The gate: every module's steps, run on the files of the worktree it's typed in, every one even after one fails, and a pass recorded by the files it passed on, so running it again on them, or landing them, runs nothing.
+    """Every module's checks, run on a worktree.
+
+    The gate: every module's steps, run on the files of the worktree it's typed in,
+    every one even after one fails, and a pass recorded by the files it passed on, so
+    running it again on them, or landing them, runs nothing.
 
     Its own steps check what every project lup sets up has: its layout, its
     promises, its import contracts, and what loading its declaration imports. Another module declares its own as a
