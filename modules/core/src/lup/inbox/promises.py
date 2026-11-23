@@ -618,7 +618,7 @@ class InboxPromises(Part):
         """A comment the operator writes on a line of an item, in the dashboard, is told to its writer as on the part the view says cites that line, or on the item where it's one part alone."""
         started = await by.started(project())
         agent = by.any(Agent)
-        lines = [*by.any(Written).lines, "the end"]
+        lines = ["the start", *by.any(Written).lines]
         number = await asked(started, "\n".join(lines), agent)
         [text] = await texts(started, number)
         at = min(by.any(Pointing).line, len(lines) - 1)

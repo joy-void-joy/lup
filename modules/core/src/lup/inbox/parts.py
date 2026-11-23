@@ -17,7 +17,7 @@ with the block before it, and what's before the first with the first.
 
 import csv
 import textwrap
-from functools import cache
+from functools import cache, lru_cache
 from itertools import dropwhile, pairwise
 from typing import TYPE_CHECKING
 
@@ -99,8 +99,9 @@ def starts(token: Token) -> bool:
             return False
 
 
+@lru_cache(maxsize=4096)
 def parted(text: str) -> list[TextPart]:
-    r"""Return the parts of `text`, in order, each numbered from 1: none of a blank one.
+    r"""Return the parts of `text`, in order, each numbered from 1: none of a blank one. Those of the texts last read are remembered, since a view is read again as long as it's watched.
 
     >>> text = "Two ways:\n\n- shorter\n  - by far\n- safer\n\n| a |\n|---|\n| b |\n"
     >>> for each in parted(text):
@@ -199,8 +200,12 @@ class Quoted(Model):
 
 
 def quoted(item: Item, lines: list[str], line: int) -> Quoted | None:
-    """Return which parts of `item`'s text `lines` are on, quoted from its line `line`, from 0, on, else from the one place they stand; none where they stand at none, or at several."""
-    text = broken(item.text)
+    """Return which parts of `item`'s text `lines` are on, quoted from its line `line`, from 0, on, else from the one place they stand; none where they stand at none, or at several.
+
+    A text that ends with a line break has a blank line after it, as the page
+    shows it.
+    """
+    text = [*broken(item.text), ""]
     found = [
         at
         for at in range(len(text) - len(lines) + 1)

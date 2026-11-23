@@ -776,18 +776,20 @@ class Inbox(Model, arbitrary_types_allowed=True):
         """Keep the operator's comment `said` on `on`: told to whoever wrote it, and to each it was for where an agent wrote it to another.
 
         It's on the part of it at `part`, where one is given; else on the
-        parts the lines it quotes are in; else, quoting none, or its heading
-        alone, who wrote it, on the item whole. Raise `InboxError` where it has
-        no part at `part`.
+        parts the lines it quotes are in; else on the item whole. Its heading
+        alone, who wrote it, is none of its lines, and picks nothing out of it.
+        Raise `InboxError` where it has no part at `part`.
         """
         operator = self.operator()
         writer = [] if on.by is None or on.by == operator.key else [on.by]
         readers = [each for each in on.to if each != operator.key]
-        if part is not None:
-            on_parts = Quoted(part=self.part(on, part).part.place)
-        else:
-            on_parts = quoted(on, said.lines, said.line)
-        if on_parts is None and said.lines == [self.writer(on)]:
+        on_parts = (
+            quoted(on, said.lines, said.line)
+            if part is None
+            else Quoted(part=self.part(on, part).part.place)
+        )
+        heading = said.lines == [self.writer(on)]
+        if heading and (part is not None or on_parts is None):
             said = Commenting(words=said.words, version=said.version)
         comment = self.database.kept(
             Comment(
@@ -974,7 +976,7 @@ class Inbox(Model, arbitrary_types_allowed=True):
             case Comment(on=int() as key):
                 target = self.database.found(key)
                 return self.on_item(item, target) if isinstance(target, Item) else None
-            case Comment(lines=[_, *_]):
+            case Comment() if item.passage().strip():
                 return On(quote=item.passage())
             case Answer() | Outcome():
                 targets = [
@@ -995,24 +997,27 @@ class Inbox(Model, arbitrary_types_allowed=True):
     def on_item(self, comment: Comment, target: Item) -> On:
         """Return what `comment` is on of `target`, the item it's on: an item of one part by its number alone, which names the part too."""
         passage = comment.passage()
-        if comment.part is None:
-            on = On(item=target.number)
-            if passage.strip():
-                return on.model_copy(update={"quote": passage})
-            return on.model_copy(update={"opening": opening(target.words())})
-        several = len(parts(target)) > 1
+        found = parts(target)
+        begins = next(
+            (each.part.text() for each in found if each.part.place == comment.part),
+            target.words(),
+        )
         on = On(
             item=target.number,
-            part=comment.part if several else None,
-            last=comment.last if several else None,
+            part=comment.part if len(found) > 1 else None,
+            last=comment.last if len(found) > 1 else None,
         )
-        on_parts = Quoted(part=comment.part, last=comment.last)
-        begins = self.part(target, comment.part).part.text()
-        if "\n".join(comment.lines) == passage and whole(
-            target, on_parts, comment.lines
-        ):
-            return on.model_copy(update={"opening": opening(begins)})
-        return on.model_copy(update={"quote": passage})
+        picked = (
+            passage.strip() != ""
+            if comment.part is None
+            else "\n".join(comment.lines) != passage
+            or not whole(
+                target, Quoted(part=comment.part, last=comment.last), comment.lines
+            )
+        )
+        return on.model_copy(
+            update={"quote": passage} if picked else {"opening": opening(begins)}
+        )
 
     def settled_by(self, question: Item) -> list[Item] | None:
         """Return what answers `question`, oldest first, where something does; none where nothing does yet. Withdrawn, it's settled with nothing to say."""
@@ -1212,10 +1217,13 @@ class Inbox(Model, arbitrary_types_allowed=True):
         match item:
             case Comment(on=int() as on):
                 target = self.database.found(on)
-                part = (
-                    self.part(target, item.part).part.text()
-                    if isinstance(target, Item) and item.part is not None
-                    else None
+                part = next(
+                    (
+                        each.part.text()
+                        for each in (parts(target) if isinstance(target, Item) else [])
+                        if each.part.place == item.part
+                    ),
+                    None,
                 )
                 return self.said_item(
                     item, writer, item.words(), target, "\n".join(item.lines) or part
