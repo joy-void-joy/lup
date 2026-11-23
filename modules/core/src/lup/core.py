@@ -32,7 +32,13 @@ from lup.told.promises import GuidancePromises
 
 
 class Core(Module):
-    """What every project has: loading the declaration and its layers, the doors its modules are reached through, checking their promises, running programs, the shell's kinds, the inbox, rendering guidance, the command line, setting a repository up for lup, and the profiles its sessions run on; the core's other submodules as they're built.
+    """What every project has, the inbox among it.
+
+    What every project has: loading the declaration and its layers, the doors its
+    modules are reached through, checking their promises, running programs, the shell's
+    kinds, the inbox, rendering guidance, the command line, setting a repository up for
+    lup, and the profiles its sessions run on; the core's other submodules as they're
+    built.
 
     A project changes it with `.edit` as it would any module, or puts another in
     its place with `.replace`, but can't drop it: resolving a selection without a

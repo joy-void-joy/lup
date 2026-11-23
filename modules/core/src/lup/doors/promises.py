@@ -63,9 +63,23 @@ class Merging(Model):
     branch: str
 
 
+class Merged(lup.Done):
+    """A branch merged."""
+
+    line: ClassVar[str] = "merged {branch}"
+    branch: str
+
+
 class Greeting(Model):
     """Someone to greet."""
 
+    name: str
+
+
+class Greeted(lup.Done):
+    """Someone greeted."""
+
+    line: ClassVar[str] = "greeted {name}"
     name: str
 
 
@@ -83,17 +97,17 @@ class EchoPart(Part):
         return Shouted(text=said.text.upper() * self.module.volume, caller=by.id)
 
     @lup.command(verb="done", says="merge it")
-    async def merge(self, merging: Merging, by: Operator) -> str:
+    async def merge(self, merging: Merging, by: Operator) -> Merged:
         """Merge a branch, refusing `main`, which is merged into."""
         if merging.branch == "main":
             message = "`main` is merged into, never merged"
             raise lup.RefusedError(message, about=[merging.branch])
-        return merging.branch
+        return Merged(branch=merging.branch)
 
     @lup.command
-    async def greet(self, greeting: Greeting, by: Operator) -> str:
+    async def greet(self, greeting: Greeting, by: Operator) -> Greeted:
         """Greet someone, as the operator."""
-        return greeting.name
+        return Greeted(name=greeting.name)
 
 
 class Echo(Module):
@@ -188,7 +202,7 @@ class Sending(Model):
 def loud(methods: str) -> str:
     """Return a project's declaration whose module's part holds `methods`."""
     return f'''
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import lup
 
@@ -199,6 +213,13 @@ if TYPE_CHECKING:
 class Said(lup.Model):
     """What's said."""
 
+    text: str
+
+
+class Heard(lup.Done):
+    """What's heard."""
+
+    line: ClassVar[str] = "heard {{text}}"
     text: str
 
 
@@ -234,6 +255,10 @@ class Misshapen(Model):
         "a name defined for type checking alone",
         "two doors",
         "a command run where it's typed offered under a key",
+        "a command answering words",
+        "a command answering nothing",
+        "a command's summary too long",
+        "a view's summary too long",
     ]
 
     def methods(self) -> str:
@@ -283,23 +308,23 @@ class Misshapen(Model):
             case "by naming no party":
                 return '''
     @lup.command
-    async def wrong(self, said: Said, by: str) -> str:
+    async def wrong(self, said: Said, by: str) -> Heard:
         """A command whose caller isn't a party."""
-        return said.text
+        return Heard(text=said.text)
 '''
             case "a command not saying who may run it":
                 return '''
     @lup.command
-    async def wrong(self, said: Said) -> str:
+    async def wrong(self, said: Said) -> Heard:
         """A command not saying who may run it."""
-        return said.text
+        return Heard(text=said.text)
 '''
             case "a name defined for type checking alone":
                 return '''
     @lup.command
-    async def wrong(self, said: Said, by: Operator) -> str:
-        """A command whose caller's class is imported for type checking alone."""
-        return said.text
+    async def wrong(self, said: Said, by: Operator) -> Heard:
+        """A command whose caller is imported for type checking alone."""
+        return Heard(text=said.text)
 '''
             case "two doors":
                 return '''
@@ -312,10 +337,43 @@ class Misshapen(Model):
             case "a command run where it's typed offered under a key":
                 return '''
     @lup.command(here=True, verb="done", says="do it")
-    async def wrong(self, said: Said, by: lup.Operator) -> str:
+    async def wrong(self, said: Said, by: lup.Operator) -> Heard:
         """A command the dashboard can't run where it's typed."""
+        return Heard(text=said.text)
+'''
+            case "a command answering words":
+                return '''
+    @lup.command
+    async def wrong(self, said: Said, by: lup.Operator) -> str:
+        """A command answering words, not what it did."""
         return said.text
 '''
+            case "a command answering nothing":
+                return '''
+    @lup.command
+    async def wrong(self, said: Said, by: lup.Operator) -> None:
+        """A command answering nothing."""
+'''
+            case "a command's summary too long":
+                return '''
+    @lup.command
+    async def wrong(self, said: Said, by: lup.Operator) -> Heard:
+        """A summary line far longer than the sixty characters a command's may take."""
+        return Heard(text=said.text)
+'''
+            case "a view's summary too long":
+                return '''
+    @lup.view
+    async def wrong(self, said: Said) -> lup.Blocks:
+        """A summary line far longer than the sixty characters a view's may take."""
+        return lup.Blocks()
+'''
+
+
+class Lined(Model):
+    """A `Done`'s line that can't be one, beside its field `text`: naming what isn't its field, or running onto a second line."""
+
+    line: Literal["said {nothing}", "said {text}\nand more", "said {text"]
 
 
 class Holding(Model):
@@ -474,6 +532,21 @@ class DoorsPromises(Part):
         with raises(ProjectError) as failed:
             await by.started(Repository(declaration=loud(misshapen.methods())))
         assert "LoudPart.wrong" in failed.raised().about
+
+    @lup.promise
+    async def a_done_says_only_its_own_fields_in_one_line(self, by: Testing) -> None:
+        """What a command answers, a `Done`, is refused as its class is defined where its line names something that isn't one of its fields, or runs onto a second line: the line says nothing its data doesn't hold, in one line."""
+        wrong = by.any(Lined)
+        with raises(lup.DoorError):
+            type(
+                "Wrong",
+                (lup.Done,),
+                {
+                    "__annotations__": {"line": ClassVar[str], "text": str},
+                    "line": wrong.line,
+                    "__doc__": "A wrong line.",
+                },
+            )
 
     @lup.promise
     async def a_door_outside_a_part_fails_the_load_naming_it(self, by: Testing) -> None:

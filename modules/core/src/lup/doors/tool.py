@@ -21,14 +21,17 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 
-def summary_of(name: str, description: str, longest: int = 50) -> str:
-    """Return the summary of the tool `name`: its description's first line, standing alone, `longest` characters at most.
+def summary_of(
+    name: str, description: str, longest: int = 50, what: str = "tool"
+) -> str:
+    """Return the summary of the tool `name`, or of another `what` a door brings: its description's first line, standing alone, `longest` characters at most.
 
     A session that finds tools by searching for them lists each by its name and
-    summary, as a git log lists commits by their subject line. Raise `DoorError`
-    naming the tool where the description opens with no line standing alone
-    (one running onto the next without a blank line between), or where that line
-    is longer.
+    summary, as a git log lists commits by their subject line, and the command
+    line's help lists each command and view by its own. Raise `DoorError`
+    naming it where the description opens with no line standing alone (one
+    running onto the next without a blank line between), or where that line is
+    longer.
 
     >>> summary_of("weather", "Look up today's weather.")
     "Look up today's weather."
@@ -36,14 +39,14 @@ def summary_of(name: str, description: str, longest: int = 50) -> str:
     line, _ = pydoc.splitdoc(description)
     if not line:
         message = (
-            f"the tool `{name}` has no summary: its docstring opens with one line "
+            f"the {what} `{name}` has no summary: its docstring opens with one line "
             f"saying what it does, {longest} characters at most, then a blank line "
             "before the rest"
         )
         raise DoorError(message)
     if len(line) > longest:
         message = (
-            f"the tool `{name}`'s summary, its docstring's first line, is "
+            f"the {what} `{name}`'s summary, its docstring's first line, is "
             f"{len(line)} characters, past {longest}: {line}"
         )
         raise DoorError(message)

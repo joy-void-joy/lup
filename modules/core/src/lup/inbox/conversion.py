@@ -13,7 +13,7 @@ lup's ledger*).
 """
 
 from functools import cache
-from typing import Literal
+from typing import ClassVar, Literal
 from urllib.parse import quote
 lazy from pathlib import Path
 
@@ -32,6 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 
+from lup.doors.done import Done
 from lup.doors.parties import Agent
 from lup.inbox.inbox import Inbox, InboxError
 from lup.inbox.records import (
@@ -215,9 +216,12 @@ class Ledger(Model):
         return None
 
 
-class Converted(Model):
+class Converted(Done):
     """What a conversion brought over: how many of each, kept as the plain record that refuses a second."""
 
+    line: ClassVar[str] = (
+        "brought {concerns} concerns and {frictions} frictions into {repository}"
+    )
     repository: str
     concerns: int = 0
     frictions: int = 0
@@ -225,16 +229,6 @@ class Converted(Model):
     bodies: int = 0
     marks: int = 0
     agents: int = 0
-
-    def said(self) -> str:
-        """Say what was brought over, as the operator reads it."""
-        return (
-            f"Brought {self.concerns} concerns and {self.frictions} frictions into "
-            f"{self.repository}'s inbox, with {self.words} sets of words, "
-            f"{self.bodies} bodies and {self.marks} done marks. The {self.agents} "
-            "agents who held or wrote them read as ended, so what they held waits "
-            "in `no-agent`, saying who left it, until they start here."
-        )
 
 
 # Reading the ledger

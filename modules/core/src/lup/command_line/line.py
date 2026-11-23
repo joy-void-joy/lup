@@ -11,17 +11,20 @@ one missing is refused as the words are parsed, and nothing runs; nothing is
 ever asked for. Only the module named is built, and the top level's where no
 other module is named, so help and a run cost what one module's methods do.
 
-A view's run prints its text (`Blocks.text`); a tool's or a command's, what it
-answered, words as they are and a model as JSON; a refusal, why, on standard
-error. The exit status says which: 0 where it ran or showed help, 1 where the
-call was refused, 2 where the words didn't parse.
+A view's run prints its text (`Blocks.text`), and a command's the line said of
+what it did (`lup.Done.shown`), each in colour in a terminal
+(`lup.command_line.printing`); with `--json`, either prints the answer's data
+instead. A tool's prints what it answered, words as they are and a model as
+JSON. A refusal prints why, on standard error, in red in a terminal. The exit
+status says which: 0 where it ran or showed help, 1 where the call was refused,
+2 where the words didn't parse.
 """
 
 import inspect
 import io
 from contextlib import redirect_stderr, redirect_stdout
 from itertools import takewhile
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Annotated, TextIO
 
 import typer
 from pydantic_core import to_json
@@ -30,6 +33,7 @@ from typer.main import get_command
 from lup.command_line.answering import Answerer, Offered, Runnable, Typed
 from lup.command_line.filled import TypedIn
 from lup.command_line.parameters import Parameter, Parsed, parameters, sent
+from lup.command_line.printing import draw, refuse
 from lup.running.wire import (
     Answered,
     Call,
@@ -50,9 +54,12 @@ if TYPE_CHECKING:
 
 
 class Parsing(MutableModel):
-    """What parsing the words came to: the call they make, once a method's command takes them."""
+    """What parsing the words came to: the call they make, once a method's command takes them, and whether its answer is printed as its data."""
 
     call: Call | None = None
+    data: bool = False
+    """Whether `--json` asked for the answer's data, as JSON, rather than
+    its lines."""
 
 
 def called(runnable: Runnable, given: JsonValue) -> Call:
@@ -74,12 +81,25 @@ def command(
 ) -> Callable[..., None]:
     """Return the function typer builds `runnable`'s command from: its signature the fields of what it takes, and its body keeping the call they make in `parsing`, made once parsing is done, each field marked so filled from where it's typed (`typed_in`)."""
     taken: list[Parameter] = parameters(runnable.doorway.input_schema)
+    asking = "lup_json"
 
     def parsed(**values: Parsed) -> None:
+        parsing.data = values.pop(asking) is True
         parsing.call = called(runnable, sent(taken, values, typed_in))
 
+    data = inspect.Parameter(
+        asking,
+        inspect.Parameter.KEYWORD_ONLY,
+        annotation=Annotated[
+            bool,
+            typer.Option(
+                "--json", help="Print the answer's data as JSON, rather than its lines."
+            ),
+        ],
+        default=False,
+    )
     vars(parsed)["__signature__"] = inspect.Signature(
-        [each.parameter(typed_in) for each in taken]
+        [*(each.parameter(typed_in) for each in taken), data]
     )
     return parsed
 
@@ -121,21 +141,26 @@ def built(
     if module not in groups:
         for one in runnable:
             if one.module == top:
-                line.command(one.doorway.typed(), help=one.doorway.description)(
-                    command(one, parsing, typed_in)
-                )
+                line.command(
+                    one.doorway.typed(),
+                    help=one.doorway.description,
+                    short_help=one.doorway.summary(),
+                )(command(one, parsing, typed_in))
     for each in groups:
         methods = typer.Typer(
             help=offered.described(each) or None,
+            short_help=offered.summarized(each) or None,
             add_completion=False,
             rich_markup_mode=markup,
         )
         if each == module:
             for one in runnable:
                 if one.module == each:
-                    methods.command(one.doorway.typed(), help=one.doorway.description)(
-                        command(one, parsing, typed_in)
-                    )
+                    methods.command(
+                        one.doorway.typed(),
+                        help=one.doorway.description,
+                        short_help=one.doorway.summary(),
+                    )(command(one, parsing, typed_in))
         line.add_typer(methods, name=each)
     return line
 
@@ -183,14 +208,11 @@ def said(output: JsonValue) -> str:
             return to_json(output).decode()
 
 
-def printed(call: Call, output: JsonValue) -> str:
-    """Return what's printed of what `call` answered: a view's text, else what it answered (`said`), a line ended."""
-    text = (
-        Blocks.model_validate(output).text()
-        if isinstance(call, ViewCalled)
-        else said(output)
-    )
-    return text if not text or text.endswith("\n") else f"{text}\n"
+def shown(call: Call, reply: Answered) -> Blocks | None:
+    """Return the blocks printed of what `call` answered: a view's answer, or the line said of what a command did; none for a tool's answer, printed as it is (`said`)."""
+    if isinstance(call, ViewCalled):
+        return Blocks.model_validate(reply.output)
+    return reply.shown
 
 
 async def typed(
@@ -222,13 +244,13 @@ async def typed(
     if len(asked) == 1 and named in [[each] for each in grouped(offered, top)]:
         asked = [*asked, "--help"]
     kept_out, kept_error = io.StringIO(), io.StringIO()
-    printing = out or kept_out
+    printed = out or kept_out
     erring = error or kept_error
     parsing = Parsing()
-    markup: MarkupMode = "markdown" if printing.isatty() else None
+    markup: MarkupMode = "markdown" if printed.isatty() else None
     module = named[0] if named else None
     line = get_command(built(name, offered, module, parsing, typed_in, markup, top=top))
-    with redirect_stdout(printing), redirect_stderr(erring):
+    with redirect_stdout(printed), redirect_stderr(erring):
         try:
             line.main(args=asked, prog_name=name, standalone_mode=True)
             status = 0
@@ -245,10 +267,15 @@ async def typed(
     reply = await answerer.answered(call)
     match reply:
         case Answered(output=output):
-            printing.write(printed(call, output))
+            blocks = shown(call, reply)
+            if parsing.data or blocks is None:
+                text = said(output)
+                printed.write(text if not text or text.endswith("\n") else f"{text}\n")
+            else:
+                draw(blocks, offered.plan.looks, printed)
             status = 0
         case Declined(rejection=rejection):
-            erring.write(f"{name}: {rejection.reason}\n")
+            refuse(name, rejection.reason, erring)
             status = 1
     return Typed(
         status=status,

@@ -28,7 +28,10 @@ class Refs(Named[str]):
 
 
 class Remote(Module):
-    """A room's `git push` and `git fetch`, carried out with the operator's credentials, within what the declaration allows.
+    """A room's push and fetch, with your credentials.
+
+    A room's `git push` and `git fetch`, carried out with the operator's credentials,
+    within what the declaration allows.
 
     Each project's is one part, in a container of its own, holding the
     project's git directory and the operator's SSH agent alone (`Remotes`). A

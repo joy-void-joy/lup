@@ -17,7 +17,18 @@ One command line for developing with lup, the one universal interface: `lup <mod
 
 A command takes everything as arguments: one missing is refused as the words are read, nothing runs, and nothing is ever asked for, so an agent or a test typing it fails rather than hangs. Words starting with `-` that aren't options go after `--`.
 
-What a run prints: a view's text (`Blocks.text`), what the operator sees said in lines; a tool's or a command's answer, words as they are and a model as its JSON; a refusal's reason, on standard error. Its exit status is 0 where it ran or showed help, 1 where the call was refused, and 2 where the words didn't parse.
+## What it prints
+
+No module writes what's printed: one printer does (`printing.py`), from what a call answers.
+- **A view** prints its text form (`Blocks.text`), what the operator sees said in lines.
+- **A command** prints the line said of what it did: its answer is a `lup.Done`, its data and a one-line template over its fields (`lup/doors/README.md`), said where it's answered, a `Done` it holds said in a line under it.
+- **`--json`,** on every command and view, prints the answer's data instead: a `Done`'s fields, a view's blocks.
+- **A tool** prints what it answered, words as they are and a model as its JSON.
+- **A refusal** prints its reason on standard error, after the command line's name.
+
+In a terminal, each is drawn as the dashboard draws it: a span in its tone, a fold's marker in its kind's colour, how a block stands in its meaning's colour, from the looks the plan carries, in the terminal's own palette, by name, so they follow the operator's theme; a refusal in red, and what lup itself says beside an answer (the machine started, the dashboard opened) set back. Piped, as an agent's always is, it's the same text, plain: one walk of the blocks (`Blocks.runs`) makes both, so colour only adds to what an agent reads. Its exit status is 0 where it ran or showed help, 1 where the call was refused, and 2 where the words didn't parse.
+
+Help lists each command, view and module by its summary, its docstring's first line, standing alone, 60 characters at most, which its door, or the module as it's defined, holds it to, so no line of help is cut off.
 
 ## Who calls, and what they may run
 
@@ -33,7 +44,7 @@ It builds its parser from the plan alone, the JSON Schema of what each method ta
 
 `Calling` answers through that program, over the socket `LUP_CALLING` names, as a room's command line does and the operator's can: it asks the program what may be called (`Offering`), and the program answers with who the socket says the caller is and the plan of the project asked about, the machine's own parts' beside it, so nothing of the project's code runs where the command line does. Each call goes to the program, which says who it's by and carries it where it's answered (`lup/hosting/README.md`, *Carrying*). Every answerer says how it stops (`stopped`): `InProcess` stops the parts it started, the others nothing.
 
-`Here` answers through `Calling` but for a command its plan marks to run where it's typed (`@lup.command(here=True)`, `Doorway.here`), which it answers in this process over the worktree's declaration, by the party the program names, read only once such a command is typed: what the project runs is the commit the operator approved, which never sees the worktree, its uncommitted files or its environment, and a branch's own checks, its tests, run in the room it's typed in. Where that declaration can't be read, the call is refused, saying why. Typed in the operator's terminal, it runs there, as `uv run` would. Which commands run here is the approved plan's word, so a command a branch adds runs here once its commit is approved.
+`Here` answers through `Calling` but for a command or a view its plan marks to run where it's typed (`@lup.command(here=True)`, `@lup.view(here=True)`, `Doorway.here`), which it answers in this process over the worktree's declaration, by the party the program names, read only once such a command is typed: what the project runs is the commit the operator approved, which never sees the worktree, its uncommitted files or its environment, and a branch's own checks, its tests, run in the room it's typed in. Where that declaration can't be read, the call is refused, saying why. Typed in the operator's terminal, it runs there, as `uv run` would. Which commands run here is the approved plan's word, so a command a branch adds runs here once its commit is approved.
 
 ## `lup`
 

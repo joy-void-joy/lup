@@ -162,7 +162,10 @@ class CounterPromises(Part):
 
 
 class Counter(Module):
-    """Counting: an example module the testing submodule's promises check the harness with."""
+    """Counting, which the harness's promises check it with.
+
+    Counting: an example module the testing submodule's promises check the harness with.
+    """
 
     name = "counter"
     parts: Parts = Parts.of(CounterPart, CounterPromises)

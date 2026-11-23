@@ -13,7 +13,10 @@ from lup.sessions.part import Sessions
 
 
 class Page(Module):
-    """The dashboard's page, built from its sources here alone: a project installs it built.
+    """The dashboard's page, built from its sources.
+
+    The dashboard's page, built from its sources here alone: a project installs it
+    built.
 
     Its gate step installs the page's packages from its lockfile, generates its
     types from what it reads of the core, type-checks it, checks its promises

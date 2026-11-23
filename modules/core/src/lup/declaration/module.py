@@ -15,6 +15,7 @@ chain of `Modules`' verbs and its reason, so the overview can show where every
 value came from.
 """
 
+import pydoc
 from collections.abc import Collection
 from inspect import cleandoc
 from itertools import takewhile
@@ -129,6 +130,7 @@ class Module(Model, extra="forbid"):
         if not cls.__doc__:
             message = f"`{declared}` has no docstring, which is its one sentence"
             raise ProjectError(message)
+        cls.summary()
         required = [
             field for field, info in cls.model_fields.items() if info.is_required()
         ]
@@ -167,6 +169,29 @@ class Module(Model, extra="forbid"):
         for info in cls.model_fields.values():
             if isinstance(default := info.default, Selection):
                 default.complete({declared: cls})
+
+    @classmethod
+    def summary(cls, longest: int = 60) -> str:
+        """Return the module's summary: its docstring's first line, standing alone, `longest` characters at most, which the command line's help lists it by beside its name.
+
+        Raise `ProjectError` where its docstring opens with no line standing
+        alone, or with a longer one.
+        """
+        line, _ = pydoc.splitdoc(cleandoc(cls.__doc__ or ""))
+        if not line:
+            message = (
+                f"`{cls.__name__}` has no summary: its docstring opens with one line "
+                f"saying what it's for, {longest} characters at most, then a blank "
+                "line before the rest"
+            )
+            raise ProjectError(message, about=[cls.__name__])
+        if len(line) > longest:
+            message = (
+                f"`{cls.__name__}`'s summary, its docstring's first line, is "
+                f"{len(line)} characters, past {longest}: {line}"
+            )
+            raise ProjectError(message, about=[cls.__name__])
+        return line
 
     @classmethod
     def sentence(cls) -> str:

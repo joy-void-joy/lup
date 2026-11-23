@@ -1556,7 +1556,7 @@ class WithoutPromises(Part):
             {"repository": "harmon", "name": "token", "value": "t"},
             lup.Operator(),
         )
-        status = await started.run("hosting", "status", {}, lup.Operator())
+        status = await started.view("hosting", "status", {}, lup.Operator())
         assert isinstance(kept, Accepted)
         assert isinstance(status, Accepted)
         assert isinstance(run, Accepted) == (podman == "6.1.0")
@@ -1590,14 +1590,15 @@ class WithoutPromises(Part):
         await started.run("hosting", "register", Opens().given(), lup.Operator())
         if opened:
             await started.serve("opened", Opens().given(), Machine())
-        status = await started.run("hosting", "status", {}, lup.Operator())
-        refused = await started.run("hosting", "status", {}, by.any(Agent))
+        status = await started.view("hosting", "status", {}, lup.Operator())
+        refused = await started.view("hosting", "status", {}, by.any(Agent))
         assert isinstance(status, Accepted)
+        assert isinstance(status.output, lup.Blocks)
         assert isinstance(refused, Refused)
-        said = status.answer()
-        assert "harmon" in said
-        assert (committed.commit in said) == opened
-        assert ("lup-harmon-project-1" in said) == opened
+        shown = [each.id for each in status.output.every()]
+        assert "project-harmon" in shown
+        assert (committed.commit in status.output.text()) == opened
+        assert ("lup-harmon-project-1" in shown) == opened
 
     @lup.promise
     async def what_a_container_prints_is_kept_capped(self, by: Testing) -> None:
@@ -1694,12 +1695,14 @@ class HerePromises(Part):
         started = await started_approved(by, podman)
         await started.run("hosting", "register", Opens().given(), lup.Operator())
         resumed = await started.serve("resumed", {}, Machine())
-        status = await started.run("hosting", "status", {}, lup.Operator())
+        status = await started.view("hosting", "status", {}, lup.Operator())
         assert isinstance(resumed, Accepted)
         assert isinstance(status, Accepted)
-        said = status.answer()
+        assert isinstance(status.output, lup.Blocks)
+        shown = [each.id for each in status.output.every()]
+        said = status.output.text()
         assert json.loads(resumed.answer())["refused"]["harmon"] in said
-        assert "lup-harmon-project-1" not in said
+        assert "lup-harmon-project-1" not in shown
 
 
 class Flaky(lup.MutableModel, Responding):
@@ -1807,9 +1810,11 @@ class MachinewidePromises(Part):
         assert data
         assert not any("ro=true" in each for each in data)
         assert not [each for each in mounts if "Keeper" in each]
-        status = await started.run("hosting", "status", {}, lup.Operator())
+        status = await started.view("hosting", "status", {}, lup.Operator())
         assert isinstance(status, Accepted)
-        assert (f"  {container}, " in status.answer()) == listens
+        assert isinstance(status.output, lup.Blocks)
+        shown = [each.id for each in status.output.every()]
+        assert (container in shown) == listens
         if not listens:
             return
         project = await placed(started, "harmon", NOTES_PLAN, ["notes.Notes"])

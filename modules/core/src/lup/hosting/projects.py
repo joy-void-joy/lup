@@ -20,6 +20,7 @@ what another imports or reads what another keeps.
 import os
 from datetime import timedelta
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import Field, TypeAdapter, ValidationError
 from tenacity import (
@@ -31,6 +32,7 @@ from tenacity import (
 
 import lup
 from lup.command_line.filled import Common, Repository
+from lup.doors.done import Done
 from lup.doors.door import RefusedError
 from lup.doors.events import Stopping
 from lup.doors.parties import Agent, Machine, Operator
@@ -54,6 +56,7 @@ from lup.hosting.settings import Lending
 from lup.hosting.trees import Commit, Exporting, Trees
 from lup.running.plan import Name, PartPlan, Plan
 from lup.running.wire import Planning, Rendering, Start, read
+from lup.shell.blocks import Blocks, Fold, Line, Span
 from lup.told.guidance import Guidance
 from lup.types import Model
 
@@ -169,6 +172,33 @@ class Shared(Model):
 
 class Statusing(Model):
     """Asking what the machine runs, giving nothing."""
+
+
+class Registered(Done):
+    """A project registered with the operator's lup."""
+
+    line: ClassVar[str] = "registered {repository}"
+    repository: str
+
+
+class PartWaiting(Done):
+    """A part of a project not started, and what it waits on."""
+
+    line: ClassVar[str] = "{part} waits on {why}"
+    part: str
+    """The part, `module.Part`."""
+    why: str
+
+
+class ProjectOpened(Done):
+    """A project running at the commit approved last, and what of it waits."""
+
+    line: ClassVar[str] = "opened {repository} at {commit:.12}, {containers} containers"
+    repository: str
+    commit: Commit
+    containers: int
+    """How many containers it runs."""
+    waiting: list[PartWaiting] = []
 
 
 class Resuming(Model):
@@ -549,14 +579,15 @@ class Projects(Part, machine=True, shared=True):
             raise RefusedError(message) from wrong
 
     @lup.command
-    async def register(self, opening: Opening, by: Operator) -> str:
-        """Register a project with your lup, which lists it and opens it once you approve a commit of it.
+    async def register(self, opening: Opening, by: Operator) -> Registered:
+        """Register a project with your lup.
 
-        Refuse a repository's name another project registered already.
+        Your lup lists it, and opens it once you approve a commit of it. Refuse
+        a repository's name another project registered already.
         """
         del by
         self.kept_with(opening)
-        return f"registered {opening.repository}"
+        return Registered(repository=opening.repository)
 
     def kept_with(self, opening: Opening) -> None:
         """Keep `opening` among the projects opened, in place of what it kept for its repository.
@@ -576,20 +607,24 @@ class Projects(Part, machine=True, shared=True):
         (self.registry.path / "openings.json").write_bytes(OPENINGS.dump_json(kept))
 
     @lup.command
-    async def open(self, opening: Opening, by: Operator) -> str:
-        """Run a project, at the commit you approved last: plan its declaration, and start the containers its plan says."""
+    async def open(self, opening: Opening, by: Operator) -> ProjectOpened:
+        """Run a project, at the commit you approved last.
+
+        Plan its declaration, and start the containers its plan says.
+        """
         del by
         opened = await self.opening(opening)
-        waiting = (
-            ""
-            if not opened.waiting
-            else f"; waiting on secrets for {', '.join(opened.waiting)}"
-        )
-        unlent = "".join(
-            f"; {name} waits on {why}" for name, why in opened.unlent.items()
-        )
-        return (
-            f"{opened.repository}: {len(opened.containers)} containers{waiting}{unlent}"
+        return ProjectOpened(
+            repository=opened.repository,
+            commit=opened.commit,
+            containers=len(opened.containers),
+            waiting=[
+                *(PartWaiting(part=name, why="a secret") for name in opened.waiting),
+                *(
+                    PartWaiting(part=name, why=why)
+                    for name, why in opened.unlent.items()
+                ),
+            ],
         )
 
     @lup.service
@@ -637,9 +672,16 @@ class Projects(Part, machine=True, shared=True):
         if refusals:
             raise ContainerError("; ".join(refusals))
 
-    @lup.command
-    async def status(self, asking: Statusing, by: Operator) -> str:
-        """Say what the machine runs: the containers of its parts one for the whole machine, then each project open, the commit it runs, each of its containers, whether it's running and where what it prints goes, and the parts waiting for a secret; and each project registered that isn't open."""
+    @lup.view
+    async def status(self, asking: Statusing, by: Operator) -> Blocks:
+        """Show what the machine runs, a line each.
+
+        The containers of its parts one for the whole machine, then each
+        project open, the commit it runs, each of its containers, whether it's
+        running and where what it prints goes, and the parts waiting for a
+        secret or what the machine couldn't lend them; and each project
+        registered that isn't open, with why where opening it was refused.
+        """
         del asking, by
         shared = self.machinewides
         alive = (
@@ -648,54 +690,91 @@ class Projects(Part, machine=True, shared=True):
             else []
         )
 
-        def container(name: str) -> str:
-            state = "running" if name in alive else "ended"
-            return f"  {name}, {state}: what it prints is in {self.output(name)}"
-
-        running = [
-            "\n".join(
-                [
-                    f"{each.repository} runs {each.commit}"
-                    + (
-                        f", waiting on a secret: {', '.join(each.waiting)}"
-                        if each.waiting
-                        else ""
+        def container(name: str) -> Line:
+            running = name in alive
+            return Line(
+                id=name,
+                spans=[
+                    Span(text=name),
+                    Span(
+                        text=" running" if running else " ended",
+                        tone="up" if running else "down",
                     ),
-                    *(container(name) for name in each.containers),
-                    *(f"  {name} waits on {why}" for name, why in each.unlent.items()),
-                ]
+                    Span(text=f"  {self.output(name)}", tone="muted"),
+                ],
             )
-            for each in self.projects.values()
-        ]
+
+        def waits(part: str, why: str) -> Line:
+            return Line(
+                id=f"waiting-{part}",
+                spans=[Span(text=part), Span(text=f" waits on {why}", tone="waiting")],
+            )
+
         machine = (
             [
-                "the machine's parts one for the whole machine run in"
-                + (
-                    f", waiting on a secret: {', '.join(shared.waiting)}"
-                    if shared.waiting
-                    else ""
-                ),
-                *(container(name) for name in shared.containers),
-                *(
-                    f"  {part} didn't come up: {why}"
-                    for part, why in shared.failed.items()
-                ),
+                Fold(
+                    id="machine",
+                    kind="project",
+                    summary=[Span(text="the machine's own parts", tone="strong")],
+                    content=[
+                        *(container(name) for name in shared.containers),
+                        *(waits(part, "a secret") for part in shared.waiting),
+                        *(
+                            Line(
+                                id=f"failed-{part}",
+                                spans=[
+                                    Span(text=part),
+                                    Span(text=f" didn't come up: {why}", tone="down"),
+                                ],
+                            )
+                            for part, why in shared.failed.items()
+                        ),
+                    ],
+                )
             ]
             if shared.containers or shared.waiting or shared.failed
             else []
         )
+        running = [
+            Fold(
+                id=f"project-{each.repository}",
+                kind="project",
+                summary=[
+                    Span(text=each.repository, tone="strong"),
+                    Span(text=f" runs {each.commit}", tone="muted"),
+                ],
+                content=[
+                    *(container(name) for name in each.containers),
+                    *(waits(part, "a secret") for part in each.waiting),
+                    *(waits(part, why) for part, why in each.unlent.items()),
+                ],
+            )
+            for each in self.projects.values()
+        ]
         closed = [
-            f"{repository} is registered, and not open"
-            + (
-                f": opening it was refused, {self.unopened[repository]}"
-                if repository in self.unopened
-                else ""
+            Line(
+                id=f"project-{repository}",
+                spans=[
+                    Span(text=repository, tone="strong"),
+                    Span(text=" registered, not open", tone="muted"),
+                    *(
+                        [
+                            Span(
+                                text=f": opening it was refused, {self.unopened[repository]}",
+                                tone="down",
+                            )
+                        ]
+                        if repository in self.unopened
+                        else []
+                    ),
+                ],
             )
             for repository in self.kept()
             if repository not in self.projects
         ]
-        return (
-            "\n".join([*machine, *running, *closed]) or "nothing is registered or open"
+        shown = [*machine, *running, *closed]
+        return Blocks.of(
+            *(shown or [Line.of("nothing", "nothing is registered or open", "muted")])
         )
 
     def output(self, container: str) -> Path:

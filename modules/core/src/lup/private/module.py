@@ -21,8 +21,10 @@ class Details(Named[str]):
 
 
 class Private(Module):
-    """What never leaves under the operator's name: their home path, user name, machine name and ssh aliases, the project's own path, their own values, and an inbox item's number in prose.
+    """What never leaves under your name.
 
+    The operator's home path, user name, machine name and ssh aliases, the
+    project's own path, their own values, and an inbox item's number in prose.
     The list is the machine's alone (`Withholding`). Each project's `Guard`
     refuses at `Publishing` a push or a post holding one, saying where, never
     what; the gate's `private` step fails on one in the worktree's files or in

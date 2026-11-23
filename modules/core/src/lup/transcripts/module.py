@@ -133,13 +133,21 @@ class Transcribing(Part, shared=True):
 
     @lup.view
     async def sessions(self, listing: Listing) -> Blocks:
-        """List the conversations kept on the machine, the latest first: each with its name, when it last moved, where it ran, and how often the operator spoke in it."""
+        """List the conversations kept, the latest first.
+
+        List the conversations kept on the machine, the latest first: each with its
+        name, when it last moved, where it ran, and how often the operator spoke in it.
+        """
         await self.caught_up()
         return listed_blocks(self.opened().listed(listing), self.opens())
 
     @lup.view
     async def show(self, showing: Showing) -> Blocks:
-        """Show a conversation: the operator's words, each after the agent's last words before them; or what was said around a step; or, `--whole`, every step."""
+        """Show a conversation, or what was said around a step.
+
+        Show a conversation: the operator's words, each after the agent's last words
+        before them; or what was said around a step; or, `--whole`, every step.
+        """
         await self.caught_up()
         index = self.opened()
         named = index.named_by(showing.session, showing.subagent)
@@ -159,7 +167,12 @@ class Transcribing(Part, shared=True):
 
     @lup.view
     async def search(self, searching: Searching) -> Blocks:
-        """Find each time words were said, the operator's by default, each under what it answered, the latest first: in every session's record and in what was said through lup."""
+        """Find each time words were said, the latest first.
+
+        Find each time words were said, the operator's by default, each under what it
+        answered, the latest first: in every session's record and in what was said
+        through lup.
+        """
         await self.caught_up()
         found = self.opened().searched(searching)
         return searched_blocks(found, self.opens(), whole=searching.whole)
@@ -198,7 +211,12 @@ def archived(archive: Path, runtime: str) -> list[Path]:
 
 
 class Transcripts(Module):
-    """Every session's record on the machine, both runtimes', read where the runtimes keep it, indexed with what the operator said through lup, and searched: what the operator said, and what it answered."""
+    """Every session's record, searched.
+
+    Every session's record on the machine, both runtimes', read where the runtimes keep
+    it, indexed with what the operator said through lup, and searched: what the operator
+    said, and what it answered.
+    """
 
     name = "transcripts"
     homes: Path = HOMES

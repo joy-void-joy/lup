@@ -26,6 +26,7 @@ from pydantic_settings import DotEnvSettingsSource, EnvSettingsSource
 
 from lup.command_line.answering import Answerer, Here, Offered
 from lup.command_line.filled import TypedIn
+from lup.command_line.printing import note, refuse
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.layout import MachineLayout, RepositoryLayout
@@ -210,7 +211,7 @@ def ran(
 
 def refused(name: str, failure: LupError) -> NoReturn:
     """End the command line called `name`, saying why it can't run: its declaration doesn't load, or it isn't in a repository."""
-    sys.stderr.write(f"{name}: {failure}\n")
+    refuse(name, str(failure), sys.stderr)
     raise SystemExit(1)
 
 
@@ -283,15 +284,16 @@ def main() -> None:
             calling = asyncio.run(loader.ensured())
             said = asyncio.run(loader.reviewed(calling, layout))
             if said is not None:
-                sys.stderr.write(f"lup: {said}\n")
+                note("lup", said, sys.stderr)
             if not words:
                 shown = opened(DashboardPlaces.of(places.state, places.runtime))
                 if shown is not None:
-                    sys.stderr.write(f"lup: {shown}\n")
+                    note("lup", shown, sys.stderr)
                     sys.exit(0)
-                sys.stderr.write(
-                    "lup: the machine serves no dashboard; what it said is in "
-                    f"{places.log()}\n"
+                refuse(
+                    "lup",
+                    f"the machine serves no dashboard; what it said is in {places.log()}",
+                    sys.stderr,
                 )
         if calling is not None:
             found = layout
@@ -314,10 +316,6 @@ def main() -> None:
                 CORE,
                 typed_in,
             )
-        sys.stderr.write(
-            "lup: podman isn't here, so no machine runs: this answers in this "
-            "process, over this worktree's declaration\n"
-        )
         resolved = resolve(read(layout, machine()).project)
     except (ProgramFailedError, GitError, ProjectError, LoaderError) as failure:
         refused("lup", failure)

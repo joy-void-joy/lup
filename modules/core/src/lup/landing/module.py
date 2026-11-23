@@ -13,9 +13,11 @@ from lup.store.records import Recorded
 
 
 class Landing(Module):
-    """Landing a branch: the agent who wrote it puts it before the operator, whose yes puts it on trial in what their lup runs, and who accepts it onto the integration branch once they've lived with it.
+    """A branch's review, its trial, and accepting it.
 
-    A branch lands once it holds the integration branch's tip and the gate
+    The agent who wrote a branch puts it before the operator, whose yes puts it
+    on trial in what their lup runs, and who accepts it onto the integration
+    branch once they've lived with it. A branch lands once it holds the integration branch's tip and the gate
     passed on its files, so it needs the gate.
     """
 

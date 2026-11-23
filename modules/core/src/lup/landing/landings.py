@@ -13,7 +13,7 @@ a project's containers (`README.md` here).
 import asyncio
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import TypeAdapter
 
@@ -21,6 +21,7 @@ import lup
 from lup.code_rules import Defer, changed_deferrals
 from lup.command_line.filled import Repository
 from lup.declaration.layout import local_layer
+from lup.doors.done import Done
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Codebase, Operator
 from lup.doors.parts import Data, Part, Program
@@ -236,6 +237,115 @@ class Live(Model):
     out: list[Unmerged] = []
 
 
+class LeftOut(Done):
+    """A branch on trial left out of what runs, and why."""
+
+    line: ClassVar[str] = "{branch} is left out of what runs: {why}"
+    branch: str
+    why: str
+
+
+class RunsAsItWas(Done):
+    """What a project runs, unchanged, since what it would run can't be computed."""
+
+    line: ClassVar[str] = "what runs stays as it was: {why}"
+    why: str
+
+
+class AwaitsReview(Done):
+    """What a project would run, waiting on the operator, since its integration branch moved without their review."""
+
+    line: ClassVar[str] = (
+        "{integration} moved to {base} without your review: lup asks you "
+        "before running it, and nothing restarted"
+    )
+    integration: str
+    base: Commit
+
+
+class RunsOnceOpen(Done):
+    """What a project runs, approved, once it opens, and why it didn't."""
+
+    line: ClassVar[str] = "{repository} runs {commit} once it opens: {why}"
+    repository: str
+    commit: Commit
+    why: str
+
+
+class RunsAt(Done):
+    """What a project runs, opened at it."""
+
+    line: ClassVar[str] = "{repository} runs {commit}"
+    repository: str
+    commit: Commit
+
+
+type Outcome = RunsAsItWas | AwaitsReview | RunsOnceOpen | RunsAt
+"""What came of a change to a project's trial for what it runs."""
+
+
+class Effect(Model):
+    """What a change to a project's trial did to what it runs: how it runs, and each branch left out."""
+
+    runs: Outcome
+    left_out: list[LeftOut] = []
+
+
+class OnTrial(Done, Effect):
+    """A branch put on trial, at the tip whose review the operator read."""
+
+    line: ClassVar[str] = "{branch} is on trial"
+    branch: str
+
+
+class PutBack(Done, Effect):
+    """A branch on trial put back into what runs."""
+
+    line: ClassVar[str] = "{branch} runs again"
+    branch: str
+
+
+class TakenOut(Done, Effect):
+    """A branch on trial taken out of what runs."""
+
+    line: ClassVar[str] = "{branch} is taken out of what runs"
+    branch: str
+
+
+class OffTrial(Done, Effect):
+    """A branch taken off trial, or a landing declined: nothing of it runs."""
+
+    line: ClassVar[str] = "{branch} is off trial"
+    branch: str
+
+
+class Unmoved(Done):
+    """The repository's tracking ref of the integration branch, left where it was, and why."""
+
+    line: ClassVar[str] = "the tracking ref stays where it was: {why}"
+    why: str
+
+
+class Undeleted(Done):
+    """A branch accepted, left on the remote, and why."""
+
+    line: ClassVar[str] = "{branch} stays on {remote}: {why}"
+    branch: str
+    remote: str
+    why: str
+
+
+class AcceptedOnto(Done, Effect):
+    """A branch on trial accepted onto the integration branch, merged at the tip reviewed."""
+
+    line: ClassVar[str] = "{branch} is accepted onto {integration} as {merge}"
+    branch: str
+    integration: str
+    merge: Commit
+    kept: list[Unmoved | Undeleted] = []
+    """What of cleaning up after it failed, the accept standing."""
+
+
 class Landings(Part, machine=True, shared=True):
     """The machine's part keeping each project's landings and what's on trial, computing what it runs, and accepting a branch onto its integration branch."""
 
@@ -440,10 +550,10 @@ class Landings(Part, machine=True, shared=True):
             return f"asked to accept {wanting.branch}"
 
     @lup.command(verb="done", says="put it on trial")
-    async def yes(self, reviewing: Reviewing, by: Operator) -> str:
-        """Say yes to a landing's review: the branch goes on trial at the tip whose review you read, and your lup runs it.
+    async def yes(self, reviewing: Reviewing, by: Operator) -> OnTrial:
+        """Put a branch on trial, at the tip whose review you read.
 
-        Refused where the branch landed again since, at a tip whose review you
+        Your lup runs it, saying yes to its review. Refused where the branch landed again since, at a tip whose review you
         haven't read.
         """
         del by
@@ -459,43 +569,50 @@ class Landings(Part, machine=True, shared=True):
             trial = trial.with_landing(
                 landed.model_copy(update={"reviewed": landed.tip})
             )
-            said = await self.ran(
-                reviewing.repository, trial, f"{reviewing.branch} is on trial"
-            )
-            await self.settled(reviewing.repository, landed, said)
-            return said
+            effect = await self.ran(reviewing.repository, trial)
+            done = OnTrial(branch=reviewing.branch, **dict(effect))
+            await self.settled(reviewing.repository, landed, done)
+            return done
 
     @lup.command(verb="toggle", says="run it or not")
-    async def toggle(self, naming: Naming, by: Operator) -> str:
-        """Take a branch on trial out of what your lup runs, or put it back, and run what's left."""
+    async def toggle(self, naming: Naming, by: Operator) -> PutBack | TakenOut:
+        """Take a branch on trial out of what runs, or put it back.
+
+        Your lup runs what's left.
+        """
         del by
         async with self.lock(naming.repository):
             trial = self.kept(naming.repository)
             landed = trial.landing(naming.branch)
             picked = not landed.picked
             trial = trial.with_landing(landed.model_copy(update={"picked": picked}))
-            said = "runs again" if picked else "is taken out of what runs"
-            return await self.ran(naming.repository, trial, f"{naming.branch} {said}")
+            effect = await self.ran(naming.repository, trial)
+            if picked:
+                return PutBack(branch=naming.branch, **dict(effect))
+            return TakenOut(branch=naming.branch, **dict(effect))
 
     @lup.command(verb="decline", says="take it off trial")
-    async def drop(self, naming: Naming, by: Operator) -> str:
-        """Take a branch off trial, or decline a landing waiting on you: nothing of it runs, and it's left as it is."""
+    async def drop(self, naming: Naming, by: Operator) -> OffTrial:
+        """Take a branch off trial, or decline its landing.
+
+        Nothing of it runs, and it's left as it is.
+        """
         del by
         async with self.lock(naming.repository):
             trial = self.kept(naming.repository)
             landed = trial.landing(naming.branch)
             trial = trial.with_landing(landed.model_copy(update={"ended": "dropped"}))
-            said = await self.ran(
-                naming.repository, trial, f"{naming.branch} is off trial"
-            )
-            await self.settled(naming.repository, landed, said)
-            return said
+            effect = await self.ran(naming.repository, trial)
+            done = OffTrial(branch=naming.branch, **dict(effect))
+            await self.settled(naming.repository, landed, done)
+            return done
 
     @lup.command(verb="done", says="accept it onto the integration branch")
-    async def accept(self, naming: Naming, by: Operator) -> str:
-        """Accept a branch on trial onto the integration branch, at the tip you reviewed: merge it, push it as you would, and delete the branch on the remote where it's there at that tip.
+    async def accept(self, naming: Naming, by: Operator) -> AcceptedOnto:
+        """Accept a branch on trial onto the integration branch.
 
-        Refused where it landed again since your yes, at a tip whose review
+        At the tip you reviewed: merge it, push it as you would, and delete the
+        branch on the remote where it's there at that tip. Refused where it landed again since your yes, at a tip whose review
         you haven't said yes to; where the integration branch doesn't hold
         what its review was read against; where it doesn't merge onto the
         integration branch as it stands, naming the files; or where the push
@@ -543,19 +660,23 @@ class Landings(Part, machine=True, shared=True):
             ).model_copy(update={"accepted": merge})
             self.keep(naming.repository, trial)
             cleaned = await self.cleaned(naming.repository, git, trial, landed, merge)
-            said = await self.ran(
-                naming.repository,
-                trial,
-                f"{naming.branch} is accepted onto {trial.integration} as {merge}{cleaned}",
+            effect = await self.ran(naming.repository, trial)
+            done = AcceptedOnto(
+                branch=naming.branch,
+                integration=trial.integration,
+                merge=merge,
+                kept=cleaned,
+                **dict(effect),
             )
-            await self.settled(naming.repository, landed, said)
-            return said
+            await self.settled(naming.repository, landed, done)
+            return done
 
-    async def settled(self, project: str, landed: Landed, said: str) -> None:
-        """Tell the agent who landed `landed` what came of it, in `said`, answering its item so it waits no more; nothing where it has none."""
+    async def settled(self, project: str, landed: Landed, said: Done | str) -> None:
+        """Tell the agent who landed `landed` what came of it, `said`, in the lines the operator reads of it where it's what the operator did, answering its item so it waits no more; nothing where it has none."""
         if landed.item is not None:
+            text = said if isinstance(said, str) else said.shown().text()
             await Inboxes.settle(
-                Settling(repository=project, item=landed.item, text=said)
+                Settling(repository=project, item=landed.item, text=text)
             )
 
     async def merged(
@@ -588,13 +709,13 @@ class Landings(Part, machine=True, shared=True):
 
     async def cleaned(
         self, project: str, git: Store, trial: Trial, landed: Landed, merge: Commit
-    ) -> str:
+    ) -> list[Unmoved | Undeleted]:
         """Move the repository's tracking ref of the integration branch to `merge`, as `git push` would, and delete `landed`'s branch on the remote through the project's `remote` where it's there at its reviewed tip, leased on it; say what of it failed, the accept standing."""
-        said: list[str] = []
+        said: list[Unmoved | Undeleted] = []
         try:
             await git.moved(f"refs/remotes/{trial.remote}/{trial.integration}", merge)
         except RefusedError as unmoved:
-            said = [*said, f"; the tracking ref stays where it was: {unmoved}"]
+            said = [*said, Unmoved(why=str(unmoved))]
         branch = f"refs/heads/{landed.branch}"
         try:
             with lup.within(project):
@@ -612,8 +733,9 @@ class Landings(Part, machine=True, shared=True):
                     there,
                 )
         except RefusedError as kept:
-            said = [*said, f"; {landed.branch} stays on {trial.remote}: {kept}"]
-        return "".join(said)
+            stays = Undeleted(branch=landed.branch, remote=trial.remote, why=str(kept))
+            said = [*said, stays]
+        return said
 
     async def who(self) -> str:
         """Return who a merge the operator accepts is by: their own name and address, as their git is configured, else lup's."""
@@ -623,8 +745,8 @@ class Landings(Part, machine=True, shared=True):
             return LUP
         return f"{name.text().strip()} <{email.text().strip()}>"
 
-    async def ran(self, project: str, trial: Trial, said: str) -> str:
-        """Keep `trial`, compute what `project` runs from it, approve that where it's made of what the operator accepted and reviewed alone, open the project at it, and say what came of it after `said`.
+    async def ran(self, project: str, trial: Trial) -> Effect:
+        """Keep `trial`, compute what `project` runs from it, approve that where it's made of what the operator accepted and reviewed alone, open the project at it, and say what came of it.
 
         `trial` is kept first, so a change stands where what runs can't be
         computed, the remote unreachable say, which is said.
@@ -636,36 +758,39 @@ class Landings(Part, machine=True, shared=True):
             base = await self.remote_tip(project, trial)
             live = await self.live(opening, trial, base)
         except RefusedError as uncomputed:
-            return f"{said}. What runs stays as it was: {uncomputed}"
+            return Effect(runs=RunsAsItWas(why=str(uncomputed)))
         trial = trial.model_copy(update={"live": live.commit, "out": live.out})
         self.keep(project, trial)
         approved = await Approvals.approval(Asking(project=project))
         accepted = base == trial.accepted or (
             approved.commit is not None and await git.holds(base, approved.commit)
         )
-        out = "".join(
-            f"; {each.branch} is left out of what runs, as it "
-            + (
-                f"conflicts in {', '.join(str(path) for path in each.files)}"
-                if each.files
-                else each.why
+        out = [
+            LeftOut(
+                branch=each.branch,
+                why=(
+                    f"it conflicts in {', '.join(str(path) for path in each.files)}"
+                    if each.files
+                    else each.why
+                ),
             )
             for each in live.out
-        )
+        ]
         if not accepted:
-            return (
-                f"{said}{out}. {trial.integration} moved to {base} without your "
-                "review, so lup asks you before running it: nothing restarted"
+            return Effect(
+                runs=AwaitsReview(integration=trial.integration, base=base),
+                left_out=out,
             )
         if approved.commit != live.commit:
             await Approvals.landed(Approving(repository=project, commit=live.commit))
         try:
             await Projects.opened(opening)
         except RefusedError as unopened:
-            return (
-                f"{said}{out}. {project} runs {live.commit} once it opens: {unopened}"
+            runs = RunsOnceOpen(
+                repository=project, commit=live.commit, why=str(unopened)
             )
-        return f"{said}{out}. {project} runs {live.commit}"
+            return Effect(runs=runs, left_out=out)
+        return Effect(runs=RunsAt(repository=project, commit=live.commit), left_out=out)
 
     async def live(self, opening: Opening, trial: Trial, base: Commit) -> Live:
         """Return what the project at `opening` runs from `trial`: the integration branch's tip, `base`, with each branch on trial and picked merged in, by name, at the tip the operator reviewed, each that doesn't merge with what's before it left out."""
@@ -719,7 +844,11 @@ class Landings(Part, machine=True, shared=True):
 
     @lup.view
     async def trial(self, of: TrialOf, by: Operator) -> Blocks:
-        """Show a project's landings: each waiting on your review or on trial, with who landed it, since when, who wants it accepted, and its review under it."""
+        """Show a project's landings, waiting on you or on trial.
+
+        Each with who landed it, since when, who wants it accepted, and its
+        review under it.
+        """
         del by
         trial = self.kept(of.repository)
         out = [each.branch for each in trial.out]
@@ -746,7 +875,11 @@ class Landings(Part, machine=True, shared=True):
 
     @lup.view
     async def review(self, naming: Naming, by: Operator) -> Blocks:
-        """Show a landing's change: how the gate went on its tip, what a step that tells said, then each file its tip changes since the integration branch's tip it holds, read from each object's own bytes."""
+        """Show a landing's change, and how the gate went on its tip.
+
+        What a step that tells said, then each file its tip changes since the
+        integration branch's tip it holds, read from each object's own bytes.
+        """
         del by
         trial = self.kept(naming.repository)
         landed = trial.landing(naming.branch)

@@ -13,7 +13,7 @@ import importlib.util
 import keyword
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import ValidationError
 
@@ -21,6 +21,7 @@ import lup
 from lup.command_line.names import typed_methods
 from lup.declaration.layout import RepositoryLayout
 from lup.declaration.module import Module
+from lup.doors.done import Done
 from lup.doors.door import RefusedError
 from lup.doors.parties import Operator
 from lup.doors.parts import Checked, Finished, Part, Parts, Program
@@ -53,8 +54,26 @@ class Making(Model):
     """Where its directory is made: where `lup` is typed, unless given."""
 
 
-class SetUp(Model):
+class Missing(Done):
+    """A program lup's other parts run that isn't there, or not at a version they take."""
+
+    line: ClassVar[str] = "{why}"
+    name: str
+    why: str
+    """Why it can't be run, and how to install it."""
+
+
+class Unregistered(Done):
+    """Why the operator's lup wasn't told of the repository set up."""
+
+    line: ClassVar[str] = "not registered with your lup: {why}"
+    why: str
+
+
+class SetUp(Done):
     """What setting a repository up for lup did."""
+
+    line: ClassVar[str] = "set {root} up for lup"
 
     root: Path
     """The worktree's root."""
@@ -67,7 +86,7 @@ class SetUp(Model):
     """The requirement the project depends on lup's core by, which uv added."""
     module: Path | None = None
     """The directory of the module of the project's own made, where one was."""
-    missing: list[Checked] = []
+    missing: list[Missing] = []
     """The programs lup's other parts run that aren't there, or not at a
     version they take, each saying why and how to install it: none of them
     stops a project working on this machine, but each stops the part running
@@ -76,8 +95,14 @@ class SetUp(Model):
     """Whether the operator's lup was told of the repository, and lists it:
     `lup` tells it once the command has set the repository up, where it's
     typed (`lup.environment.setup`)."""
-    unregistered: str = ""
+    unregistered: Unregistered | None = None
     """Why it wasn't, where `lup` tried."""
+
+
+class Made(SetUp):
+    """A project made, set up for lup, with a module of its own."""
+
+    line: ClassVar[str] = "made {root}, set up for lup"
 
 
 class VcsInfo(Model):
@@ -127,9 +152,11 @@ class Setup(Part):
 
     @lup.command
     async def init(self, initializing: Initializing, by: Operator) -> SetUp:
-        """Set up the repository you're in for lup: its declaration of lup's default modules, the gitignore line for its local layer, and lup's core as its dependency, through uv.
+        """Set up the repository you're in for lup.
 
-        Refuse where git or uv is missing, where the directory is in no git
+        It writes its declaration of lup's default modules and the gitignore
+        line for its local layer, and adds lup's core as its dependency,
+        through uv. Refuse where git or uv is missing, where the directory is in no git
         worktree, or where a declaration is there already, which it never
         overwrites: nothing is written then.
         """
@@ -150,10 +177,11 @@ class Setup(Part):
         return await self.prepared(layout, None)
 
     @lup.command
-    async def new(self, making: Making, by: Operator) -> SetUp:
-        """Make a project set up for lup: its directory, a git repository and a uv workspace, what `init` writes, and a module of its own, which its declaration selects.
+    async def new(self, making: Making, by: Operator) -> Made:
+        """Make a project set up for lup, with a module of its own.
 
-        Refuse where git or uv is missing, where the directory is there
+        Its directory, a git repository and a uv workspace, what `init` writes,
+        and a module of its own, which its declaration selects. Refuse where git or uv is missing, where the directory is there
         already, or where the name would shadow a command of lup's or a
         package Python finds: nothing is written then. Where a step fails
         after, the directory it made is removed.
@@ -182,7 +210,7 @@ class Setup(Part):
                 shutil.rmtree(root, ignore_errors=True)
         return done
 
-    async def built(self, root: Path, own: Skeleton) -> SetUp:
+    async def built(self, root: Path, own: Skeleton) -> Made:
         """Make the project at `root`, its directory made, with `own` as its module."""
         await Git.initialised(root, self.git)
         self.succeeded(
@@ -209,7 +237,9 @@ class Setup(Part):
             root, "--dev", "pytest", "lup-core[environment,dashboard]"
         )
         self.succeeded(checking, "uv add")
-        return done.model_copy(update={"module": root / own.directory()})
+        return Made.model_validate(
+            {**done.model_dump(), "module": root / own.directory()}
+        )
 
     async def prepared(self, layout: RepositoryLayout, own: Skeleton | None) -> SetUp:
         """Write what `init` writes in `layout`'s worktree: lup's core as its dependency, first, where uv can refuse it, then its declaration, selecting `own` where given, and the line ignoring its local layer."""
@@ -248,7 +278,9 @@ class Setup(Part):
             declaration=layout.declaration,
             ignored=ignored,
             dependency=dependency,
-            missing=await self.wanting(),
+            missing=[
+                Missing(name=each.name, why=each.why) for each in await self.wanting()
+            ],
         )
 
     async def added(self, root: Path, *words: str) -> Finished:

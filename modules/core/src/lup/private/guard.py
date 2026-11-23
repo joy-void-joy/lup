@@ -2,8 +2,10 @@
 
 import asyncio
 from pathlib import Path
+from typing import ClassVar
 
 import lup
+from lup.doors.done import Done
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Operator
 from lup.doors.parts import Part, Program
@@ -102,6 +104,17 @@ class Unchecked(Model):
     """Asking the gate's check, giving nothing: it reads the worktree it's typed in."""
 
 
+class NothingPrivate(Done):
+    """A worktree's files and its unpushed commits, holding nothing that never leaves."""
+
+    line: ClassVar[str] = (
+        "nothing that never leaves in {files} files and {commits} commits the "
+        "remotes lack"
+    )
+    files: int
+    commits: int
+
+
 class Checker(Part):
     """The gate's `private` step: the worktree's files, and the commits the remotes lack, checked as `Withholding` checks what's about to leave."""
 
@@ -113,8 +126,12 @@ class Checker(Part):
     )
 
     @lup.command(here=True)
-    async def check(self, unchecked: Unchecked, by: Agent | Operator) -> str:
-        """Check the worktree's files, and the messages of the commits its remotes lack, for what never leaves under the operator's name; refused where any holds one, saying where, never what."""
+    async def check(self, unchecked: Unchecked, by: Agent | Operator) -> NothingPrivate:
+        """Check a worktree for what never leaves under your name.
+
+        Its files, and the messages of the commits its remotes lack; refused
+        where any holds one, saying where, never what.
+        """
         del unchecked, by
         worktree = await Git.located(Path.cwd(), through=self.git)
         if worktree is None:
@@ -154,7 +171,4 @@ class Checker(Part):
         )
         if checked.places:
             raise RefusedError(checked.told("this worktree"))
-        return (
-            f"Nothing that never leaves in {len(files)} files and "
-            f"{len(commits)} commits the remotes lack."
-        )
+        return NothingPrivate(files=len(files), commits=len(commits))

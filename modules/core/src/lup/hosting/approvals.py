@@ -14,13 +14,14 @@ comes from both commits written out, so what's shown is what would run
 """
 
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import ClassVar, Literal
 lazy from pathlib import Path
 
 from pydantic import TypeAdapter
 
 import lup
 from lup.command_line.filled import Repository
+from lup.doors.done import Done
 from lup.doors.parties import Machine, Operator
 from lup.doors.parts import Data, Part
 from lup.hosting.trees import Change, Commit, Comparing, Trees
@@ -33,6 +34,14 @@ class Approving(Model):
 
     commit: Commit
     repository: Repository
+
+
+class CommitApproved(Done):
+    """A commit of a repository's the operator approved to run."""
+
+    line: ClassVar[str] = "approved {commit:.12} of {repository} to run"
+    commit: Commit
+    repository: str
 
 
 class Approval(Model):
@@ -134,11 +143,14 @@ class Approvals(Part, machine=True, shared=True):
         self.kept_with(approving, Approval(commit=approving.commit, how="landing"))
 
     @lup.command
-    async def approve(self, approving: Approving, by: Operator) -> str:
-        """Approve a commit of a project to run, as you answer the question asked before it does."""
+    async def approve(self, approving: Approving, by: Operator) -> CommitApproved:
+        """Approve a commit of a project to run.
+
+        As you answer the question asked before it runs.
+        """
         del by
         self.kept_with(approving, Approval(commit=approving.commit, how="asked"))
-        return f"approved {approving.commit} of {approving.repository} to run"
+        return CommitApproved(commit=approving.commit, repository=approving.repository)
 
     @lup.service
     async def approval(self, asking: Asking, by: Machine) -> Approved:

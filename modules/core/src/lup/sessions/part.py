@@ -20,12 +20,13 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
 import lup
 from lup.command_line.filled import Repository
+from lup.doors.done import Done
 from lup.doors.door import RefusedError
 from lup.doors.events import Heeded, Starting
 from lup.doors.parties import Agent, Machine, Operator
@@ -143,6 +144,29 @@ class Called(Model):
     name: str
 
 
+class SessionBegun(Done):
+    """A session started, in a room of its own, held by lup."""
+
+    line: ClassVar[str] = "started {name}, a {runtime} session in {worktree}"
+    name: str
+    runtime: str
+    worktree: Path
+
+
+class TurnInterrupted(Done):
+    """A session's turn under way, interrupted."""
+
+    line: ClassVar[str] = "interrupted {name}'s turn"
+    name: str
+
+
+class SessionFinished(Done):
+    """A session ended: a reply starts it again."""
+
+    line: ClassVar[str] = "ended {name}"
+    name: str
+
+
 def said(item: ToldItem) -> str:
     r"""Return an item told to an agent, as a tag saying whose it is.
 
@@ -206,10 +230,10 @@ class Held(Part, machine=True, shared=True):
         return found[-1]
 
     @lup.command
-    async def start(self, starting: NewSession, by: Operator) -> str:
-        """Start a session in a room of its own, held by lup, and say what it's called.
+    async def start(self, starting: NewSession, by: Operator) -> SessionBegun:
+        """Start a session in a room of its own, held by lup.
 
-        Refused where the project isn't running, the runtime isn't one lup
+        It says what the session's called. Refused where the project isn't running, the runtime isn't one lup
         holds, the limit on sessions running is reached, or its room doesn't
         start.
         """
@@ -250,7 +274,7 @@ class Held(Part, machine=True, shared=True):
         )
         if starting.said:
             await self.ordered(session, Order(order="turn", text=starting.said))
-        return f"started {name}, a {starting.runtime} session in {worktree}"
+        return SessionBegun(name=name, runtime=starting.runtime, worktree=worktree)
 
     def limited(self, repository: str) -> None:
         """Refuse a session past the limits on sessions running: on the machine, and of one repository."""
@@ -372,16 +396,23 @@ class Held(Part, machine=True, shared=True):
             raise RefusedError(message) from wrong
 
     @lup.command
-    async def interrupt(self, called: Called, by: Operator) -> str:
-        """Interrupt the turn a session has under way: its foreground command ended, what waits for it told at its next turn."""
+    async def interrupt(self, called: Called, by: Operator) -> TurnInterrupted:
+        """Interrupt the turn a session has under way.
+
+        Its foreground command ends, and what waits for it is told at its next
+        turn.
+        """
         del by
         session = self.called(called.name)
         await self.ordered(session.session, Order(order="interrupt"))
-        return f"interrupted {session.name}"
+        return TurnInterrupted(name=session.name)
 
     @lup.command
-    async def end(self, called: Called, by: Operator) -> str:
-        """End a session: its turn under way finishes, then its runtime and room end; a reply starts it again."""
+    async def end(self, called: Called, by: Operator) -> SessionFinished:
+        """End a session once its turn under way finishes.
+
+        Its runtime and room end then; a reply starts it again.
+        """
         del by
         session = self.called(called.name)
         self.keep(session.model_copy(update={"ended": True}))
@@ -390,7 +421,7 @@ class Held(Part, machine=True, shared=True):
         await Inboxes.agent_ended(
             Ending(repository=session.repository, agent=Agent.of(session.session))
         )
-        return f"ended {session.name}"
+        return SessionFinished(name=session.name)
 
     async def ended(self, session: Session) -> None:
         """End a running session: its holder told to end, which closes its runtime's input, its room stopped, and calls from it refused from then on."""
@@ -584,7 +615,11 @@ class Held(Part, machine=True, shared=True):
 
 
 class Sessions(lup.Module):
-    """Sessions lup starts and holds itself, each in a room of its own, on Claude Code or Codex: the machine's parts holding them and making their rooms."""
+    """Sessions lup starts and holds, each in a room of its own.
+
+    On Claude Code or Codex: the machine's parts holding them and making their
+    rooms.
+    """
 
     name = "sessions"
     parts: lup.Parts = lup.Parts.of(Held, Rooms, SessionsPromises)
