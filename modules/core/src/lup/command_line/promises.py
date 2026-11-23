@@ -310,9 +310,10 @@ async def placed(started: Started) -> Inboxed:
 
 
 class Quoted(Model):
-    """The lines a comment quotes, as it's sent."""
+    """The lines a comment quotes, as it's sent, and where they start among the block's, from 0."""
 
     lines: list[str] = []
+    line: int = 0
 
 
 class Telling(Model):
@@ -350,7 +351,9 @@ class CommandLinePromises(Part):
         )
         assert quoting.status == 0, quoting.error
         assert quoting.call is not None
-        assert Quoted.model_validate(quoting.call.given).lines == [lines[-1]]
+        quoted = Quoted.model_validate(quoting.call.given)
+        assert quoted.lines == [lines[-1]]
+        assert quoted.line == len(lines) - 1
         shown = await started.typed(["show", "@ideas"], Operator())
         assert shown.status == 0, shown.error
         assert shown.call is not None
