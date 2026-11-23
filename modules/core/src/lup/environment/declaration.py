@@ -30,6 +30,7 @@ from lup.environment.doors import Doors
 from lup.errors import LupError
 from lup.gate.module import Gate
 from lup.github.module import GitHub
+from lup.inbox.module import Inbox
 from lup.landing.module import Landing
 from lup.private.module import Private
 from lup.remote.module import Remote
@@ -59,7 +60,16 @@ class Resolved(Model):
 
 def default() -> list[Module]:
     """List lup's default modules, in their order: what `Modules.default()` starts from."""
-    return [Core(), Gate(), Landing(), Remote(), GitHub(), Private(), Transcripts()]
+    return [
+        Core(),
+        Inbox(),
+        Gate(),
+        Landing(),
+        Remote(),
+        GitHub(),
+        Private(),
+        Transcripts(),
+    ]
 
 
 def shipped() -> list[Module]:

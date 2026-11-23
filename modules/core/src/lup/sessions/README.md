@@ -4,7 +4,7 @@ Every session is started and held by lup itself (`DESIGN.md`, *Sessions*), each 
 
 ## Starting, and what's kept
 
-`lup sessions start` takes a project that's running (`lup hosting open`), a runtime, a name, a worktree and the first words, and starts a session. A session is kept for good once started: its project, its runtime, lup's id for it (a UUID, its own agent's, `lup.Agent.of`) and the runtime's own, its worktree and its name. A session that's ended is still kept, and a reply starts it again with its whole conversation. `lup sessions interrupt` ends the turn under way. `lup sessions end` lets the turn finish, then ends its runtime and its room.
+`lup sessions start` takes a project that's running (`lup machine open`), a runtime, a name, a worktree and the first words, and starts a session. A session is kept for good once started: its project, its runtime, lup's id for it (a UUID, its own agent's, `lup.Agent.of`) and the runtime's own, its worktree and its name. A session that's ended is still kept, and a reply starts it again with its whole conversation. `lup sessions interrupt` ends the turn under way. `lup sessions end` lets the turn finish, then ends its runtime and its room.
 
 At most 32 sessions run at once, 16 of one repository (`Sessions.most`, `most_per_repository`). That's against a loop of spawns, not a budget.
 

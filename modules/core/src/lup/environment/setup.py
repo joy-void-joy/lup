@@ -53,7 +53,7 @@ async def registered(done: SetUp) -> SetUp:
     if calling is None and shutil.which("podman") is None:
         why = (
             "podman isn't here, so no machine of lup's runs to list it: once one "
-            "does, `lup hosting register` lists it"
+            "does, `lup machine register` lists it"
         )
         return done.model_copy(update={"unregistered": Unregistered(why=why)})
     try:
@@ -78,7 +78,7 @@ async def registered(done: SetUp) -> SetUp:
         )
         reply = await Calling(socket=socket).answered(
             CommandCalled(
-                module="hosting",
+                module="machine",
                 command="register",
                 given=opening.model_dump(mode="json"),
             )

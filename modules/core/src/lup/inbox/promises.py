@@ -91,6 +91,7 @@ from lup.testing import (
     Step,
     Testing,
     Write,
+    raises,
 )
 
 HERE = Codebase(repository="harness")
@@ -431,7 +432,7 @@ async def untold(started: Started) -> list[Agent]:
 
 async def viewed(started: Started, view: str, given: Model) -> Blocks:
     """Read one of the inbox's views as the operator does, which must answer its blocks."""
-    answered = await started.view("core", view, given, Operator())
+    answered = await started.view("inbox", view, given, Operator())
     assert isinstance(answered, Accepted), answered
     assert isinstance(answered.output, Blocks)
     return answered.output
@@ -553,7 +554,7 @@ async def texts(started: Started, number: int) -> list[Markdown]:
 
 async def commented(started: Started, comment: Commented[OnItem]) -> None:
     """Comment on an item as the operator does, which must be kept."""
-    kept = await started.run("core", "comment", comment, Operator())
+    kept = await started.run("inbox", "comment", comment, Operator())
     assert isinstance(kept, Accepted), kept
 
 
@@ -569,6 +570,13 @@ async def told_on(started: Started, agent: Agent, words: str) -> On:
 
 class InboxPromises(Part):
     """What agents and the operator can count on of the inbox."""
+
+    @lup.promise
+    async def every_project_holds_the_inbox(self, by: Testing) -> None:
+        """Every project holds the inbox, which the core requires: a declaration dropping it is refused as it resolves, naming it."""
+        with raises(lup.ProjectError) as refused:
+            await by.started(Project(modules=Modules.default().drop("inbox")))
+        assert "inbox" in refused.raised().about
 
     @lup.promise
     def a_parts_id_names_the_same_words(self, step: Step[Everywhere]) -> bool:
@@ -626,7 +634,7 @@ class InboxPromises(Part):
         await page.say(Hello(token=page.token))
         quote = Quote(
             viewing=Viewing(
-                module="core", view="waiting", given={"repository": "harness"}
+                module="inbox", view="waiting", given={"repository": "harness"}
             ),
             block=text.id,
             lines=[lines[at]],
@@ -717,7 +725,7 @@ class InboxPromises(Part):
             assert (on.item, on.part) == (number, place)
         beyond = OnItem(item=number, part=count + 2)
         refused = await started.run(
-            "core", "comment", Commented[OnItem](on=beyond, words="no"), Operator()
+            "inbox", "comment", Commented[OnItem](on=beyond, words="no"), Operator()
         )
         assert isinstance(refused, Refused)
 
@@ -730,7 +738,7 @@ class InboxPromises(Part):
         comment = by.any(Highlight).phrase
         ruling = Ruling(number=1, verdict="leaning", comment=comment)
         answering = Answering(question=number, rulings=[ruling])
-        answered = await started.run("core", "answer", answering, Operator())
+        answered = await started.run("inbox", "answer", answering, Operator())
         assert isinstance(answered, Accepted), answered
         [answer] = (await told(started, agent)).items
         assert comment in answer.text
@@ -747,7 +755,7 @@ class InboxPromises(Part):
         picked = by.any(Highlight)
         await said(started, "note", NoteSaid(remark="here"), agent)
         kept = await started.run(
-            "core",
+            "inbox",
             "comment_to",
             Commented[Reached](
                 on=Reached(party=agent),
@@ -795,7 +803,7 @@ class InboxPromises(Part):
         missing = Reading(number=number, part=3)
         assert isinstance(await started.call("inbox", missing, agent), Refused)
         clearing = Clearing(repository="harness", what=f"{number}.2")
-        cleared = await started.run("core", "clear", clearing, Operator())
+        cleared = await started.run("inbox", "clear", clearing, Operator())
         assert isinstance(cleared, Refused)
 
     @lup.promise
@@ -879,7 +887,7 @@ class InboxPromises(Part):
         await said(started, "note", NoteSaid(remark="a doubt"), agent)
         [question] = (await inboxed(started)).waiting
         answered = await started.run(
-            "core", "answer", Answering(question=question, text="this way"), Operator()
+            "inbox", "answer", Answering(question=question, text="this way"), Operator()
         )
         assert isinstance(answered, Accepted)
         assert not (await inboxed(started)).waiting
@@ -905,7 +913,7 @@ class InboxPromises(Part):
         )
         [question] = (await inboxed(started)).waiting
         await started.run(
-            "core",
+            "inbox",
             "answer",
             Answering(question=question, rulings=[Ruling(number=1, verdict="leaning")]),
             Operator(),
@@ -913,7 +921,7 @@ class InboxPromises(Part):
         await said(started, "note", NoteSaid(remark="a doubt\n\nand why"), agent)
         note = max((await inboxed(started)).new)
         await started.run(
-            "core",
+            "inbox",
             "comment",
             Commented[OnItem](
                 on=OnItem(item=note), words="answered", lines=["and why"]
@@ -968,7 +976,7 @@ class InboxPromises(Part):
         assert state.new
         concern = placed(state, "a direction")
         cleared = await started.run(
-            "core",
+            "inbox",
             "clear",
             Clearing(repository="harness", what=str(concern.number)),
             Operator(),
@@ -1002,7 +1010,7 @@ class InboxPromises(Part):
         await said(started, "send", SendSaid(to="reader", text="over to you"), writer)
         message = max((await inboxed(started)).new)
         commented = await started.run(
-            "core",
+            "inbox",
             "comment",
             Commented[OnItem](on=OnItem(item=message), words="noted"),
             Operator(),
@@ -1092,7 +1100,7 @@ class InboxPromises(Part):
         )
         [question] = (await inboxed(started)).waiting
         await started.run(
-            "core", "answer", Answering(question=question, text="this way"), Operator()
+            "inbox", "answer", Answering(question=question, text="this way"), Operator()
         )
         assert (
             "which way?"
@@ -1138,7 +1146,7 @@ class InboxPromises(Part):
         )
         pile = Pile(repository="harness", path="frictions/keys")
         commented = await started.run(
-            "core",
+            "inbox",
             "comment_to",
             Commented[Reached](on=Reached(party=pile), words="group these"),
             Operator(),
@@ -1194,13 +1202,13 @@ class InboxPromises(Part):
             converting = Converting(
                 ledger=ledger, named=SECOND_REPOSITORY, repository="harness"
             )
-            converted = await started.run("core", "convert", converting, Operator())
+            converted = await started.run("inbox", "convert", converting, Operator())
             assert isinstance(converted, Accepted), converted
-            again = await started.run("core", "convert", converting, Operator())
+            again = await started.run("inbox", "convert", converting, Operator())
             assert isinstance(again, Refused)
             missing = converting.model_copy(update={"ledger": Path(directory) / "no"})
             assert isinstance(
-                await started.run("core", "convert", missing, Operator()), Refused
+                await started.run("inbox", "convert", missing, Operator()), Refused
             )
         state = await inboxed(started)
         assert [each.title for each in state.concerns] == [
@@ -1226,7 +1234,7 @@ class InboxPromises(Part):
             for each in body.blocks
         )
         probe = await started.view(
-            "core", "party", PartyOf(repository="harness", name="probe"), Operator()
+            "inbox", "party", PartyOf(repository="harness", name="probe"), Operator()
         )
         assert isinstance(probe, Accepted), probe
 
@@ -1246,7 +1254,7 @@ class InboxPromises(Part):
         for block in opened.blocks:
             if block.sighted is not None:
                 seen = Showing.model_validate(block.sighted.given)
-                shown = await started.run("core", "shown", seen, Operator())
+                shown = await started.run("inbox", "shown", seen, Operator())
                 assert isinstance(shown, Accepted), shown
         assert not placed(await inboxed(started), "a direction").new
         await said(
@@ -1304,7 +1312,7 @@ class InboxPromises(Part):
             await asyncio.wait([held], timeout=60)
         [question] = (await inboxed(started)).waiting
         answered = await started.run(
-            "core",
+            "inbox",
             "answer",
             Answering(
                 question=question,
