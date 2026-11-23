@@ -5,7 +5,7 @@
 
 import { getCM } from "@replit/codemirror-vim";
 
-import { foldKind, nodeAt, type Node } from "../document/tree";
+import { foldKind, nodeAt, ownLines, type Node } from "../document/tree";
 import { said, vimBindings } from "./keymap";
 import { standings } from "./palette";
 import type { Shell } from "./shell";
@@ -109,16 +109,27 @@ function offeredHere(shell: Shell): Keyed[] {
     });
 }
 
-/** Return what `node`'s block says aside, as the header shows it after its line: muted, each after a dot. */
+/** Return `text` as the header shows what's said aside: muted, after a dot. */
+function aside(text: string): HTMLElement {
+    const said = document.createElement("span");
+    said.className = "lup-where-aside";
+    said.textContent = ` · ${text}`;
+    return said;
+}
+
+/** Return what `node`'s block says aside, as the header shows it after its line. */
 function asideOf(node: Node): HTMLElement[] {
-    return (node.block?.aside ?? [])
-        .filter((span) => span.text !== "")
-        .map((span) => {
-            const said = document.createElement("span");
-            said.className = "lup-where-aside";
-            said.textContent = ` · ${span.text}`;
-            return said;
-        });
+    return (node.block?.aside ?? []).filter((span) => span.text !== "").map((span) => aside(span.text));
+}
+
+/**
+ * Return what cites the line of `node`'s block at `position`, or the line a comment there is under: its nearest anchor
+ * at that line or before it, else its first; none where nothing cites the block's lines.
+ */
+export function citedAt(node: Node, position: number): string | null {
+    const anchors = node.block?.block === "markdown" ? node.block.anchors : [];
+    const line = ownLines(node).findLastIndex((each) => each.from <= position);
+    return (anchors.findLast((each) => each.line <= line) ?? anchors[0])?.cited ?? null;
 }
 
 /** Return the innermost block the cursor of `shell` is in; none where it's in none. */
@@ -156,12 +167,14 @@ export function framed(shell: Shell, header: HTMLElement | null, keys: HTMLEleme
             part.append(...asideOf(node));
             return part;
         });
-        // The block the cursor is on, where it's no fold and says something aside: an item's kind and number.
+        // The block the cursor is on, where it's no fold and says something aside, an item's kind and number, or its
+        // line is cited, as an item's part is.
         const on = innermostBlock(shell);
-        if (on !== null && foldKind(on) === null && (on.block?.aside.length ?? 0) > 0) {
+        const cited = on === null ? null : citedAt(on, shell.view.state.selection.main.head);
+        if (on !== null && foldKind(on) === null && ((on.block?.aside.length ?? 0) > 0 || cited !== null)) {
             const part = document.createElement("span");
             part.className = "lup-where-part";
-            part.append(...asideOf(on));
+            part.append(...asideOf(on), ...(cited === null ? [] : [aside(cited)]));
             parts.push(part);
         }
         header.replaceChildren(...parts);
