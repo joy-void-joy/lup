@@ -31,7 +31,7 @@ from lup.running.wire import (
     Reply,
     ViewCalled,
 )
-from lup.shell.blocks import Blocks, Fold, Line, Markdown, Span, Viewing
+from lup.shell.blocks import Blocks, Fold, Line, Markdown, Span, Viewing, broken
 from lup.shell.kinds import Verb
 from lup.types import JsonObject, Model
 
@@ -257,7 +257,7 @@ async def opened(
     asked: ViewCalled,
     shown: Answered,
 ) -> Acted:
-    """Show what `blocks`, the block of what's cited, open: the view a fold of it reads as it opens, where it's one such fold; else the blocks themselves, each of a text's lines numbered, as `--lines` counts them."""
+    """Show what `blocks`, the block of what's cited, open: the view a fold of it reads as it opens, where it's one such fold; else the blocks themselves, the lines of the first text among them numbered, as `--lines` counts them."""
     match blocks.blocks:
         case [Fold(content=Viewing() as reads)]:
             call = ViewCalled(
@@ -267,12 +267,17 @@ async def opened(
             )
             return Acted(call=call, reply=await answerer.answered(call))
         case _:
+            first = next(
+                (each for each in blocks.blocks if isinstance(each, Markdown)), None
+            )
             numbered = Blocks(
                 blocks=[
                     line
                     for block in blocks.blocks
                     for line in (
-                        counted(block) if isinstance(block, Markdown) else [block]
+                        counted(block)
+                        if isinstance(block, Markdown) and block is first
+                        else [block]
                     )
                 ],
                 summary=blocks.summary,
@@ -286,18 +291,20 @@ async def opened(
 
 
 def counted(text: Markdown) -> list[Line]:
-    """Return a text's lines, each after its number, set back, as `--lines` counts them from 1."""
-    lines = text.text.splitlines()
+    """Return a text's lines, each after its number, set back, as `--lines` counts them from 1, and, after the line each anchor is at, what cites it from there, as its text form says it."""
+    lines = broken(text.text)
     width = len(str(len(lines)))
+    cited = {each.line: each.cited for each in text.anchors}
     return [
         Line(
             id=f"{text.id}-{at}",
             spans=[
-                Span(text=f"{at:>{width}}  ", tone="muted"),
+                Span(text=f"{at + 1:>{width}}  ", tone="muted"),
                 Span(text=line, tone=text.tone),
+                *([Span(text=f"  · {cited[at]}", tone="muted")] if at in cited else []),
             ],
         )
-        for at, line in enumerate(lines, start=1)
+        for at, line in enumerate(lines)
     ]
 
 
@@ -328,7 +335,7 @@ async def offering(
         if not words:
             return refusal(call, f'say something: `lup {TELL} {verbing.cite} "…"`')
         texts = [each for each in blocks.blocks if isinstance(each, Markdown)]
-        lines = next(iter(texts), Markdown(id="", text="")).text.splitlines()
+        lines = broken(next(iter(texts), Markdown(id="", text="")).text)
         quoted = (
             []
             if verbing.lines is None
@@ -337,6 +344,7 @@ async def offering(
         given: JsonObject = {
             "words": words,
             "lines": list[JsonValue](quoted),
+            "line": 0 if verbing.lines is None else verbing.lines.first - 1,
             "on": offer.given,
         }
     else:
