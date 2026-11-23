@@ -39,6 +39,8 @@ from lup import (
     Span,
     Tone,
     Tones,
+    Verb,
+    Verbs,
     Viewing,
 )
 from lup.inbox import PartyOf, Pile
@@ -251,7 +253,7 @@ class NotesPart(Part):
         self.cleared.append(clearing.number)
         return NoteDone(number=clearing.number)
 
-    @lup.command(verb="comment", says="comment on it")
+    @lup.command(verb="tell", says="comment on it")
     async def comment(self, commented: Commented[NoteOf], by: lup.Operator) -> NoteDone:
         """Take a comment on a note, once the pile lets it through.
 
@@ -284,6 +286,9 @@ class Notes(Module):
     (`release`): what keeps a send running while a promise writes beside it."""
     folds: Folds = Folds.of(FoldKind(name="note", letter="n", called="note", level=1))
     tones: Tones = Tones.of(Tone(name="title", like="strong"))
+    verbs: Verbs = Verbs.of(
+        Verb(name="release", letter="r", says="Let the comments held through.")
+    )
     parts: Parts = Parts.of(NotesPart)
 
 

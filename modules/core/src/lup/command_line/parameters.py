@@ -20,7 +20,7 @@ import typer
 from pydantic import Field, JsonValue
 from typer.main import get_command_name
 
-from lup.command_line.filled import MARK, Filled, TypedIn
+from lup.command_line.filled import MARK, Filled, Marked, TypedIn
 from lup.types import JsonObject, Model
 
 type Kind = Literal["text", "integer", "number", "flag", "choice", "json"]
@@ -92,22 +92,27 @@ class Schema(Model):
     properties: dict[str, Schema] = {}
     required: list[str] = []
     defs: dict[str, Schema] = Field(default={}, alias="$defs")
-    filled: Filled | None = Field(default=None, alias=MARK)
-    """What the command line fills it with where it's left out, where it's
-    marked so."""
+    marked: Marked | None = Field(default=None, alias=MARK)
+    """What its mark says of it: filled from where it's typed, or the words
+    said with a verb; none where it's unmarked."""
 
-    def filling(self, defs: dict[str, Schema]) -> Filled | None:
-        """Return what the command line fills it with where it's left out, as it or the schema it refers to is marked, an optional field's among them; none where neither is."""
-        if self.filled is not None:
-            return self.filled
+    def marking(self, defs: dict[str, Schema]) -> Marked | None:
+        """Return what its mark says of it, as it or the schema it refers to is marked, an optional field's among them; none where neither is."""
+        if self.marked is not None:
+            return self.marked
         if self.ref is not None:
             named = {f"#/$defs/{name}": each for name, each in defs.items()}
             found = named.get(self.ref)
-            return None if found is None else found.filling(defs)
+            return None if found is None else found.marking(defs)
         others = [each for each in self.any_of if each.type != "null"]
         if self.any_of and len(others) == 1:
-            return others[0].filling(defs)
+            return others[0].marking(defs)
         return None
+
+    def filling(self, defs: dict[str, Schema]) -> Filled | None:
+        """Return what the command line fills it with where it's left out; none where it's marked as words or not at all."""
+        marked = self.marking(defs)
+        return None if marked == "words" else marked
 
     def defaulted(self) -> bool:
         """Say whether it gives a default."""
@@ -165,6 +170,9 @@ class Parameter(Model):
     filled: Filled | None = None
     """What the command line fills it with where it's left out: an option
     then, whatever its default."""
+    said: bool = False
+    """Whether it takes the words said with a verb (`lup.Words`): what's typed
+    after what's cited."""
 
     @classmethod
     def of(cls, position: int, key: str, field: Schema, model: Schema) -> Parameter:
@@ -184,6 +192,7 @@ class Parameter(Model):
             defaulted=field.defaulted(),
             description=field.description or plain.description,
             filled=field.filling(model.defs),
+            said=field.marking(model.defs) == "words",
         )
 
     @property

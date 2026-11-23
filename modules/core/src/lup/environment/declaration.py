@@ -18,12 +18,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lup.command_line.answering import TOOLS
 from lup.command_line.names import typed_methods
 from lup.core import Core
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import applied, listed, set_fields
 from lup.declaration.module import Module, Modules
 from lup.declaration.project import Project
+from lup.doors.command import CommandDoor
 from lup.environment.doors import Doors
 from lup.errors import LupError
 from lup.gate.module import Gate
@@ -150,8 +152,9 @@ def resolve(project: Project) -> Resolved:
     no module named `core`, where a module it holds requires one it doesn't,
     where modules require each other in a cycle, where what they serve can't
     be served (`Doors.of`), where a module is named as the core's tools,
-    commands and views are typed (`unshadowed`), or where what they declare for
-    their views clashes (`Looks.of`).
+    commands and views are typed (`unshadowed`), where what they declare for
+    their views clashes (`Looks.of`), or where a command's verb is wrong
+    (`verbed`).
     """
     selected = project.modules.over(Modules.default())
     placed = selected.resolve(default(), shipped())
@@ -189,12 +192,65 @@ def resolve(project: Project) -> Resolved:
         raise ProjectError(message, about=list(dict.fromkeys(about)))
     doors = Doors.of(modules)
     unshadowed(modules)
+    looks = Looks.of(modules)
+    verbed(modules, doors, looks)
     return Resolved(
         modules=modules,
         doors=doors,
-        looks=Looks.of(modules),
+        looks=looks,
         kinds=kept(modules),
     )
+
+
+def verbed(modules: list[Module], doors: Doors, looks: Looks) -> None:
+    """Raise `ProjectError` where a command names a verb no module declares, where two commands are what one verb runs with nothing cited, or where a verb is named as a module is typed, naming each: `lup` types each verb at its top level, beside the modules."""
+    declared = [each.kind.name for each in looks.verbs]
+    commands = [
+        (entry, door)
+        for entry in doors.through(CommandDoor)
+        if isinstance(door := entry.method.door, CommandDoor) and door.verb is not None
+    ]
+    unknown = [
+        (entry.method.taken.qualified, door.verb)
+        for entry, door in commands
+        if door.verb is not None and door.verb not in declared
+    ]
+    if unknown:
+        said = "; ".join(f"`{method}` names `{verb}`" for method, verb in unknown)
+        message = (
+            f"{said}, which no module declares: a verb is declared as fold kinds "
+            f"are, in a module's `Verbs`; there are {listed(declared)}"
+        )
+        raise ProjectError(message, about=[verb for _, verb in unknown])
+    alone = [door.verb for _, door in commands if door.alone and door.verb is not None]
+    twice = [verb for verb in dict.fromkeys(alone) if alone.count(verb) > 1]
+    if twice:
+        message = (
+            f"two commands are what {listed(twice)} runs with nothing cited "
+            "(`alone=True`), and `lup <verb>` alone runs one"
+        )
+        raise ProjectError(message, about=twice)
+    named = [
+        *(typed(module.name) for module in modules),
+        *(
+            name
+            for module in modules
+            if module.name == Core.name
+            for name, method in typed_methods(module).items()
+            if not (isinstance(method.door, CommandDoor) and method.door.verb)
+        ),
+    ]
+    clashing = [
+        *(verb for verb in declared if typed(verb) in named),
+        *(module.name for module in modules if typed(module.name) == TOOLS),
+    ]
+    if clashing:
+        message = (
+            f"{listed(clashing)} are named as a verb, a module, one of the core's "
+            f"tools, commands and views, or `{TOOLS}` is typed: `lup` types each "
+            "at its top level, so two would be typed alike"
+        )
+        raise ProjectError(message, about=clashing)
 
 
 def unshadowed(modules: list[Module]) -> None:

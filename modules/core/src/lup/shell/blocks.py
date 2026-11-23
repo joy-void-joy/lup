@@ -162,7 +162,7 @@ class Offer(Model):
     ) -> Offer:
         """Return the offer of `command`, a command read through its class, given `given`: its verb and what it does are the command's own, what the block offering it says closer to what it's on (`says`), and what its line reads marked (`draws`); of the module named `module`, where it's another's than the view offering it.
 
-        A command taking `Commented[G]`, as one offered under the `comment` verb
+        A command taking `Commented[G]`, as one offered under the `tell` verb
         does, is given a `G`, the comment written with it as it's sent. Raise
         `BlockError` where `command` isn't a command with a verb, or doesn't take
         `given`'s type.

@@ -40,6 +40,7 @@ from lup.inbox.said import (
     AskSaid,
     Awaited,
     Awaiting,
+    Citing,
     Clearing,
     CommentKept,
     ConcernDeclined,
@@ -79,9 +80,9 @@ from lup.inbox.said import (
     ToldItem,
     Untelling,
     Untold,
+    Utterance,
     Uttered,
     WithdrawSaid,
-    Words,
 )
 from lup.inbox.views import Shows
 from lup.shell.blocks import Blocks
@@ -473,7 +474,7 @@ class Inboxes(Part, approved=True, shared=True):
             question=question.number or 0, answer=answer.number or 0
         )
 
-    @lup.command(verb="comment", says="comment on it")
+    @lup.command(verb="tell", says="comment on it")
     async def comment(self, commented: Commented[OnItem], by: Operator) -> CommentKept:
         """Keep your comment on an item, or on a part of it.
 
@@ -486,7 +487,7 @@ class Inboxes(Part, approved=True, shared=True):
             comment = inbox.commented(item, commented, commented.on.part)
         return CommentKept(item=item.number or 0, comment=comment.number or 0)
 
-    @lup.command(verb="comment", says="comment to them")
+    @lup.command(verb="tell", says="tell them")
     async def comment_to(self, commented: Commented[Reached], by: Operator) -> SentTo:
         """Keep your comment for the party a block reaches.
 
@@ -501,7 +502,7 @@ class Inboxes(Part, approved=True, shared=True):
         return SentTo(to=inbox.called(found), comment=comment.number or 0)
 
     @lup.command
-    async def tell(self, addressing: Addressing, by: Operator) -> SentTo:
+    async def address(self, addressing: Addressing, by: Operator) -> SentTo:
         """Send your words to an agent, or to a pile.
 
         A pile keeps them as a concern it opens.
@@ -594,6 +595,7 @@ class Inboxes(Part, approved=True, shared=True):
             party=Inboxes.party,
             concern=Inboxes.concern_view,
             comment=Inboxes.comment,
+            tell=Inboxes.comment_to,
             clear=Inboxes.clear,
             decline=Inboxes.decline,
             seen=Inboxes.shown,
@@ -628,6 +630,19 @@ class Inboxes(Part, approved=True, shared=True):
         with refusing():
             found = self.numbered(of.number, Concern)
         return views.concern(self.inbox(found.repository), found, self.shows())
+
+    @lup.view
+    async def cited(self, citing: Citing) -> Blocks:
+        """Show what's cited, offering what's done with it.
+
+        An item or a part of one, a concern or a party, laid out as the views it
+        shows in lay it out, with what each offers under each verb: what `lup <verb>
+        <thing>` reaches, as the verb's key does on the dashboard.
+        """
+        inbox = self.inbox(citing.repository)
+        with refusing():
+            found = inbox.cited(citing.cite)
+            return views.cited(inbox, found, self.shows())
 
     @lup.view
     async def waiting(self, of: PartiesOf) -> Blocks:
@@ -728,7 +743,7 @@ class Speaking(Part):
         return awaited.text
 
     @lup.tool
-    async def how_it_felt(self, said: Words, by: Agent) -> str:
+    async def how_it_felt(self, said: Utterance, by: Agent) -> str:
         """Note how it is for you.
 
         In your own words: the work, the tools, lup, the people you worked with,
@@ -746,7 +761,7 @@ class Speaking(Part):
         )
 
     @lup.tool
-    async def blocked(self, said: Words, by: Agent) -> str:
+    async def blocked(self, said: Utterance, by: Agent) -> str:
         """Say the work can't go on, and what's wrong.
 
         It waits on the operator until they answer it.
@@ -756,7 +771,7 @@ class Speaking(Part):
         )
 
     @lup.tool
-    async def stop(self, said: Words, by: Agent) -> str:
+    async def stop(self, said: Utterance, by: Agent) -> str:
         """End your work by your own choice, saying why."""
         return await Inboxes.spoke(
             Spoken(agent=by, said=Uttered(kind="stop", text=said.text))

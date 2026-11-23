@@ -12,7 +12,7 @@ from typing import Annotated, ClassVar, Literal
 from annotated_types import Ge, Lt
 from pydantic import AwareDatetime, BaseModel, JsonValue
 
-from lup.command_line.filled import Repository
+from lup.command_line.filled import Repository, Words
 from lup.doors.done import Done
 from lup.doors.parties import Agent, Party
 from lup.inbox.records import FRICTIONS, Decision, Item, Ruling, Tone
@@ -124,7 +124,7 @@ class Awaited(Model):
     text: str
 
 
-class Words(Model):
+class Utterance(Model):
     """An agent's words, whole: how it felt, why the work can't go on, why they stop."""
 
     text: str
@@ -211,7 +211,9 @@ class Declining(Model):
     """A concern the operator declines, and why."""
 
     concern: Cited
-    why: str = ""
+    why: Words = ""
+    """Why: what's said with the decline, typed after what's cited, or the
+    comment written on the block it marks."""
 
 
 class Piling(Model):
@@ -562,6 +564,15 @@ class ConcernOf(Model):
     """A concern to show, by its number."""
 
     number: Cited
+
+
+class Citing(Model):
+    """Something cited in a repository: an item or a concern by its number, a part of an item by its place in it, a party or a concern by its name."""
+
+    cite: str
+    """What's cited, as `@` cites it: `@12`, `@12.3`, `@dashboard-usable`,
+    `@frictions/keys`; the `@` may be left out."""
+    repository: Repository
 
 
 class Showing(Model):

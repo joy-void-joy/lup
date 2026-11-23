@@ -167,7 +167,7 @@ class TranscriptsPromises(Part):
             assert isinstance(piled, Accepted), piled
             told = await started.run(
                 "core",
-                "tell",
+                "address",
                 {
                     "repository": "harness",
                     "to": "ideas",

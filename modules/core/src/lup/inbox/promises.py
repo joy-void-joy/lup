@@ -763,6 +763,24 @@ class InboxPromises(Part):
         assert (on.item, on.quote) == (None, picked.phrase)
 
     @lup.promise
+    async def a_part_is_answered_from_the_command_line(self, by: Testing) -> None:
+        """`lup tell` on a part of an item, `@12.3`, is told to its writer as on that part, and clearing one isn't offered there; a part the item hasn't is refused."""
+        started = await by.started(project())
+        agent = by.any(Agent)
+        place = by.any(Deciding).count + 1
+        number = await asked(started, "Which way?", agent, decisions=place - 1)
+        words = by.any(Highlight).phrase
+        cited = f"@{number}.{place}"
+        typed = await started.typed(["tell", cited, words], Operator())
+        assert typed.status == 0, typed.error
+        on = await told_on(started, agent, words)
+        assert (on.item, on.part, on.quote) == (number, place, None)
+        done = await started.typed(["done", cited], Operator())
+        assert done.status != 0
+        beyond = await started.typed(["tell", f"{cited}0", words], Operator())
+        assert beyond.status != 0
+
+    @lup.promise
     async def a_part_is_read_by_its_id(self, by: Testing) -> None:
         """An agent reads a part of an item alone by the item's number and its place, or the item whole with each part's id; a place it hasn't is refused, and so is clearing a part."""
         started = await by.started(project())

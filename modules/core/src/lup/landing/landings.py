@@ -473,7 +473,7 @@ class Landings(Part, machine=True, shared=True):
                 message = (
                     f"{landing.integration} moved since {landing.branch} last held it: "
                     f"merge it in (`git merge {landing.remote}/{landing.integration}`), "
-                    "run the gate (`lup gate check`), and land again"
+                    "run the gate (`lup check`), and land again"
                 )
                 raise RefusedError(message)
             tree = await git.tree(tip)
@@ -483,7 +483,7 @@ class Landings(Part, machine=True, shared=True):
             if run is None:
                 message = (
                     f"the gate hasn't passed on {landing.branch}'s files at {tip}: commit "
-                    "everything, run `lup gate check` in its worktree, and land again"
+                    "everything, run `lup check` in its worktree, and land again"
                 )
                 raise RefusedError(message)
             before = next(

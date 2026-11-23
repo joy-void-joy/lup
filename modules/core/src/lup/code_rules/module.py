@@ -327,7 +327,7 @@ class Checker(Reading):
 
         Each finding is kept only by an `ignore`; refused where one fails the
         gate, saying each. Given `.`, it checks every Python file of the worktree it's typed in,
-        as the gate's `rules` step does. What `lup gate check --fix` fixes, and
+        as the gate's `rules` step does. What `lup check --fix` fixes, and
         guesses over prose, are said apart.
         """
         report = await self.reported(checking.paths)

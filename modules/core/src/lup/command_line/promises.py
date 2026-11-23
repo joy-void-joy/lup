@@ -29,8 +29,11 @@ from lup import (
     Project,
     ProjectError,
     Repository,
+    Verb,
+    Verbs,
 )
-from lup.testing import Accepted, Testing, TypedIn, raises
+from lup.inbox import Inboxed, Nothing
+from lup.testing import Accepted, Started, Testing, TypedIn, raises
 lazy from lup import Core
 
 
@@ -215,6 +218,59 @@ class Tally(Module):
     parts: Parts = Parts.of(Tallying)
 
 
+class Recounted(Done):
+    """The jots counted again."""
+
+    line: ClassVar[str] = "counted {count} again"
+    count: int
+
+
+class Recounting(Part):
+    """A verb of the module's own, run with nothing cited."""
+
+    @lup.command(verb="recount", says="count them again", alone=True)
+    async def recount(self, _asking: Asking, by: Agent | Operator) -> Recounted:
+        """Count the jots again."""
+        return Recounted(count=0)
+
+
+class Recount(Module):
+    """Recounting: a module declaring a verb of its own."""
+
+    name = "recounting"
+    verbs: Verbs = Verbs.of(Verb(name="recount", says="Count the jots again."))
+    parts: Parts = Parts.of(Recounting)
+
+
+class Unheard(Part):
+    """A command offered under a verb nobody declares."""
+
+    @lup.command(verb="unheard", says="do it")
+    async def unheard(self, _asking: Asking, by: Operator) -> Recounted:
+        """Do what nobody declares."""
+        return Recounted(count=0)
+
+
+class Unheards(Module):
+    """A module whose command names a verb no module declares."""
+
+    name = "unheards"
+    parts: Parts = Parts.of(Unheard)
+
+
+class Twice(Module):
+    """A second module running `recount` with nothing cited."""
+
+    name = "twice"
+    parts: Parts = Parts.of(Recounting)
+
+
+class Finished(Module):
+    """A module named as one of the core's verbs."""
+
+    name = "done"
+
+
 def jotting() -> Project:
     """Return a project of lup's default modules, the jots and the seal."""
     return Project(modules=Modules.default().add(Jot(), Seal()))
@@ -244,12 +300,137 @@ def words(jotted: Jotted, *, data: bool = False) -> list[str]:
     ]
 
 
+async def placed(started: Started) -> Inboxed:
+    """Read the harness's project's inbox, as its own code does."""
+    read = await started.serve(
+        "standing", Nothing(), lup.Codebase(repository=started.repository)
+    )
+    assert isinstance(read, Accepted)
+    return Inboxed.model_validate_json(read.answer())
+
+
+class Quoted(Model):
+    """The lines a comment quotes, as it's sent."""
+
+    lines: list[str] = []
+
+
+class Telling(Model):
+    """What a promise tells a pile, what it answers to a line of that, and why it declines what it opened."""
+
+    words: Literal["an idea", "two ideas,\none a line"] = "an idea"
+    reply: str = Field(min_length=1)
+    why: str = Field(min_length=1)
+
+
 class CommandLinePromises(Part):
     """What someone typing on the command line can count on."""
 
     @lup.promise
+    async def a_verb_runs_what_the_cited_block_offers(self, by: Testing) -> None:
+        """`lup <verb> <thing>` runs what the thing's block offers under the verb, given what the block gives it and the words said with it: telling a pile opens a concern in it, and declining that concern declines it, the words its reason; a verb the block offers nothing under, or words a command takes none of, are refused, and nothing runs. `show` reads the view the block opens."""
+        telling = by.any(Telling)
+        started = await by.started(jotting())
+        piled = await started.run(
+            "core",
+            "pile",
+            {"repository": started.repository, "path": "ideas"},
+            Operator(),
+        )
+        assert isinstance(piled, Accepted), piled
+        told = await started.typed(
+            ["tell", "@ideas", "--json", "--", telling.words], Operator()
+        )
+        assert told.status == 0, told.error
+        item = json.loads(told.output)["comment"]
+        lines = telling.words.splitlines()
+        quoting = await started.typed(
+            ["tell", f"@{item}", f"--lines={len(lines)}", "--", telling.reply],
+            Operator(),
+        )
+        assert quoting.status == 0, quoting.error
+        assert quoting.call is not None
+        assert Quoted.model_validate(quoting.call.given).lines == [lines[-1]]
+        shown = await started.typed(["show", "@ideas"], Operator())
+        assert shown.status == 0, shown.error
+        assert shown.call is not None
+        assert shown.call.kind == "view"
+        concerns = (await placed(started)).concerns
+        [concern] = [each for each in concerns if each.holder == "@ideas"]
+        cited = f"@{concern.number}"
+        unoffered = await started.typed(["toggle", cited], Operator())
+        wordy = await started.typed(["done", cited, "--", telling.why], Operator())
+        assert unoffered.status != 0
+        assert wordy.status != 0
+        [still] = [
+            each
+            for each in (await placed(started)).concerns
+            if each.number == concern.number
+        ]
+        assert not still.cleared
+        assert not still.declined
+        declined = await started.typed(
+            ["decline", cited, "--", telling.why], Operator()
+        )
+        assert declined.status == 0, declined.error
+        [after] = [
+            each
+            for each in (await placed(started)).concerns
+            if each.number == concern.number
+        ]
+        assert after.declined
+
+    @lup.promise
+    async def a_verb_with_nothing_cited_runs_its_command_alone(
+        self, by: Testing
+    ) -> None:
+        """A verb typed with nothing cited runs the command it runs alone, which a module declaring its own verb may give; one with none such is refused, and nothing runs."""
+        started = await by.started(
+            Project(modules=Modules.default().add(Jot(), Recount()))
+        )
+        party = by.any(Agent) if by.any(bool) else Operator()
+        top = await started.typed(["--help"], party)
+        assert top.listed is not None
+        assert "recount" in top.listed
+        recounted = await started.typed(["recount", "--json"], party)
+        assert recounted.status == 0, recounted.error
+        assert recounted.call is not None
+        assert recounted.call.kind == "command"
+        assert Recounted.model_validate_json(recounted.output).count == 0
+        uncited = await started.typed(["done"], Operator())
+        assert uncited.status != 0
+
+    @lup.promise
+    async def a_verb_is_declared_and_typed_alone(self, by: Testing) -> None:
+        """A command's verb is one a module declares, at most one command of a project is what a verb runs with nothing cited, and no module is named as a verb is typed: each else is refused as the declaration resolves, naming it."""
+        for modules, about in [
+            (Modules.default().add(Unheards()), "unheard"),
+            (Modules.default().add(Recount(), Twice()), "recount"),
+            (Modules.default().add(Finished()), "done"),
+        ]:
+            with raises(ProjectError) as refused:
+                await by.started(Project(modules=modules))
+            assert about in refused.raised().about
+
+    @lup.promise
+    async def tools_are_typed_under_tool(self, by: Testing) -> None:
+        """A tool is typed under `tool`, by whoever may call it, never at the top level nor under its module's name."""
+        started = await by.started(jotting())
+        agent = by.any(Agent)
+        top = await started.typed(["--help"], agent)
+        tools = await started.typed(["tool", "--help"], agent)
+        jot = await started.typed(["jot", "--help"], agent)
+        assert top.listed is not None
+        assert tools.listed is not None
+        assert jot.listed is not None
+        assert "tool" in top.listed
+        assert "count" in tools.listed
+        assert "count" not in top.listed
+        assert "count" not in jot.listed
+
+    @lup.promise
     async def help_lists_only_what_the_party_may_run(self, by: Testing) -> None:
-        """The help lists the modules with something the party typing may run, and, under a module, its tools, commands and views their `by` admits: the operator's commands for the operator, an agent's tools for an agent, a view for both."""
+        """The help lists the modules with something the party typing may run by its name, and, under a module, its commands and views their `by` admits: the operator's commands for the operator, an agent's for an agent, a view for both."""
         started = await by.started(jotting())
         agent = by.any(Agent)
         top = await started.typed(["--help"], Operator())
@@ -265,7 +446,7 @@ class CommandLinePromises(Part):
         assert agents.listed is not None
         assert all(each in operators.listed for each in ["jot-down", "clear", "pile"])
         assert "count" not in operators.listed
-        assert all(each in agents.listed for each in ["jot-down", "count", "pile"])
+        assert all(each in agents.listed for each in ["jot-down", "pile"])
         assert "clear" not in agents.listed
         assert all(each.status == 0 and each.call is None for each in [top, agents])
 
