@@ -1,4 +1,4 @@
-"""The gate's promises: what an agent or the operator typing `lup gate check` in a worktree can count on.
+"""The gate's promises: what an agent or the operator typing `lup check` in a worktree can count on.
 
 Each runs the check through the harness on a scratch repository in a temporary
 directory, git run for real (`lup.testing.RealGit`) and each step's program
@@ -46,7 +46,7 @@ LOCAL = "lup_project.local.py"
 
 
 class Checking(Model):
-    """What the gate is asked, as `lup gate check` takes it."""
+    """What the gate is asked, as `lup check` takes it."""
 
     fix: bool = False
     again: bool = False
@@ -160,7 +160,7 @@ def standing(
 
 
 class GatePromises(Part):
-    """What someone typing `lup gate check` in a worktree can count on."""
+    """What someone typing `lup check` in a worktree can count on."""
 
     @lup.promise
     async def every_step_runs_from_the_root_even_after_one_fails(

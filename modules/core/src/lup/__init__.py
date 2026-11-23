@@ -13,7 +13,7 @@ every module declares, `Declared`, and what the operator's machine lends it,
 `GitDirectory`, `SshAgent` and `GitHubLogin`); the shell's
 view door (`lup.view`), the blocks a
 view answers, and the kinds a module declares for them (`Tones`, `Folds`,
-`Marks`); and the records a module keeps in the store (`Node`, `Edge`, listed
+`Marks`, and `Verbs`, what its commands are offered under); and the records a module keeps in the store (`Node`, `Edge`, listed
 in its `Recorded`); the guidance door (`lup.guidance`), a module's section of
 what a session is told at its start; and the steps a module declares the gate
 runs (`Step`, listed in its `Steps`), with the gate itself, `Gate`, and landing
@@ -27,7 +27,7 @@ name: alone, its names would read as lup's own (`lup.run`).
 each module lists its promises, which import `lup` itself.
 """
 
-from lup.command_line.filled import Common, Repository
+from lup.command_line.filled import Common, Repository, Words
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Layer, Named, Selection
 from lup.declaration.module import Module, Modules
@@ -84,7 +84,7 @@ from lup.shell.blocks import (
     Viewing,
 )
 from lup.shell.draft import Commented, Commenting
-from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
+from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones, Verb, Verbs
 from lup.shell.view import view
 from lup.store.records import Edge, Node, Recorded
 from lup.testing.promise import promise
@@ -175,7 +175,10 @@ __all__ = [
     "Transcripts",
     "UncarriedError",
     "UnrunError",
+    "Verb",
+    "Verbs",
     "Viewing",
+    "Words",
     "chosen",
     "command",
     "guidance",

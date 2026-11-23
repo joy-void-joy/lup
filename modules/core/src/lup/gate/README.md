@@ -32,9 +32,9 @@ Any module declares its own as a field of `Steps`, and the gate runs every modul
 
 What a step finds without failing anyone, a flaky check, a slow one, a line no promise notices, it tells the gate to file: the gate gives each step a file of its own, named in `LUP_GATE_FINDINGS` (`FindingsFile`), and a step writes one JSON line to it for each `Finding` (what it's about, a module or the harness; a title; the text), which Python code writes with `lup.gate.tell`. The gate keeps them with the run it records and names each in its report; a landing shows them in its review, and files each as a friction of the agent landing it, under `frictions/` and its subject, so a flake met at every run an agent makes is filed once, as the branch lands (`lup/landing/README.md`).
 
-## `lup gate check`
+## `lup check`
 
-It runs where it's typed (`@lup.command(here=True)`, `lup/command_line/README.md`): a branch's own checks, its tests among them, run in the room it's typed in, over that worktree's declaration and environment. Carried to where the project runs, it would check the commit the operator approved, never the worktree. `--directory` checks another worktree than the one it's typed in.
+It's the `check` verb with nothing cited, and runs where it's typed (`@lup.command(verb="check", alone=True, here=True)`, `lup/command_line/README.md`): a branch's own checks, its tests among them, run in the room it's typed in, over that worktree's declaration and environment. Carried to where the project runs, it would check the commit the operator approved, never the worktree. `--directory` checks another worktree than the one it's typed in.
 
 Every step runs, even after one fails, and the report says how each ended and how long it took, then what a failing step printed. A step's program that can't be run fails the step, saying why. Where any fails, the check is refused, so the command ends failed.
 

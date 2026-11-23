@@ -1,6 +1,7 @@
-"""`lup gate check`: every module's steps, run on the files of the worktree it's typed in, and a pass recorded by the files it passed on.
+"""`lup check`: every module's steps, run on the files of the worktree it's typed in, and a pass recorded by the files it passed on.
 
-It runs where it's typed (`@lup.command(here=True)`): a branch's own checks,
+It's the `check` verb with nothing cited (`@lup.command(verb="check",
+alone=True)`), and runs where it's typed (`here=True`): a branch's own checks,
 its tests among them, run in the room it's typed in, from the worktree's root,
 in the environment the gate runs in, never where the project runs, which runs
 the commit the operator approved (`README.md` here, *Where it runs*).
@@ -175,7 +176,7 @@ class Gating(Part):
     """Optional, so a project's container without git starts its other parts;
     the gate runs in a worktree, which git always has."""
 
-    @lup.command(here=True)
+    @lup.command(verb="check", says="run the gate", alone=True, here=True)
     async def check(
         self, checking: Checking, by: Agent | Operator
     ) -> GatePassed | PassedBefore:

@@ -20,7 +20,19 @@ from lup.doors.door import Rejection
 from lup.errors import LupError
 from lup.running.plan import Doorway, Offerable, Plan
 from lup.running.wire import Call, Caller, CommandCalled, Declined, Reply, ViewCalled
+from lup.shell.kinds import Verb
 from lup.types import Model, MutableModel
+
+SHOW = "show"
+"""The verb that shows what's cited, the view its block opens, rather than run
+a command it offers."""
+
+TOOLS = "tool"
+"""The group every tool the party may call is typed under: `lup tool concern …`."""
+
+CITED = "cited"
+"""The name of the view showing what's cited, with what it offers: the
+inbox's (`Inboxes.cited`)."""
 
 
 class Runnable(Model):
@@ -50,9 +62,66 @@ class Offered(Model):
             if way.door in get_args(Offerable.__value__) and party in way.parties
         ]
 
+    def named(self) -> list[Runnable]:
+        """List each command and view `by` may call that's typed by its name, in the plan's order: those reached by no verb."""
+        return [
+            each
+            for each in self.runnable()
+            if each.doorway.door != "tool" and each.doorway.verb is None
+        ]
+
+    def tools(self) -> list[Runnable]:
+        """List each tool `by` may call, in the plan's order: typed under `tool`."""
+        return [each for each in self.runnable() if each.doorway.door == "tool"]
+
+    def verbs(self) -> list[Verb]:
+        """List each verb a command `by` may run is reached by, as its module declares it, in the order declared; `show`, where `by` may read what's cited."""
+        used = [each.doorway.verb for each in self.runnable() if each.doorway.verb]
+        showing = [SHOW] if self.cited() is not None else []
+        return [
+            each.kind
+            for each in self.plan.looks.verbs
+            if each.kind.name in used or each.kind.name in showing
+        ]
+
+    def cited(self) -> Runnable | None:
+        """Return the view showing what's cited, where `by` may read it (`lup <verb> <thing>`, `Inboxes.cited`); none where they may not."""
+        return next(
+            (
+                each
+                for each in self.runnable()
+                if each.doorway.door == "view" and each.doorway.name == CITED
+            ),
+            None,
+        )
+
+    def alone(self, verb: str) -> Runnable | None:
+        """Return the command `by` may run that `verb` runs with nothing cited; none where there's none."""
+        return next(
+            (
+                each
+                for each in self.runnable()
+                if each.doorway.verb == verb and each.doorway.alone
+            ),
+            None,
+        )
+
+    def offered(self, module: str, command: str) -> Runnable | None:
+        """Return the command named `command` of the module named `module` that `by` may run; none where there's none."""
+        return next(
+            (
+                each
+                for each in self.runnable()
+                if each.module == module
+                and each.doorway.door == "command"
+                and each.doorway.name == command
+            ),
+            None,
+        )
+
     def modules(self) -> list[str]:
-        """List the modules with something `by` may call, by name, in the plan's order."""
-        within = [each.module for each in self.runnable()]
+        """List the modules with something `by` may call by its name, by name, in the plan's order."""
+        within = [each.module for each in self.named()]
         named = [each.name for each in self.plan.modules]
         return [
             *(name for name in named if name in within),

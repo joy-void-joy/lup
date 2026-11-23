@@ -13,7 +13,16 @@ from typing import TYPE_CHECKING, Literal
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import Named, listed
 from lup.shell.blocks import BlockError, Blocks, Code, Diff, Fold, Line
-from lup.shell.kinds import FoldKind, Folds, MarkKind, Marks, Tone, Tones
+from lup.shell.kinds import (
+    FoldKind,
+    Folds,
+    MarkKind,
+    Marks,
+    Tone,
+    Tones,
+    Verb,
+    Verbs,
+)
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -42,6 +51,7 @@ class Looks(Model):
     tones: list[Owned[Tone]] = []
     folds: list[Owned[FoldKind]] = []
     marks: list[Owned[MarkKind]] = []
+    verbs: list[Owned[Verb]] = []
 
     @classmethod
     def of(cls, modules: list[Module]) -> Looks:
@@ -59,7 +69,12 @@ class Looks(Model):
                 for kind in module.held(selection)
             ]
 
-        looks = cls(tones=owned(Tones), folds=owned(Folds), marks=owned(Marks))
+        looks = cls(
+            tones=owned(Tones),
+            folds=owned(Folds),
+            marks=owned(Marks),
+            verbs=owned(Verbs),
+        )
         apart(
             "tone",
             [Owned(module=each.module, kind=each.kind.name) for each in looks.tones],
@@ -76,6 +91,18 @@ class Looks(Model):
             "mark kind",
             [Owned(module=each.module, kind=each.kind.name) for each in looks.marks],
         )
+        apart(
+            "verb",
+            [Owned(module=each.module, kind=each.kind.name) for each in looks.verbs],
+        )
+        apart(
+            "verb's letter",
+            [
+                Owned(module=each.module, kind=each.kind.letter)
+                for each in looks.verbs
+                if each.kind.letter is not None
+            ],
+        )
         for each in looks.tones:
             like = each.kind.like
             if like is not None and like not in looks.named(looks.tones, each.module):
@@ -86,7 +113,7 @@ class Looks(Model):
                 raise ProjectError(message, about=[each.module])
         return looks
 
-    def named[K: Tone | FoldKind | MarkKind](
+    def named[K: Tone | FoldKind | MarkKind | Verb](
         self, owned: list[Owned[K]], module: str
     ) -> list[str]:
         """Return the names of the kinds in `owned` that a view of the module named `module` may name: the core's and its own."""

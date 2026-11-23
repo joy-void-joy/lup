@@ -74,7 +74,7 @@ class Report(Model):
                 explained=True,
             ),
             self.section("pyright's and ruff's findings", checks),
-            self.section("fixed by `lup gate check --fix`", fixable),
+            self.section("fixed by `lup check --fix`", fixable),
             self.section(
                 "listed, not failing: guesses over prose, to read again", listed
             ),

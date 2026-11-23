@@ -13,6 +13,7 @@ lazy from collections.abc import Iterator, Mapping
 
 from pydantic import BaseModel, JsonValue
 
+from lup.command_line.filled import Words
 from lup.shell.blocks import Offer, Viewing
 from lup.types import Model
 
@@ -157,9 +158,11 @@ class Draft(Model):
 
 
 class Commenting(Model):
-    """The comment an action offered under the `comment` verb is given, beside what its offer gave (`Commented`)."""
+    """The comment an action offered under the `tell` verb is given, beside what its offer gave (`Commented`)."""
 
-    words: str
+    words: Words
+    """What's said: the comment written on the block, or the words typed after
+    what's cited (`lup tell @12 "go on"`)."""
     lines: list[str] = []
     """The block's lines the comment quotes, whole, as they read when it was written."""
     start: int = 0
@@ -171,7 +174,7 @@ class Commenting(Model):
 
 
 class Commented[G: BaseModel](Commenting):
-    """What an action a block offers under the `comment` verb is given: what the offer gave it, and the comment written on the block.
+    """What an action a block offers under the `tell` verb is given: what the offer gave it, and the comment written on the block.
 
     A module's comment action takes `Commented[G]`, its block offering it with a
     `G`: `Offer.of(InboxPart.comment, OnItem(item=12))`.

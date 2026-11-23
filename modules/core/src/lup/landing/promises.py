@@ -148,7 +148,7 @@ def places() -> Generator[Places]:
 
 
 class Gating(Model):
-    """What the gate is asked, as `lup gate check` takes it."""
+    """What the gate is asked, as `lup check` takes it."""
 
     directory: Path
 

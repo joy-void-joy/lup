@@ -475,7 +475,7 @@ class Machined(Model, arbitrary_types_allowed=True):
         before = await self.inboxed()
         sent = await self.started.run(
             "core",
-            "tell",
+            "address",
             {"repository": REPOSITORY, "to": name, "text": text},
             Operator(),
         )

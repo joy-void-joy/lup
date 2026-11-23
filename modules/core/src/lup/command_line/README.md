@@ -1,6 +1,6 @@
 # The command line
 
-One command line for developing with lup, the one universal interface: `lup <module> <name> …` runs any of a module's tools, commands and views by name, as whoever types it may, and the core's are typed without its name (`lup init`), since the core is lup itself. A project's own command (`harmon …`) is the same command line over the modules the project gives it. Its library side (`lup.command_line`) is what typing does: parsing words into a call that crosses (`lup.running.wire`), handing it to an answerer, and printing the reply. Answering in this process, `lup`'s own script and a project's are the environment's (`lup.environment.command_line`).
+One command line for developing with lup, the one universal interface: `lup <verb> <thing>` does to a thing what its block offers under the verb, as the verb's key does on the dashboard; `lup <module> <name> …` runs any of a module's commands and views reached by no verb, by name, as whoever types it may, and the core's are typed without its name (`lup init`), since the core is lup itself; `lup tool <name> …` calls a tool. A project's own command (`harmon …`) is the same command line over the modules the project gives it. Its library side (`lup.command_line`) is what typing does: parsing words into a call that crosses (`lup.running.wire`), handing it to an answerer, and printing the reply. Answering in this process, `lup`'s own script and a project's are the environment's (`lup.environment.command_line`).
 
 ## Typing
 
@@ -16,6 +16,18 @@ One command line for developing with lup, the one universal interface: `lup <mod
 **One module at the top.** A command line types one module's methods at its top level, without the module's name, and every other module's under its name: `lup`'s is the core (`lup init`, `lup note …`, `lup hosting open`), a project's own command's the first module it's given. So no module is named as one of the core's tools, commands and views is typed, which `lup` would type alike: resolving a declaration refuses one, naming it and the method, and lup's program on the operator's machine refuses a plan holding one (`Plan.shadowed`). A method's name and a module's are compared as they're typed (`lup.running.plan.typed`).
 
 A command takes everything as arguments: one missing is refused as the words are read, nothing runs, and nothing is ever asked for, so an agent or a test typing it fails rather than hangs. Words starting with `-` that aren't options go after `--`.
+
+**Tools** are an agent's door, typed under `tool` by whoever may call them (`lup tool concern …`), never at the top level nor under their module's name.
+
+## Verbs
+
+What someone does to a thing is said in one vocabulary, the same on the command line and the dashboard: a verb (`lup.Verb`), a word and a key, which a module declares as it declares a fold kind, the core's being `show`, `done`, `decline`, `toggle`, `tell` and `seen` (`lup.shell.kinds`). A command offered under a verb (`@lup.command(verb="done", says="clear it")`) isn't typed by its name: a block offers it, given what it takes, and `lup <verb> <thing>` reaches it there.
+- **A thing is cited** as `@` cites it, `@12` an item or a concern, `@dashboard-usable` an agent, `@frictions/keys` a pile, in the repository the worktree's, else the one `-r` names. The view showing what's cited (`Inboxes.cited`) answers its block, with what it offers under each verb, and the command line runs the offer under the verb typed, given what the block gives it: so one block says what `done` does to a concern and to a landing, for the dashboard's key and the command line alike. A verb the block offers nothing under is refused, saying what it offers.
+- **What's said with a verb,** the words typed after the thing, goes to the field the offered command takes words in (`lup.Words`): a comment's words for `tell`, a reason for `decline`. A command taking none refuses words, and nothing runs. `tell` sends what's said as a comment on the thing, as one written on its block does, and `--lines 10-12` quotes those lines of it.
+- **`show`** runs nothing: it prints the view the thing's block opens, a concern whole or a party's buffer, or the thing's own blocks, each line of a text numbered as `--lines` counts it.
+- **With nothing cited,** a verb runs the command marked as what it does alone (`@lup.command(verb="check", alone=True)`), done to where it's typed or to lup's machine: `lup check` runs the gate on the worktree, the gate declaring the verb. A project has at most one such command for each verb, and a verb with none refuses `lup <verb>` alone.
+
+Resolving a declaration refuses a command offered under a verb no module declares, two commands a verb runs alone, and a verb, a module or `tool` typed as another of them is (`lup.environment.declaration.verbed`).
 
 ## What it prints
 

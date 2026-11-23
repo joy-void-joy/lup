@@ -5,6 +5,7 @@ from lup.doors.parts import Parts
 from lup.gate.checking import Gating
 from lup.gate.promises import GatePromises
 from lup.gate.steps import Step, Steps
+from lup.shell.kinds import Verb, Verbs
 
 FORMAT = Step(
     name="format",
@@ -42,5 +43,8 @@ class Gate(Module):
     """
 
     name = "gate"
+    verbs: Verbs = Verbs.of(Verb(name="check", says="Run the gate on this worktree."))
+    """The verb its check is typed by: `lup check`, done to the worktree it's
+    typed in."""
     steps: Steps = Steps.of(FORMAT, PROMISES, IMPORTS, DECLARATION)
     parts: Parts = Parts.of(Gating, GatePromises)
