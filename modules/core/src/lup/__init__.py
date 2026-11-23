@@ -67,6 +67,7 @@ from lup.doors.tool import tool
 from lup.errors import LupError
 from lup.gate.steps import Step, Steps
 from lup.shell.blocks import (
+    Anchor,
     BlockError,
     Blocks,
     Code,
@@ -99,6 +100,7 @@ lazy from lup.transcripts.module import Transcripts
 
 __all__ = [
     "Agent",
+    "Anchor",
     "BlockError",
     "Blocks",
     "Chosen",

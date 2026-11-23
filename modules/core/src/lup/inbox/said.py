@@ -138,9 +138,11 @@ class WithdrawSaid(Model):
 
 
 class Reading(Model):
-    """What of the inbox to read: one item or concern whole, by its number, or what stands."""
+    """What of the inbox to read: one item or concern whole, by its number, one part of an item, or what stands."""
 
     number: Cited | None = None
+    part: Cited | None = None
+    """One part of the item to read alone, by its place: 3 for `@12.3`."""
 
 
 type Spoke = Literal["how it felt", "blocked", "stop", "turn's end"]
@@ -178,7 +180,10 @@ class OnItem(Model):
     """What an item's block gives the comment it offers: the item, by its number, and the part of it, where the block is one."""
 
     item: Cited
-    part: int | None = None
+    part: Cited | None = None
+    """The part's place in it, 3 for `@12.3`, where the block is that part
+    alone; none for one saying the item's text, where the lines a comment
+    quotes say which of its parts it's on."""
 
 
 class Reached(Model):
@@ -413,10 +418,22 @@ class Telling(Model):
 
 
 class Comments(Model):
-    """One of the operator's comments, and how many parties it reaches."""
+    """One of the operator's comments: how many parties it reaches, and what it's on."""
 
     item: int
     reaches: int
+    on: int | None = None
+    """The number of the item it's on; none where it's on none."""
+    places: list[int] = []
+    """The first part of it it's on, and the last where it's on several."""
+
+
+class Parts(Model):
+    """An item's parts, as data."""
+
+    item: int
+    parts: list[str] = []
+    """Each part's words, in order: the first is `@12.1`."""
 
 
 class Inboxed(Model):
@@ -430,6 +447,36 @@ class Inboxed(Model):
     """The numbers of what's new to the operator."""
     told: list[Telling] = []
     comments: list[Comments] = []
+    parts: list[Parts] = []
+    """Every item's parts."""
+
+
+class On(Model):
+    """What an item told to an agent is on: an item or parts of it, and what it says there."""
+
+    item: Cited | None = None
+    """The item's number; none for words on what no item holds, as a line of a
+    conversation."""
+    part: Cited | None = None
+    """The part of it, by its place; none for the item whole."""
+    last: Cited | None = None
+    """The last part, where it's on several."""
+    quote: str | None = None
+    """The passage picked out, whole, where it's on less than whole parts."""
+    opening: str | None = None
+    """How what it's on begins, where it's on it whole: its first line, cut,
+    since its number says the rest."""
+
+    def named(self) -> str | None:
+        """Name what it's on as a tag does, `12`, `12.3` or `12.3-12.5`; none where no item holds it.
+
+        >>> On(item=12, part=3, last=5).named()
+        '12.3-12.5'
+        """
+        if self.item is None:
+            return None
+        places = [each for each in [self.part, self.last] if each is not None]
+        return "-".join(f"{self.item}.{each}" for each in places) or str(self.item)
 
 
 class ToldItem(Model):
@@ -439,6 +486,8 @@ class ToldItem(Model):
     by: str | None
     kind: str
     text: str
+    on: On | None = None
+    """What it's on, where it's on something."""
 
 
 class Told(Model):

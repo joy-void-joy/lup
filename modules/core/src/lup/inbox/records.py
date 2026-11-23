@@ -267,6 +267,8 @@ class Comment(Item):
     """The key of the item it's on; none for words to a party alone."""
     part: int | None = None
     """The part of that item it's on, from 1; none for the item whole."""
+    last: int | None = None
+    """The last part it's on, where it runs over several."""
     lines: list[str] = []
     """The block's lines it quotes, whole, as they read when it was written."""
     start: int = 0
@@ -275,6 +277,10 @@ class Comment(Item):
     """Where the passage ends; none for the lines whole."""
     version: str | None = None
     """The block's version as it was written."""
+
+    def passage(self) -> str:
+        """Return the passage it's on, as it read: of its lines, from `start` to `end`."""
+        return "\n".join(self.lines)[self.start : self.end]
 
 
 # Edges

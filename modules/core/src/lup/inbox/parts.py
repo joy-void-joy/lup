@@ -16,7 +16,7 @@ with the block before it, and what's before the first with the first.
 """
 
 import csv
-import io
+import textwrap
 from functools import cache
 from itertools import dropwhile, pairwise
 from typing import TYPE_CHECKING
@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from markdown_it import MarkdownIt
 
 from lup.inbox.records import Item
+from lup.shell.blocks import Anchor, Markdown, broken
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -77,15 +78,6 @@ def part_cited(cited: str) -> PartCited | None:
             return PartCited(item=int(item), place=int(place))
         case _:
             return None
-
-
-def broken(text: str) -> list[str]:
-    r"""Return `text`'s lines, broken where markdown-it and the page break them: at `\r\n`, `\r` and `\n` alike, and nowhere else.
-
-    >>> broken("a\r\nb\rc\x0cd\n")
-    ['a', 'b', 'c\x0cd']
-    """
-    return [line.removesuffix("\n") for line in io.StringIO(text, newline=None)]
 
 
 @cache
@@ -143,11 +135,120 @@ def parted(text: str) -> list[TextPart]:
     ]
 
 
+class Stretch(Model):
+    """A stretch of an item's words laid out as a block of its own: its text, or one thing it says beyond its text, a part alone."""
+
+    item: Item
+    text: str
+    parts: list[TextPart]
+    """Its parts, each at its line of the stretch."""
+    alone: int | None = None
+    """The place of the part it is, for one thing said beyond the text; none
+    for the text."""
+    of: int
+    """How many parts its item has."""
+
+    def block(self) -> Markdown:
+        """Return it as Markdown, each of its parts anchored at its first line by what cites it: none where its item has one part, which its number names."""
+        key = "text" if self.alone is None else f"part-{self.alone}"
+        return Markdown(
+            id=f"item-{self.item.number}-{key}",
+            text=self.text,
+            anchors=[
+                Anchor(line=each.line, cited=f"@{self.item.number}.{each.place}")
+                for each in self.parts
+                if self.of > 1
+            ],
+        )
+
+
+def stretches(item: Item) -> list[Stretch]:
+    """Return the stretches of `item`'s words, in order: its text, where it isn't blank, then each thing it says beyond it, their parts numbered on."""
+    own = parted(item.text)
+    beyond = item.beyond()
+    of = len(own) + len(beyond)
+    return [
+        *([Stretch(item=item, text=item.text, parts=own, of=of)] if own else []),
+        *(
+            Stretch(
+                item=item,
+                text=said,
+                parts=[TextPart(place=place, line=0, lines=broken(said))],
+                alone=place,
+                of=of,
+            )
+            for place, said in enumerate(beyond, start=len(own) + 1)
+        ),
+    ]
+
+
 def parts(item: Item) -> list[ItemPart]:
     """Return the parts of `item`, in order: its text's, then each thing it says beyond its text."""
-    own = parted(item.text)
-    beyond = [
-        TextPart(place=place, line=0, lines=broken(said))
-        for place, said in enumerate(item.beyond(), start=len(own) + 1)
+    return [
+        ItemPart(item=item, part=each)
+        for stretch in stretches(item)
+        for each in stretch.parts
     ]
-    return [ItemPart(item=item, part=each) for each in [*own, *beyond]]
+
+
+class Quoted(Model):
+    """Which parts of an item the lines a comment quotes are on: the first, and the last where they run over several."""
+
+    part: int
+    last: int | None = None
+
+
+def quoted(item: Item, lines: list[str], line: int) -> Quoted | None:
+    """Return which parts of `item`'s text `lines` are on, quoted from its line `line`, from 0, on, else from the one place they stand; none where they stand at none, or at several."""
+    text = broken(item.text)
+    found = [
+        at
+        for at in range(len(text) - len(lines) + 1)
+        if lines and text[at : at + len(lines)] == lines
+    ]
+    at = line if line in found else found[0] if len(found) == 1 else None
+    own = parted(item.text)
+    if at is None or not own:
+        return None
+
+    def holding(line: int) -> int:
+        """Return the place of the part holding the line `line`: the last starting at it or before it, else the first."""
+        return max((each.place for each in own if each.line <= line), default=1)
+
+    first, last = holding(at), holding(at + len(lines) - 1)
+    return Quoted(part=first, last=last if last > first else None)
+
+
+def whole(item: Item, quoted: Quoted, lines: list[str]) -> bool:
+    """Say whether `lines`, quoted of the parts of `item` `quoted` says, are those parts whole, blank lines aside: where they say nothing, they pick nothing out of them."""
+    said = filled("\n".join(lines))
+    spanned = [
+        line
+        for each in parts(item)
+        if quoted.part <= each.part.place <= (quoted.last or quoted.part)
+        for line in filled(each.part.text())
+    ]
+    return not said or said == spanned
+
+
+def filled(text: str) -> list[str]:
+    r"""Return `text`'s lines that say something.
+
+    >>> filled("a\n\nb\n")
+    ['a', 'b']
+    """
+    return [line for line in broken(text) if line.strip()]
+
+
+def opening(text: str, longest: int = 80) -> str:
+    r"""Return how `text` begins, where a number says the rest: its first line that says something, cut to `longest` characters at a word's end where it's of several words, `…` at its end where more follows it.
+
+    >>> opening("Twenty kinds of line.\nFour carry what was said.")
+    'Twenty kinds of line.…'
+    >>> opening("Twenty kinds of line, and only four of them.", longest=30)
+    'Twenty kinds of line, and…'
+    """
+    first, *rest = filled(text) or [""]
+    shortened = textwrap.shorten(first, width=longest, placeholder="…")
+    cut = first if shortened == "…" else shortened
+    return f"{cut}…" if rest and not cut.endswith("…") else cut

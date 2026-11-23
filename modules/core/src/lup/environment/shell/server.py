@@ -489,6 +489,7 @@ class Dashboard(Model, arbitrary_types_allowed=True):
         commenting = Commenting(
             words=comment.words.strip(),
             lines=quote.lines,
+            line=quote.line,
             start=quote.start,
             end=quote.end,
             version=quote.version,

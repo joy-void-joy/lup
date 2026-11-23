@@ -9,6 +9,7 @@ whoever wrote an item, whoever holds a concern, the party a buffer is
 """
 
 from lup.doors.door import Method
+from lup.inbox.parts import ItemPart, stretches
 from lup.inbox.records import AgentRecord, Concern, Item, PartyRecord, PileRecord
 from lup.inbox.said import (
     Clearing,
@@ -19,7 +20,17 @@ from lup.inbox.said import (
     Pile,
     Showing,
 )
-from lup.shell.blocks import Block, Blocks, Fold, Line, Markdown, Offer, Span, Viewing
+from lup.shell.blocks import (
+    Anchor,
+    Block,
+    Blocks,
+    Fold,
+    Line,
+    Markdown,
+    Offer,
+    Span,
+    Viewing,
+)
 from lup.types import Model
 lazy from lup.doors.parties import Party
 lazy from lup.inbox.inbox import Inbox
@@ -109,11 +120,14 @@ def concern_fold(inbox: Inbox, concern: Concern, shows: Shows) -> Fold:
 
 
 def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
-    """Return `item` as its heading, who wrote it, of what kind, its number, whether it's new or waits, then its words; then, for a module's own kind of item, the fold its kind lays out, opening on the module's view.
+    """Return `item` as its heading, who wrote it, of what kind, its number, what it's on, whether it's new or waits, then its words; then, for a module's own kind of item, the fold its kind lays out, opening on the module's view.
 
-    Each of its blocks offers a comment on it, and what its kind offers beside;
-    clearing it where its kind offers nothing under that verb, so Space d on an
-    item clears the item, never the concern around it.
+    Its text is one block, each of its parts anchored at its line by its id;
+    what it says beyond its text, a question's decisions or an answer's
+    rulings, is a block each. Each of its blocks offers a comment on it, or on
+    the part it is alone, and what its kind offers beside; clearing it where
+    its kind offers nothing under that verb, so Space d on an item clears the
+    item, never the concern around it.
     """
     new = inbox.unseen(item)
     waits = item in inbox.waits_on_operator()
@@ -124,11 +138,19 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
     clearing = Offer.of(
         shows.clear, Clearing(repository=inbox.repository, what=str(number))
     )
-    offers = [
-        Offer.of(shows.comment, OnItem(item=number)),
+    beside = [
         *([] if any(each.verb == clearing.verb for each in kind) else [clearing]),
         *kind,
     ]
+
+    def offered(part: int | None) -> list[Offer]:
+        """Return what a block of the item offers: a comment on it, or on the part the block is alone, and what each of its blocks does."""
+        return [Offer.of(shows.comment, OnItem(item=number, part=part)), *beside]
+
+    tone = "operator" if writer.key == inbox.operator().key else "plain"
+    on = inbox.on(item)
+    named = None if on is None else on.named()
+    offers = offered(None)
     folded: list[Block] = (
         []
         if laid is None
@@ -149,18 +171,41 @@ def item_blocks(inbox: Inbox, item: Item, shows: Shows) -> list[Block]:
             aside=[
                 Span(text=item.kind.removeprefix("inbox:"), tone="muted"),
                 Span(text=f"@{item.number}", tone="muted"),
+                *([] if named is None else [Span(text=f"on @{named}", tone="muted")]),
             ],
             standing="waiting" if waits else "new" if new else None,
             offers=offers,
             sighted=Offer.of(shows.seen, Showing(items=[number])),
         ),
-        Markdown(
-            id=f"item-{item.number}-text",
-            text=item.text,
-            tone="operator" if writer.key == inbox.operator().key else "plain",
-            offers=offers,
+        *(
+            each.block().model_copy(
+                update={"tone": tone, "offers": offered(each.alone)}
+            )
+            for each in stretches(item)
         ),
         *folded,
+    ]
+
+
+def part_blocks(inbox: Inbox, found: ItemPart, shows: Shows) -> list[Block]:
+    """Return a part of an item alone, as `@12.3` shows it: whose item it's of, then the part's words under its id, offering a comment on it and nothing else, since what's done to an item is done to it whole."""
+    number = found.item.number or 0
+    place = found.part.place
+    return [
+        Line(
+            id=f"item-{number}",
+            spans=[Span(text=inbox.writer(found.item), tone="strong")],
+            aside=[
+                Span(text=found.item.kind.removeprefix("inbox:"), tone="muted"),
+                Span(text=f"@{number}", tone="muted"),
+            ],
+        ),
+        Markdown(
+            id=f"item-{number}-part-{place}",
+            text=found.part.text(),
+            anchors=[Anchor(line=0, cited=found.cited())],
+            offers=[Offer.of(shows.comment, OnItem(item=number, part=place))],
+        ),
     ]
 
 

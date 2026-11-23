@@ -23,6 +23,7 @@ from lup.doors.parts import Data, Declared, Part
 from lup.inbox import conversion, views
 from lup.inbox.conversion import Converted
 from lup.inbox.inbox import Inbox, InboxError, first_line
+from lup.inbox.parts import ItemPart
 from lup.inbox.records import (
     NODES,
     AgentRecord,
@@ -315,7 +316,7 @@ class Inboxes(Part, approved=True, shared=True):
         inbox = self.inbox(by.repository)
         agent = inbox.agent(given.agent)
         with refusing():
-            return inbox.read(agent, given.said.number)
+            return inbox.read(agent, given.said.number, given.said.part)
 
     @lup.service
     async def standing(self, given: Nothing, by: Codebase) -> Inboxed:
@@ -370,6 +371,7 @@ class Inboxes(Part, approved=True, shared=True):
                     by=inbox.writer(each),
                     kind=each.kind,
                     text=inbox.told_as(each, agent),
+                    on=inbox.on(each),
                 )
                 for each in items
             ]
@@ -520,8 +522,11 @@ class Inboxes(Part, approved=True, shared=True):
         del by
         inbox = self.inbox(clearing.repository)
         with refusing():
-            node = inbox.cited(clearing.what)
-            inbox.cleared(node)
+            found = inbox.cited(clearing.what)
+            if isinstance(found, ItemPart):
+                message = f"{found.cited()} is a part of an item: clear the item whole"
+                raise InboxError(message, about=[clearing.what])
+            inbox.cleared(found)
         return NodeCleared(what=clearing.what)
 
     @lup.command(verb="decline", says="decline it")
