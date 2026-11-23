@@ -393,13 +393,13 @@ class HostingPromises(Part):
         )
         operator = lup.Operator()
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "token", "value": kept.value},
             operator,
         )
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "story", "name": "token", "value": other.value},
             operator,
@@ -427,7 +427,7 @@ class HostingPromises(Part):
             "held", {"project": "harmon", "names": ["token"]}, caller
         )
         given = await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "token", "value": "x"},
             caller,
@@ -607,7 +607,7 @@ class HostingPromises(Part):
         started = await started_approved(by, podman)
         if kept:
             await started.run(
-                "hosting",
+                "machine",
                 "keep",
                 {"repository": "harmon", "name": "key", "value": "k"},
                 lup.Operator(),
@@ -718,7 +718,7 @@ class HostingPromises(Part):
         )
         started = await started_approved(by, podman)
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
@@ -1046,7 +1046,7 @@ class ApprovalsPromises(Part):
             if each.landing:
                 await started.serve("landed", asked, Machine())
             else:
-                await started.run("hosting", "approve", asked, lup.Operator())
+                await started.run("machine", "approve", asked, lup.Operator())
         approval = await started.serve("approval", {"project": "harmon"}, Machine())
         assert isinstance(approval, Accepted)
         last = approvals[-1].commit if approvals else None
@@ -1060,7 +1060,7 @@ class ApprovalsPromises(Part):
             lup.testing.Repository(declaration=HOME), machine=True
         )
         asked = {"repository": "harmon", "commit": by.any(Approved).commit}
-        approved = await started.run("hosting", "approve", asked, caller)
+        approved = await started.run("machine", "approve", asked, caller)
         landed = await started.serve("landed", asked, caller)
         read = await started.serve("approval", {"project": "harmon"}, caller)
         assert isinstance(approved, Refused)
@@ -1084,7 +1084,7 @@ class ApprovalsPromises(Part):
             machine=True,
         )
         await started.run(
-            "hosting",
+            "machine",
             "approve",
             {"repository": "harmon", "commit": before.commit},
             lup.Operator(),
@@ -1163,7 +1163,7 @@ async def started_approved(
         machine=True,
     )
     await started.run(
-        "hosting",
+        "machine",
         "approve",
         {"repository": "harmon", "commit": approving.commit},
         lup.Operator(),
@@ -1229,7 +1229,7 @@ class ProjectsPromises(Part):
         )
         for each in [first, last]:
             await started.run(
-                "hosting",
+                "machine",
                 "approve",
                 {"repository": "harmon", "commit": each.commit},
                 lup.Operator(),
@@ -1252,7 +1252,7 @@ class ProjectsPromises(Part):
         """Opening a project again stops each container it ran before, before starting those of the commit approved last, so two never run under one name."""
         started = await started_approved(by, OPENING_PODMAN)
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
@@ -1310,7 +1310,7 @@ class ProjectsPromises(Part):
         """Opening a project it runs starts the containers of this opening beside those running, and stops those only once every container of this opening has started, so calls always have somewhere to go."""
         started = await started_approved(by, OPENING_PODMAN)
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
@@ -1345,7 +1345,7 @@ class ProjectsPromises(Part):
         podman = Failing(allowed=by.any(Allowed).allowed)
         started = await started_approved(by, podman)
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
@@ -1504,9 +1504,9 @@ class ClearingPromises(Part):
         """The operator registers a project with their lup without opening it, and it's opened as the machine's parts start, once a commit of it is approved; a name another project, at another git directory, holds already is refused."""
         started = await started_approved(by, OPENING_PODMAN)
         operator = lup.Operator()
-        registered = await started.run("hosting", "register", Opens().given(), operator)
+        registered = await started.run("machine", "register", Opens().given(), operator)
         taken = await started.run(
-            "hosting",
+            "machine",
             "register",
             {"repository": "harmon", "common": "/srv/elsewhere.git"},
             operator,
@@ -1551,12 +1551,12 @@ class WithoutPromises(Part):
         )
         run = await started.serve("started", by.any(Asked).spec(), Machine())
         kept = await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "token", "value": "t"},
             lup.Operator(),
         )
-        status = await started.view("hosting", "status", {}, lup.Operator())
+        status = await started.view("machine", "status", {}, lup.Operator())
         assert isinstance(kept, Accepted)
         assert isinstance(status, Accepted)
         assert isinstance(run, Accepted) == (podman == "6.1.0")
@@ -1569,7 +1569,7 @@ class WithoutPromises(Part):
         """As the machine's parts stop, every container of every project they run is stopped: nothing would route calls to it."""
         started = await started_approved(by, OPENING_PODMAN)
         await started.run(
-            "hosting",
+            "machine",
             "keep",
             {"repository": "harmon", "name": "key", "value": "k"},
             lup.Operator(),
@@ -1587,11 +1587,11 @@ class WithoutPromises(Part):
         opened = by.any(bool)
         committed = Committed.of(Files())
         started = await started_approved(by, OPENING_PODMAN, committed)
-        await started.run("hosting", "register", Opens().given(), lup.Operator())
+        await started.run("machine", "register", Opens().given(), lup.Operator())
         if opened:
             await started.serve("opened", Opens().given(), Machine())
-        status = await started.view("hosting", "status", {}, lup.Operator())
-        refused = await started.view("hosting", "status", {}, by.any(Agent))
+        status = await started.view("machine", "status", {}, lup.Operator())
+        refused = await started.view("machine", "status", {}, by.any(Agent))
         assert isinstance(status, Accepted)
         assert isinstance(status.output, lup.Blocks)
         assert isinstance(refused, Refused)
@@ -1693,9 +1693,9 @@ class HerePromises(Part):
             ]
         )
         started = await started_approved(by, podman)
-        await started.run("hosting", "register", Opens().given(), lup.Operator())
+        await started.run("machine", "register", Opens().given(), lup.Operator())
         resumed = await started.serve("resumed", {}, Machine())
-        status = await started.view("hosting", "status", {}, lup.Operator())
+        status = await started.view("machine", "status", {}, lup.Operator())
         assert isinstance(resumed, Accepted)
         assert isinstance(status, Accepted)
         assert isinstance(status.output, lup.Blocks)
@@ -1764,7 +1764,7 @@ class MachinewidePromises(Part):
         )
         plan = plan_of(
             Planned(module="chat", part="Desk", shared=True, tools=["note"]),
-            Planned(module="hosting", part="Keeper", shared=True),
+            Planned(module="machine", part="Keeper", shared=True),
         )
         keeper = json.loads(json.dumps(plan))
         keeper["parts"][1]["holds"]["machine"] = True
@@ -1810,7 +1810,7 @@ class MachinewidePromises(Part):
         assert data
         assert not any("ro=true" in each for each in data)
         assert not [each for each in mounts if "Keeper" in each]
-        status = await started.view("hosting", "status", {}, lup.Operator())
+        status = await started.view("machine", "status", {}, lup.Operator())
         assert isinstance(status, Accepted)
         assert isinstance(status.output, lup.Blocks)
         shown = [each.id for each in status.output.every()]

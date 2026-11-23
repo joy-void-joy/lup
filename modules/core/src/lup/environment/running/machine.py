@@ -35,6 +35,7 @@ from lup.environment.running.container import (
     declined,
     listening,
 )
+from lup.environment.running.moving import moved
 from lup.environment.running.planning import plan_of
 from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import Served, started
@@ -120,7 +121,7 @@ async def carried(
     except (OSError, ValueError) as lost:
         return declined(
             f"the container answering it doesn't answer ({lost}): it may still be "
-            "starting, or have ended; `lup hosting status` says which, and where "
+            "starting, or have ended; `lup machine status` says which, and where "
             "what it printed is"
         )
 
@@ -273,6 +274,7 @@ async def hosted(host: Host, runs: Runs | None, *, limit: int = 16 * 2**20) -> N
     """
     inward = Inward(limit=limit)
     contained = shutil.which("podman") is not None
+    moved(host.state / "data")
     running = await hosted_parts(host, runs, inward, contained=contained)
     carrying = next(
         (each.made for each in running.made if isinstance(each.made, Carrying)), None

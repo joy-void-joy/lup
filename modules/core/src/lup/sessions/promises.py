@@ -474,7 +474,7 @@ class Machined(Model, arbitrary_types_allowed=True):
         """Tell the agent called `name` `text`, as the operator does, and return the number of the item it's told in."""
         before = await self.inboxed()
         sent = await self.started.run(
-            "core",
+            "inbox",
             "address",
             {"repository": REPOSITORY, "to": name, "text": text},
             Operator(),
@@ -534,7 +534,7 @@ async def machined(by: Testing, *settings: str) -> AsyncGenerator[Machined]:
             by, list(settings), place / "kept", podman, holder
         )
         approved = await started.run(
-            "hosting",
+            "machine",
             "approve",
             {"repository": REPOSITORY, "commit": COMMIT.id},
             Operator(),
@@ -775,7 +775,7 @@ class SessionsPromises(Part):
             after = await machine.inboxed()
             [new] = [each for each in after.new if each not in before.new]
             buffer = await machine.started.view(
-                "core",
+                "inbox",
                 "party",
                 {"repository": REPOSITORY, "name": named},
                 Operator(),

@@ -223,7 +223,7 @@ def machine() -> MachineLayout:
 def setting_up(words: list[str]) -> bool:
     """Say whether `words` name one of lup's own commands setting a repository up, `lup init` or `lup new`.
 
-    >>> setting_up(["init"]), setting_up(["new", "--help"]), setting_up(["hosting"])
+    >>> setting_up(["init"]), setting_up(["new", "--help"]), setting_up(["machine"])
     (True, True, False)
     """
     match line.reached(words):

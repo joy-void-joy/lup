@@ -569,7 +569,7 @@ class Way(Model):
     module: str | None = None
 
     def said(self) -> str:
-        """Name it as a refusal does: the command `keep` of `hosting`."""
+        """Name it as a refusal does: the command `keep` of `machine`."""
         within = "" if self.module is None else f" of `{self.module}`"
         return f"the {self.door} `{self.name}`{within}"
 

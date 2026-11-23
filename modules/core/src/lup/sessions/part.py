@@ -121,7 +121,7 @@ class NewSession(Model):
     """A session to start: in which project, on which runtime, called what, where, and the first words it's told."""
 
     repository: Repository
-    """The project, as lup names it: one running (`lup hosting open`)."""
+    """The project, as lup names it: one running (`lup machine open`)."""
     runtime: str = "claude"
     """The runtime, by lup's name for it: `claude` or `codex`."""
     name: Name | None = None

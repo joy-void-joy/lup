@@ -767,7 +767,7 @@ class ShellPromises(Part):
             ("notes/note-1", "4"),
         ]:
             answered = await started.view(
-                "core", "party", PartyOf(repository="harness", name=pile), Operator()
+                "inbox", "party", PartyOf(repository="harness", name=pile), Operator()
             )
             assert isinstance(answered, Accepted)
             assert isinstance(answered.output, Blocks)
