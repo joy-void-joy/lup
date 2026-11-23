@@ -536,7 +536,7 @@ async def machined(by: Testing, *settings: str) -> AsyncGenerator[Machined]:
         approved = await started.run(
             "hosting",
             "approve",
-            {"project": REPOSITORY, "commit": COMMIT.id},
+            {"repository": REPOSITORY, "commit": COMMIT.id},
             Operator(),
         )
         assert isinstance(approved, Accepted), approved

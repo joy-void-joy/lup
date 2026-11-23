@@ -8,6 +8,7 @@ how it ended, never the words of its help or of a refusal (`README.md` here,
 """
 
 import json
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -16,6 +17,7 @@ import lup
 from lup import (
     Agent,
     Blocks,
+    Common,
     Line,
     Model,
     Module,
@@ -25,8 +27,9 @@ from lup import (
     Parts,
     Project,
     ProjectError,
+    Repository,
 )
-from lup.testing import Accepted, Testing, raises
+from lup.testing import Accepted, Testing, TypedIn, raises
 lazy from lup import Core
 
 
@@ -62,6 +65,26 @@ class Clearing(Model):
     number: int = Field(ge=0, le=99)
 
 
+class Posting(Model):
+    """A jot posted to a repository's board, kept where git keeps the repository: both filled from where it's typed, where they're left out."""
+
+    text: str
+    repository: Repository
+    common: Common
+
+
+type Named = Literal["harmon", "lup-next.git", "story_2"]
+"""A repository's name, as lup takes one."""
+
+
+class Typing(Model):
+    """Where a promise types: in a repository's worktree, or outside any, and another repository it names."""
+
+    within: Named | None
+    other: Named
+    """Another repository, which `-r` names."""
+
+
 class Jotting(Part):
     """Jots, made by the operator or an agent, cleared by the operator alone."""
 
@@ -77,6 +100,11 @@ class Jotting(Part):
     async def clear(self, clearing: Clearing, by: Operator) -> str:
         """Clear a jot."""
         return f"cleared {clearing.number}"
+
+    @lup.command
+    async def post(self, posting: Posting, by: Operator) -> Posting:
+        """Post a jot to a repository's board, answering what was posted."""
+        return posting
 
     @lup.tool(reads=True)
     async def count(self, _asking: Asking) -> Count:
@@ -254,6 +282,35 @@ class CommandLinePromises(Part):
         assert isinstance(answered, Accepted)
         assert isinstance(answered.output, str)
         assert cleared.output.splitlines() == answered.output.splitlines()
+
+    @lup.promise
+    async def a_repository_left_out_is_the_one_typed_in(self, by: Testing) -> None:
+        """A field naming a repository, or where git keeps it, left out, is the repository whose worktree the command line is typed in, and `-r` names another; typed outside any worktree, it's refused unless named, and nothing runs."""
+        typing = by.any(Typing)
+        started = await by.started(jotting())
+        within = typing.within
+        where = TypedIn(
+            directory=Path("/srv/work"),
+            repository=within,
+            common=None if within is None else Path("/srv") / f"{within}.git",
+        )
+        other = Path("/srv") / f"{typing.other}.git"
+        left = await started.typed(["jot", "post", "hi"], Operator(), typed_in=where)
+        named = await started.typed(
+            ["jot", "post", "-r", typing.other, f"--common={other}", "hi"],
+            Operator(),
+            typed_in=where,
+        )
+        assert named.status == 0
+        posted = Posting.model_validate_json(named.output)
+        assert (posted.repository, posted.common) == (typing.other, other)
+        if within is None:
+            assert left.call is None
+            assert left.status != 0
+        else:
+            assert left.status == 0
+            filled = Posting.model_validate_json(left.output)
+            assert (filled.repository, filled.common) == (within, where.common)
 
     @lup.promise
     async def a_view_prints_its_text(self, by: Testing) -> None:

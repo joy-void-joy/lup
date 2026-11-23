@@ -337,7 +337,7 @@ class Loader(Model):
                 await running.run(
                     "hosting",
                     "approve",
-                    {"project": repository.name, "commit": repository.tip},
+                    {"repository": repository.name, "commit": repository.tip},
                     Operator(),
                 )
                 commit = repository.tip

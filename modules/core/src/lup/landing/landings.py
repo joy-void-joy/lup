@@ -19,6 +19,7 @@ from pydantic import TypeAdapter
 
 import lup
 from lup.code_rules import Defer, changed_deferrals
+from lup.command_line.filled import Repository
 from lup.declaration.layout import local_layer
 from lup.doors.door import RefusedError
 from lup.doors.parties import Agent, Codebase, Operator
@@ -43,7 +44,6 @@ from lup.remote.remotes import (
     Update,
     Updates,
 )
-from lup.running.plan import Name
 from lup.shell.blocks import (
     Blocks,
     Diff,
@@ -200,24 +200,24 @@ TRIALS = TypeAdapter(Trial)
 
 
 class Naming(Model):
-    """A landing, by its project and its branch."""
+    """A landing, by its branch and its repository."""
 
-    project: Name
     branch: str
+    repository: Repository
 
 
 class Reviewing(Model):
     """A landing the operator says yes to, at the tip whose review they read: a tip landed since is another review."""
 
-    project: Name
     branch: str
     tip: Commit
+    repository: Repository
 
 
 class TrialOf(Model):
-    """A project whose landings to show."""
+    """A repository whose landings to show."""
 
-    project: Name
+    repository: Repository
 
 
 class Wanting(Model):
@@ -447,8 +447,8 @@ class Landings(Part, machine=True, shared=True):
         haven't read.
         """
         del by
-        async with self.lock(reviewing.project):
-            trial = self.kept(reviewing.project)
+        async with self.lock(reviewing.repository):
+            trial = self.kept(reviewing.repository)
             landed = trial.landing(reviewing.branch)
             if landed.tip != reviewing.tip:
                 message = (
@@ -460,35 +460,35 @@ class Landings(Part, machine=True, shared=True):
                 landed.model_copy(update={"reviewed": landed.tip})
             )
             said = await self.ran(
-                reviewing.project, trial, f"{reviewing.branch} is on trial"
+                reviewing.repository, trial, f"{reviewing.branch} is on trial"
             )
-            await self.settled(reviewing.project, landed, said)
+            await self.settled(reviewing.repository, landed, said)
             return said
 
     @lup.command(verb="toggle", says="run it or not")
     async def toggle(self, naming: Naming, by: Operator) -> str:
         """Take a branch on trial out of what your lup runs, or put it back, and run what's left."""
         del by
-        async with self.lock(naming.project):
-            trial = self.kept(naming.project)
+        async with self.lock(naming.repository):
+            trial = self.kept(naming.repository)
             landed = trial.landing(naming.branch)
             picked = not landed.picked
             trial = trial.with_landing(landed.model_copy(update={"picked": picked}))
             said = "runs again" if picked else "is taken out of what runs"
-            return await self.ran(naming.project, trial, f"{naming.branch} {said}")
+            return await self.ran(naming.repository, trial, f"{naming.branch} {said}")
 
     @lup.command(verb="decline", says="take it off trial")
     async def drop(self, naming: Naming, by: Operator) -> str:
         """Take a branch off trial, or decline a landing waiting on you: nothing of it runs, and it's left as it is."""
         del by
-        async with self.lock(naming.project):
-            trial = self.kept(naming.project)
+        async with self.lock(naming.repository):
+            trial = self.kept(naming.repository)
             landed = trial.landing(naming.branch)
             trial = trial.with_landing(landed.model_copy(update={"ended": "dropped"}))
             said = await self.ran(
-                naming.project, trial, f"{naming.branch} is off trial"
+                naming.repository, trial, f"{naming.branch} is off trial"
             )
-            await self.settled(naming.project, landed, said)
+            await self.settled(naming.repository, landed, said)
             return said
 
     @lup.command(verb="done", says="accept it onto the integration branch")
@@ -503,8 +503,8 @@ class Landings(Part, machine=True, shared=True):
         pushed.
         """
         del by
-        async with self.lock(naming.project):
-            trial = self.kept(naming.project)
+        async with self.lock(naming.repository):
+            trial = self.kept(naming.repository)
             landed = trial.landing(naming.branch)
             reviewed = landed.reviewed
             if reviewed is None:
@@ -516,9 +516,9 @@ class Landings(Part, machine=True, shared=True):
                     "say yes to its review there first, or take it off trial"
                 )
                 raise RefusedError(message, about=[naming.branch])
-            opening = await Projects.registered(Asking(project=naming.project))
+            opening = await Projects.registered(Asking(project=naming.repository))
             git = self.repository(opening)
-            dev = await self.remote_tip(naming.project, trial)
+            dev = await self.remote_tip(naming.repository, trial)
             if not await git.holds(landed.onto, dev):
                 message = (
                     f"{trial.integration} doesn't hold {landed.onto}, which "
@@ -533,7 +533,7 @@ class Landings(Part, machine=True, shared=True):
             )
             if merge != dev:
                 await self.pushed(
-                    naming.project,
+                    naming.repository,
                     trial.remote,
                     Update(source=merge, destination=f"refs/heads/{trial.integration}"),
                     dev,
@@ -541,14 +541,14 @@ class Landings(Part, machine=True, shared=True):
             trial = trial.with_landing(
                 landed.model_copy(update={"ended": "accepted"})
             ).model_copy(update={"accepted": merge})
-            self.keep(naming.project, trial)
-            cleaned = await self.cleaned(naming.project, git, trial, landed, merge)
+            self.keep(naming.repository, trial)
+            cleaned = await self.cleaned(naming.repository, git, trial, landed, merge)
             said = await self.ran(
-                naming.project,
+                naming.repository,
                 trial,
                 f"{naming.branch} is accepted onto {trial.integration} as {merge}{cleaned}",
             )
-            await self.settled(naming.project, landed, said)
+            await self.settled(naming.repository, landed, said)
             return said
 
     async def settled(self, project: str, landed: Landed, said: str) -> None:
@@ -658,7 +658,7 @@ class Landings(Part, machine=True, shared=True):
                 "review, so lup asks you before running it: nothing restarted"
             )
         if approved.commit != live.commit:
-            await Approvals.landed(Approving(project=project, commit=live.commit))
+            await Approvals.landed(Approving(repository=project, commit=live.commit))
         try:
             await Projects.opened(opening)
         except RefusedError as unopened:
@@ -721,13 +721,13 @@ class Landings(Part, machine=True, shared=True):
     async def trial(self, of: TrialOf, by: Operator) -> Blocks:
         """Show a project's landings: each waiting on your review or on trial, with who landed it, since when, who wants it accepted, and its review under it."""
         del by
-        trial = self.kept(of.project)
+        trial = self.kept(of.repository)
         out = [each.branch for each in trial.out]
-        approved = await Approvals.approval(Asking(project=of.project))
+        approved = await Approvals.approval(Asking(project=of.repository))
         running = (
-            f"{of.project} runs {approved.commit}"
+            f"{of.repository} runs {approved.commit}"
             if approved.commit is not None
-            else f"nothing of {of.project} is approved to run yet"
+            else f"nothing of {of.repository} is approved to run yet"
         )
         waiting = (
             f"; {trial.live} waits on your approval, as {trial.integration} moved "
@@ -738,7 +738,7 @@ class Landings(Part, machine=True, shared=True):
         return Blocks.of(
             Line.of("live", f"{running}{waiting}"),
             *(
-                landing_fold(of.project, each, left_out=each.branch in out)
+                landing_fold(of.repository, each, left_out=each.branch in out)
                 for each in trial.landings
                 if each.ended is None
             ),
@@ -748,9 +748,9 @@ class Landings(Part, machine=True, shared=True):
     async def review(self, naming: Naming, by: Operator) -> Blocks:
         """Show a landing's change: how the gate went on its tip, what a step that tells said, then each file its tip changes since the integration branch's tip it holds, read from each object's own bytes."""
         del by
-        trial = self.kept(naming.project)
+        trial = self.kept(naming.repository)
         landed = trial.landing(naming.branch)
-        opening = await Projects.registered(Asking(project=naming.project))
+        opening = await Projects.registered(Asking(project=naming.repository))
         git = self.repository(opening)
         main = opening.common if await git.bare() else opening.common.parent
         local = local_layer(main, opening.declaration)
@@ -919,8 +919,10 @@ class WaitsOnReview(Item):
 
     def laid(self) -> Laid:
         """Return its review under a fold of the landing kind, offering a yes to the tip that landed, and declining it."""
-        naming = Naming(project=self.repository, branch=self.branch)
-        reviewing = Reviewing(project=self.repository, branch=self.branch, tip=self.tip)
+        naming = Naming(repository=self.repository, branch=self.branch)
+        reviewing = Reviewing(
+            repository=self.repository, branch=self.branch, tip=self.tip
+        )
         return Laid(
             fold="landing",
             summary=f"{self.branch} at {self.tip}",
@@ -934,8 +936,8 @@ class WaitsOnReview(Item):
 
 def landing_fold(project: str, landed: Landed, *, left_out: bool) -> Fold:
     """Return a landing's fold in a project's trial: its branch, how it stands, who landed it and since when, who wants it accepted, and its review under it, offering what can be done with it."""
-    naming = Naming(project=project, branch=landed.branch)
-    reviewing = Reviewing(project=project, branch=landed.branch, tip=landed.tip)
+    naming = Naming(repository=project, branch=landed.branch)
+    reviewing = Reviewing(repository=project, branch=landed.branch, tip=landed.tip)
     stands = (
         "waits on your review"
         if landed.waiting()

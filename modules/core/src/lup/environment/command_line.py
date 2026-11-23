@@ -25,6 +25,7 @@ from pydantic import TypeAdapter
 from pydantic_settings import DotEnvSettingsSource, EnvSettingsSource
 
 from lup.command_line.answering import Answerer, Here, Offered
+from lup.command_line.filled import TypedIn
 from lup.declaration.errors import ProjectError
 from lup.declaration.grammar import listed
 from lup.declaration.layout import MachineLayout, RepositoryLayout
@@ -44,7 +45,7 @@ from lup.environment.settings import LupSettings
 from lup.environment.shell.hosted import opened
 from lup.environment.shell.layout import DashboardPlaces
 from lup.programs import ProgramFailedError
-from lup.programs.git import Git, GitError
+from lup.programs.git import Git, GitError, Worktree
 from lup.running.plan import CORE, typed
 from lup.running.wire import (
     Call,
@@ -176,13 +177,29 @@ class InProcess(MutableModel, Answerer, arbitrary_types_allowed=True):
             self.running = None
 
 
-def ran(answerer: Answerer, name: str, words: list[str], top: str | None) -> NoReturn:
-    """Run the command line called `name` on `words` over `answerer`, the methods of the module named `top` typed at its top level, printing what it prints, stop what it started in this process, and end with its status."""
+def ran(
+    answerer: Answerer,
+    name: str,
+    words: list[str],
+    top: str | None,
+    typed_in: TypedIn,
+) -> NoReturn:
+    """Run the command line called `name` on `words` over `answerer`, the methods of the module named `top` typed at its top level, printing what it prints, stop what it started in this process, and end with its status.
+
+    It's typed where `typed_in` says, which fills each field marked so that's
+    left out (`lup.command_line.filled`).
+    """
 
     async def running() -> int:
         try:
             done = await line.typed(
-                words, answerer, name, sys.stdout, sys.stderr, top=top
+                words,
+                answerer,
+                name,
+                sys.stdout,
+                sys.stderr,
+                typed_in=typed_in,
+                top=top,
             )
         finally:
             await answerer.stopped()
@@ -238,11 +255,11 @@ def main() -> None:
         lups = SettingUp(
             by=Operator(), resolved=resolve(Project()), repository="lup", runs=Local()
         )
-        ran(lups, "lup", words, CORE)
+        ran(lups, "lup", words, CORE, TypedIn(directory=Path.cwd()))
     calling = LupSettings().lup_calling
 
-    def here() -> RepositoryLayout:
-        found = asyncio.run(RepositoryLayout.found(Path.cwd()))
+    def here() -> Worktree:
+        found = asyncio.run(Git.located(Path.cwd()))
         if found is None:
             message = (
                 f"{Path.cwd()} is in no git worktree, so lup has no declaration to read"
@@ -251,7 +268,13 @@ def main() -> None:
         return found
 
     try:
-        layout = here()
+        worktree = here()
+        layout = RepositoryLayout.of(worktree)
+        typed_in = TypedIn(
+            directory=Path.cwd(),
+            repository=worktree.main.name,
+            common=worktree.common,
+        )
         if calling is None and shutil.which("podman") is not None:
             places = Places.found()
             loader = Loader(
@@ -273,7 +296,7 @@ def main() -> None:
         if calling is not None:
             found = layout
 
-            def worktree(by: Caller) -> Answerer:
+            def worktreed(by: Caller) -> Answerer:
                 return InProcess(
                     by=by,
                     resolved=resolve(read(found, machine()).project),
@@ -284,11 +307,12 @@ def main() -> None:
             ran(
                 Here(
                     through=Calling(socket=calling, repository=layout.main.name),
-                    here=worktree,
+                    here=worktreed,
                 ),
                 "lup",
                 words,
                 CORE,
+                typed_in,
             )
         sys.stderr.write(
             "lup: podman isn't here, so no machine runs: this answers in this "
@@ -303,7 +327,7 @@ def main() -> None:
         repository=layout.main.name,
         runs=Local(),
     )
-    ran(answerer, "lup", words, CORE)
+    ran(answerer, "lup", words, CORE, typed_in)
 
 
 async def developed(modules: list[Module]) -> Project | None:
@@ -374,6 +398,12 @@ def command_line(name: str, *modules: Module) -> Callable[[], None]:
             runs=Local(),
             offering=[each.name for each in modules],
         )
-        ran(answerer, name, sys.argv[1:], modules[0].name if modules else None)
+        ran(
+            answerer,
+            name,
+            sys.argv[1:],
+            modules[0].name if modules else None,
+            TypedIn(directory=Path.cwd(), repository=name),
+        )
 
     return main

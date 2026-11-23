@@ -28,6 +28,7 @@ from pydantic_core import to_json
 from typer.main import get_command
 
 from lup.command_line.answering import Answerer, Offered, Runnable, Typed
+from lup.command_line.filled import TypedIn
 from lup.command_line.parameters import Parameter, Parsed, parameters, sent
 from lup.running.wire import (
     Answered,
@@ -68,15 +69,17 @@ def called(runnable: Runnable, given: JsonValue) -> Call:
             return ViewCalled(module=runnable.module, view=way.name, given=given)
 
 
-def command(runnable: Runnable, parsing: Parsing) -> Callable[..., None]:
-    """Return the function typer builds `runnable`'s command from: its signature the fields of what it takes, and its body keeping the call they make in `parsing`, made once parsing is done."""
+def command(
+    runnable: Runnable, parsing: Parsing, typed_in: TypedIn
+) -> Callable[..., None]:
+    """Return the function typer builds `runnable`'s command from: its signature the fields of what it takes, and its body keeping the call they make in `parsing`, made once parsing is done, each field marked so filled from where it's typed (`typed_in`)."""
     taken: list[Parameter] = parameters(runnable.doorway.input_schema)
 
     def parsed(**values: Parsed) -> None:
-        parsing.call = called(runnable, sent(taken, values))
+        parsing.call = called(runnable, sent(taken, values, typed_in))
 
     vars(parsed)["__signature__"] = inspect.Signature(
-        [each.parameter() for each in taken]
+        [each.parameter(typed_in) for each in taken]
     )
     return parsed
 
@@ -95,11 +98,12 @@ def built(
     offered: Offered,
     module: str | None,
     parsing: Parsing,
+    typed_in: TypedIn,
     markup: MarkupMode = None,
     *,
     top: str | None = None,
 ) -> typer.Typer:
-    """Return the command line `offered` makes, called `name`: each method of the module named `top` its party may call, at the top level, and each other module with something they may call, by its name, with each method they may call of the one named `module`, each command keeping the call it parses in `parsing`.
+    """Return the command line `offered` makes, called `name`: each method of the module named `top` its party may call, at the top level, and each other module with something they may call, by its name, with each method they may call of the one named `module`, each command keeping the call it parses in `parsing`, its fields marked so filled from where it's typed (`typed_in`).
 
     The top level's methods are built only where `module` names no other
     module. Its help is plain, or, with `markup`, typer's rich layout,
@@ -118,7 +122,7 @@ def built(
         for one in runnable:
             if one.module == top:
                 line.command(one.doorway.typed(), help=one.doorway.description)(
-                    command(one, parsing)
+                    command(one, parsing, typed_in)
                 )
     for each in groups:
         methods = typer.Typer(
@@ -130,7 +134,7 @@ def built(
             for one in runnable:
                 if one.module == each:
                     methods.command(one.doorway.typed(), help=one.doorway.description)(
-                        command(one, parsing)
+                        command(one, parsing, typed_in)
                     )
         line.add_typer(methods, name=each)
     return line
@@ -196,13 +200,16 @@ async def typed(
     out: TextIO | None = None,
     error: TextIO | None = None,
     *,
+    typed_in: TypedIn,
     top: str | None = None,
 ) -> Typed:
     """Run the command line called `name` on `words`, its calls handed to `answerer`, and say what it did.
 
     The methods of the module named `top` are typed at its top level, without
     its name, as `lup`'s core's are; every other module's under its name.
-    What it prints goes to `out` and `error`, or, where they're left out, is
+    A field marked to be filled from where it's typed (`lup.command_line.filled`)
+    and left out is filled from `typed_in`. What it prints goes to `out` and
+    `error`, or, where they're left out, is
     kept in what it answers. Typer's own help and messages are written to
     them as it parses: in typer's rich layout where `out` is a terminal, as
     the operator's is, and plain where it's piped, as an agent's always is.
@@ -220,7 +227,7 @@ async def typed(
     parsing = Parsing()
     markup: MarkupMode = "markdown" if printing.isatty() else None
     module = named[0] if named else None
-    line = get_command(built(name, offered, module, parsing, markup, top=top))
+    line = get_command(built(name, offered, module, parsing, typed_in, markup, top=top))
     with redirect_stdout(printing), redirect_stderr(erring):
         try:
             line.main(args=asked, prog_name=name, standalone_mode=True)

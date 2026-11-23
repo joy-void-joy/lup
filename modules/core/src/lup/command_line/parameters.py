@@ -5,7 +5,9 @@ for the field's alias, else its name, as typer names one (`-` for `_`); a `bool`
 is a flag, a `list` is repeated, a field limited to some words takes one of
 them, and a field the command line can't say in words (a model, a mapping) is
 written as JSON. A field's description, its docstring, is its help. An option left out isn't
-sent, so the model's own default applies, whatever it is.
+sent, so the model's own default applies, whatever it is; but a field marked to be
+filled from where it's typed (`lup.command_line.filled`), which is an option
+whatever its default, and is filled from there.
 """
 
 import inspect
@@ -18,6 +20,7 @@ import typer
 from pydantic import Field, JsonValue
 from typer.main import get_command_name
 
+from lup.command_line.filled import MARK, Filled, TypedIn
 from lup.types import JsonObject, Model
 
 type Kind = Literal["text", "integer", "number", "flag", "choice", "json"]
@@ -89,6 +92,22 @@ class Schema(Model):
     properties: dict[str, Schema] = {}
     required: list[str] = []
     defs: dict[str, Schema] = Field(default={}, alias="$defs")
+    filled: Filled | None = Field(default=None, alias=MARK)
+    """What the command line fills it with where it's left out, where it's
+    marked so."""
+
+    def filling(self, defs: dict[str, Schema]) -> Filled | None:
+        """Return what the command line fills it with where it's left out, as it or the schema it refers to is marked, an optional field's among them; none where neither is."""
+        if self.filled is not None:
+            return self.filled
+        if self.ref is not None:
+            named = {f"#/$defs/{name}": each for name, each in defs.items()}
+            found = named.get(self.ref)
+            return None if found is None else found.filling(defs)
+        others = [each for each in self.any_of if each.type != "null"]
+        if self.any_of and len(others) == 1:
+            return others[0].filling(defs)
+        return None
 
     def defaulted(self) -> bool:
         """Say whether it gives a default."""
@@ -143,6 +162,9 @@ class Parameter(Model):
     defaulted: bool = False
     """Whether the schema gives its default, which help shows."""
     description: str | None = None
+    filled: Filled | None = None
+    """What the command line fills it with where it's left out: an option
+    then, whatever its default."""
 
     @classmethod
     def of(cls, position: int, key: str, field: Schema, model: Schema) -> Parameter:
@@ -161,6 +183,7 @@ class Parameter(Model):
             default=field.default,
             defaulted=field.defaulted(),
             description=field.description or plain.description,
+            filled=field.filling(model.defs),
         )
 
     @property
@@ -172,8 +195,26 @@ class Parameter(Model):
         """Return its option, as typer names one: `--` and its key, each `_` a `-`."""
         return f"--{get_command_name(self.key)}"
 
-    def helped(self) -> str | None:
-        """Return its help: its description, and its default where it's an option whose schema gives one."""
+    def options(self) -> list[str]:
+        """Return the names typer takes it by as an option: its own, and `-r` for a repository filled from where it's typed."""
+        option = self.option()
+        if self.kind == "flag" and not self.many and self.default is True:
+            return [f"{option}/--no-{option.removeprefix('--')}"]
+        return [*(["-r"] if self.filled == "repository" else []), option]
+
+    def helped(self, typed_in: TypedIn) -> str | None:
+        """Return its help: its description, then what fills it where it's left out, or its default where it's an option whose schema gives one."""
+        match self.filled:
+            case "repository":
+                filled = typed_in.repository or "none: name one, outside a worktree"
+                return f"{self.description or 'The repository.'}  [left out: {filled}]"
+            case "common":
+                filled = typed_in.common or "none: name one, outside a worktree"
+                return (
+                    f"{self.description or 'Where git keeps it.'}  [left out: {filled}]"
+                )
+            case None:
+                pass
         if self.required or not self.defaulted:
             return self.description
         default = f"[default: {json.dumps(self.default)}]"
@@ -192,9 +233,9 @@ class Parameter(Model):
         """Return the type typer parses it as, or none where it's left out."""
         return self.annotation() | None
 
-    def parameter(self) -> inspect.Parameter:
-        """Return it as a parameter of the function typer builds a command from: an argument, required, or an option, left out where it isn't given."""
-        if self.required:
+    def parameter(self, typed_in: TypedIn) -> inspect.Parameter:
+        """Return it as a parameter of the function typer builds a command from: an argument, required, or an option, left out where it isn't given; one filled from where it's typed is an option, whatever its default, its help saying what fills it there (`typed_in`)."""
+        if self.required and self.filled is None:
             given = typer.Argument(
                 ...,
                 metavar=self.key.upper(),
@@ -203,13 +244,10 @@ class Parameter(Model):
             )
             annotation = self.annotation()
         else:
-            flag = self.kind == "flag" and not self.many
-            option = self.option()
-            switched = f"{option}/--no-{option.removeprefix('--')}"
             given = typer.Option(
                 None,
-                switched if flag and self.default is True else option,
-                help=self.helped(),
+                *self.options(),
+                help=self.helped(typed_in),
                 show_default=False,
             )
             annotation = self.optional()
@@ -245,10 +283,42 @@ def parameters(schema: JsonObject) -> list[Parameter]:
     ]
 
 
-def sent(taken: list[Parameter], values: dict[str, Parsed]) -> JsonObject:
-    """Return what's sent for the values typer parsed, by each parameter's name: each field given, by its key, and none left out."""
+def sent(
+    taken: list[Parameter], values: dict[str, Parsed], typed_in: TypedIn
+) -> JsonObject:
+    """Return what's sent for the values typer parsed, by each parameter's name: each field given, by its key, none left out, and each marked to be filled from where it's typed (`typed_in`) filled there.
+
+    Raise `typer.BadParameter` where one isn't given and the command line is
+    typed in no repository's worktree: the words don't parse, and nothing
+    runs.
+    """
+
+    def filled(parameter: Parameter, value: Parsed) -> JsonValue:
+        """Return what's sent for `parameter`, marked to be filled from where it's typed: the value given, or, left out, what fills it there."""
+        if value is not None:
+            return parameter.sent(value)
+        found = (
+            typed_in.repository
+            if parameter.filled == "repository"
+            else None
+            if typed_in.common is None
+            else str(typed_in.common)
+        )
+        if found is None:
+            option = " / ".join(f"'{each}'" for each in parameter.options())
+            message = (
+                f"{typed_in.directory} is in no repository's worktree: name it "
+                f"with {option}"
+            )
+            raise typer.BadParameter(message, param_hint=option)
+        return found
+
     return {
-        each.key: each.sent(values[each.name])
+        each.key: (
+            each.sent(values[each.name])
+            if each.filled is None
+            else filled(each, values.get(each.name))
+        )
         for each in taken
-        if values.get(each.name) is not None
+        if each.filled is not None or values.get(each.name) is not None
     }
